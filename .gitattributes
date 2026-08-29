@@ -1,0 +1,20 @@
+# .editorconfig と揃えて改行コードは LF に固定する。
+# 開発は Windows、CI は ubuntu-latest のため、CRLF が混ざると
+# 差分が全行変更になり履歴が読めなくなる。
+* text=auto eol=lf
+
+# テキスト変換をかけてはいけないもの
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gguf binary
+*.bin  binary
+*.safetensors binary
+
+# GitHub の言語統計から設計文書を除外し、Python を主言語として表示させる
+Docs/**    linguist-documentation
+*.md       linguist-documentation
