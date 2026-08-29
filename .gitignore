@@ -28,3 +28,6 @@ Thumbs.db
 
 # reviewer/session artifacts
 _to_delete/
+
+# test leftovers (R-20260830-01 の暫定保険)
+tmp*/

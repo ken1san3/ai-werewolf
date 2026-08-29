@@ -247,7 +247,9 @@ rules:
     allow_villager_claim: false
   death:
     public_detail: phase           # phase | cause | none
-  role_missing: false
+  role_missing:
+    enabled: false
+    replacement_role_id: villager   # 欠けた役職を何に置き換えるか
   day_seconds: 180
   night_seconds: 60
   silence_after_dawn_seconds: 15
@@ -279,6 +281,10 @@ options:
     values: [none, free, random_white]
     default: random_white
 ```
+
+役職欠け（`role_missing`）は bool ではなくオブジェクトとして持つ。
+置換先の Role をコアに埋め込むと「役職追加に Python の変更は要らない」という
+不変条件に反するため、content 側で指定する。
 
 プリセットの値は初期値であって仕様ではない。
 起動時に設定スキーマを検証し、未知のキー・不正値・順序未定義はエラーとする。

@@ -28,6 +28,7 @@
 | Q22 | 能力結果の通知範囲 | `decisions/D016` |
 | Q7  | ログの公開・秘匿分離 | `decisions/D013`（public / private / ai の3系統） |
 | Q23 | available_actions の生成場所と送信 | `decisions/D017` |
+| Q25 | 役職欠けの置換先の指定方法 | DESIGN.md §5（`role_missing` をオブジェクト化）。実装は R-20260830-06 |
 
 ---
 
@@ -100,13 +101,3 @@ Phase 8 で具体的な Modifier を追加する前に、priority・付与順・
 
 ---
 
-## Q25 [Phase 1.2] 役職欠けの置換先役職を content でどう指定するか
-
-`rules.role_missing: true` は「ランダムに役職が市民に置き換わる」設定だが、
-DESIGN.md の `RulesConfig` は bool だけで、どの Role を置換先の市民として使うかを
-role 名非依存で指定する方法がない。コアに `"villager"` を埋め込むと、役職追加・
-差し替えに Python 変更を不要とする不変条件に反する。
-
-決めること:
-
-- 置換先 Role を preset / content のどこで指定するか
