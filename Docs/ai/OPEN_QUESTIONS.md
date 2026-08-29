@@ -5,26 +5,6 @@
 
 ---
 
-## Q1 [Phase 1 前に必須] 判定陣営(alignment)と勝利陣営(team)を分離するか
-
-マスター仕様は `team` しか持たない（§7, §9, §31）。
-しかし狂人は「勝利上はwolf、占い判定は白」であり、妖狐は「fox陣営、判定は白」。
-`team` だけで実装すると狂いが黒判定になり、後から直すとコアの作り直しになる。
-
-提案:
-
-```yaml
-id: madman
-team: wolf          # 勝利判定
-alignment: village  # 占い/霊能の見え方
-knows_wolves: false
-chat_channels: [public]
-```
-
-→ 採用するなら Phase 1.1 のデータモデルに最初から入れる。
-
----
-
 ## Q2 [Phase 1 前に必須] 村の勝利条件の定義
 
 マスター仕様 §10 は村の勝利条件を `eliminate_team: target: wolf` としている。

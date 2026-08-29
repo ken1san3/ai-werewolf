@@ -40,7 +40,7 @@ Ability / Effect は priority を持ち、夜の解決順を設定可能にす�
 - 単純な役職でも Ability / Effect を経由するため、実装がやや冗長になる
 - 代わりに Phase 8（役職拡張 / MOD）のコストが大きく下がる
 
-## Open
+## Related
 
-`Alignment`（占い・霊能での見え方）をこのモデルへ追加するかは未決。
-`OPEN_QUESTIONS.md` Q1 を参照。
+`Alignment`（占い・霊能での見え方）を追加することが決定済み。
+`decisions/D003_TEAM_ALIGNMENT_SEPARATION.md` を参照。
