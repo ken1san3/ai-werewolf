@@ -17,7 +17,8 @@
 2. Docs/ai/INDEX.md
 3. Docs/ai/CURRENT_STATE.md
 4. Docs/ai/REVIEW_INBOX.md
-5. INDEXが現在Phase用に指定したファイル
+5. Docs/ai/spec/DESIGN.md（設計の結論）
+6. Docs/ai/TEST_POLICY.md（検証項目）
 
 その後、現在タスクに必要なコードだけ確認する。
 

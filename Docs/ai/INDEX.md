@@ -8,36 +8,32 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 - `CURRENT_STATE.md`
 - `REVIEW_INBOX.md`（OPEN の Critical / High があれば新機能より先に対応）
 
+## 実装に入る前に読む
+
+- `spec/DESIGN.md` — 設計の結論。**まずこれを読む**
+- `TEST_POLICY.md` — 検証項目。Phase 1 の完了判定はこれで行う
+
+`decisions/` は「なぜそう決めたか」の記録。
+設計を変えたくなったとき、または DESIGN.md の意図が読み取れないときだけ開く。
+
 ## Current phase
 
 **Phase 1.1 着手可（設計判断は D001〜D007 で確定済み）**
 
 Relevant:
-- `spec/AI_WEREWOLF_CODEX_HANDOFF.md` の §1, §2, §5〜§11, §26, §30, §31, §32, §37
+
+- `spec/DESIGN.md`
+- `TEST_POLICY.md`
 - `spec/JUDGMENT_REFERENCE.md`（参照実装の事実。**再調査せずここを見る**）
-- `SPEC_REVIEW.md`
-- `OPEN_QUESTIONS.md`（Q1〜Q4 は Phase 1 実装前に決める必要がある）
-- `decisions/D001_SERVER_AUTHORITATIVE.md`
-- `decisions/D002_ROLE_ABILITY_EFFECT_MODEL.md`
-- `decisions/D003_ROLE_ATTRIBUTE_MODEL.md`
-- `decisions/D004_REFERENCE_IMPLEMENTATION.md`
-- `decisions/D005_WIN_CONDITIONS.md`
-- `decisions/D006_RULE_OPTIONS.md`
-- `decisions/D008_ROLE_MODIFIER.md`
-- `decisions/D009_INITIAL_ROLE_SET.md`（実装対象13役職の属性表）
-- `decisions/D010_WISE_WEREWOLF_INFO.md`
-- `decisions/D011_NEKOMATA_RETALIATION.md`
-- `decisions/D012_DEATH_CAUSE.md`
-- `decisions/D013_LOGGING_AND_REPLAY.md`
-- `decisions/D014_DRAW.md`
-- `decisions/D015_PHASE_MACHINE.md`
-- `decisions/D016_NIGHT_RESOLUTION_AND_NOTIFICATION.md`
-- `decisions/D017_ACTION_STATE_AND_PUSH.md`
+- `OPEN_QUESTIONS.md`
 
 ## Read only if needed
 
 | 目的 | ファイル |
 |---|---|
+| 設計判断の理由 | `decisions/`（D001〜D017） |
+| 元仕様への指摘 | `SPEC_REVIEW.md` |
+| 元仕様の原文 | `spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
 | 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
 | ロードマップ全体 | `ROADMAP.md` |
 | Phase引継ぎ | `handoffs/` |

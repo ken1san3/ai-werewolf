@@ -30,7 +30,10 @@ Do not scan the whole repository unless necessary.
 | 恒久ルール | `AGENTS.md`（このファイル） |
 | 読む場所の地図 | `Docs/ai/INDEX.md` |
 | 現在地 | `Docs/ai/CURRENT_STATE.md` |
+| 設計書（結論） | `Docs/ai/spec/DESIGN.md` |
+| 検証項目 | `Docs/ai/TEST_POLICY.md` |
 | マスター仕様 | `Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
+| 参照実装の事実 | `Docs/ai/spec/JUDGMENT_REFERENCE.md` |
 | 運用ガイド | `Docs/ai/spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
 | Phase間引継ぎ | `Docs/ai/handoffs/` |
 | 設計判断 | `Docs/ai/decisions/` |
@@ -53,6 +56,22 @@ Do not scan the whole repository unless necessary.
 8. The protocol must stay language-independent and versioned.
 9. Must run on RTX 3070 Ti / 8GB VRAM: one shared LLM server, not one model per agent.
 10. Game core must be fully testable without any LLM.
+
+## Review checklist
+
+レビュー時に必ず確認する。**この一覧が唯一の置き場所であり、各Decisionには複製しない。**
+
+- ゲームコアに役職固有の分岐（`if role == "seer"`）が入っていないか
+- 占い・霊能が `team` を参照していないか（`inspect_result` / `medium_result` を使うこと）
+- 勝利条件の人数計算が `team` を数えていないか（`count_as` を使うこと）
+- 判定が Role を直接読んでいないか（Role + Modifiers の実効属性を経由すること）
+- 内部死因を含むイベントがクライアントへ送られていないか
+- private 通知がブロードキャスト経路に乗っていないか
+- ネットワーク層に行動の可否判定が書かれていないか
+- ランダムな選択の結果がイベントとして記録されているか
+- モジュールレベルの `random` を直接呼んでいないか
+- ルールの既定値がコードへ埋め込まれていないか
+- 役職の追加に Python の変更が必要になっていないか
 
 ## Prohibitions
 
