@@ -1,7 +1,20 @@
 # Project AI Rules
 
-AI人狼プロジェクトの恒久ルール。ここには**短く安定した規約のみ**を書く。
-現在の進捗・タスク・設計理由はここに書かない（置き場所は下記）。
+## このリポジトリの動かし方
+
+ユーザーが打つ指示は原則3つだけ。**指示を受けたら `Docs/ai/RUNBOOK.md` の該当節を読み、
+そこに書かれた手順に従う。ユーザーへ追加の指示を求めない。**
+
+| 指示 | 担当 | 手順 |
+|---|---|---|
+| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Codex | RUNBOOK §1 |
+| 「レビューして」 | Claude (Cowork) | RUNBOOK §2 |
+| 「レビュー内容を確認して修正して」 | Codex | RUNBOOK §3 |
+
+- フェーズ番号の指定が無ければ `Docs/ai/CURRENT_STATE.md` の Next Task に従う
+- スコープ（含む / 含まない / 完了条件）は `Docs/ai/ROADMAP.md` の該当サブPhaseにある
+- 判断に迷ったら `Docs/ai/OPEN_QUESTIONS.md` へ起票し、避けて進められるなら続行する
+- 現状の要約は `python scripts/ai_status.py` で取得できる
 
 ## Roles
 
@@ -30,6 +43,8 @@ Do not scan the whole repository unless necessary.
 | 恒久ルール | `AGENTS.md`（このファイル） |
 | 読む場所の地図 | `Docs/ai/INDEX.md` |
 | 現在地 | `Docs/ai/CURRENT_STATE.md` |
+| 作業手順 | `Docs/ai/RUNBOOK.md` |
+| フェーズのスコープ | `Docs/ai/ROADMAP.md` |
 | 設計書（結論） | `Docs/ai/spec/DESIGN.md` |
 | 検証項目 | `Docs/ai/TEST_POLICY.md` |
 | マスター仕様 | `Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
@@ -40,7 +55,7 @@ Do not scan the whole repository unless necessary.
 | 失敗記録 | `Docs/ai/failures/` |
 | レビュー指摘 | `Docs/ai/REVIEW_INBOX.md` |
 | 未決事項 | `Docs/ai/OPEN_QUESTIONS.md` |
-| セッション用プロンプト | `Docs/ai/PROMPTS.md` |
+| 初回セットアップ用の文面 | `Docs/ai/PROMPTS.md` |
 
 同じ内容を複数ファイルへ複製しない。
 

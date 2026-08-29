@@ -1,78 +1,223 @@
 # Roadmap
 
-マスター仕様 §30 に対応。各Phaseは「一つの責務が完成しテスト可能になる」単位でサブ分割する。
+各サブPhaseは「含む / 含まない / 完了条件 / 参照」を持つ。
+**実装セッションはここで自分のスコープを決める。**手順は `RUNBOOK.md`。
 
-## Phase 1 — Game Core（LLM不使用）
+進行中のPhaseと次のタスクは `CURRENT_STATE.md` を見る。
 
-- 1.1 Role属性5軸 / Team / Ability / Passive / Effect / Modifier のデータモデル + YAMLローダー
-- 1.2 GameState / Player / Event Bus / イベントログ出力（D013の3系統分離）
-- 1.3 Phase Manager（D015: Night0 / Dawn / Day / Vote / [Runoff] / Execution / Night）
-- 1.4 投票と処刑（同数時ルールを設定化）
-- 1.5 夜行動の予約と Action Resolver（priority順の解決、DeathCause、死亡連鎖の停止規則、D017の予約→解決）
-- 1.6 WinCondition 評価（D005 / D014。引き分けを含む）
-- 1.7 13役職の実装（D009）と Dummy操作での完走テスト
-- 1.8 `get_available_actions(player_id)` の実装（D017）
+---
+
+# Phase 1 — Game Core（LLM不使用）
+
+## 1.1 データモデルと content ローダー ✅ 完了
+
+## 1.2 GameState / Player / Event Bus / ログ
+
+含む:
+- `GameState`（プレイヤー、生死、日番号、現在フェーズ、pending actions の保持枠）
+- `Player`（player_id / display_name / Role / Modifiers / 生死）
+- Event Bus（イベントの発行と購読）
+- イベント定義と、`public` / `private` / `ai` の3系統へのログ出力
+- 乱数を `game.rng` に一元化し、テストで注入可能にする
+- 役職配布（`role_missing` を含む）と `ROLE_ASSIGNED` イベント
+
+含まない:
+- フェーズ遷移そのもの（1.3）
+- 投票・夜行動・勝敗判定
+- ネットワーク
 
 完了条件:
+- 13役職と standard_9 プリセットから1ゲーム分の初期状態を構築できる
+- 役職配布の結果がイベントとして記録される
+- `public.jsonl` に秘匿情報が出ないことをテストで確認できる
 
-- 標準9人村をDummy操作だけで最後まで進行できる
-- D009 の13役職がすべて content の YAML だけで定義され、動作する
-- 狂人 / 狂信者 / 囁く狂人 がゲームコアの分岐なしに区別される
-- 妖狐入り構成で、妖狐の勝利・呪殺・襲撃耐性が動く
+参照: DESIGN.md §3 §4 §10 / TEST_POLICY §13
 
-## Phase 2 — Network Server
+## 1.3 Phase Manager
 
-- 2.1 WebSocket サーバ + プロトコル定義（バージョン付き）
-- 2.2 Session / Join / Ready
-- 2.3 公開ブロードキャストと private 送信の分離
-- 2.4 Chat / Vote / Ability の受付と検証
-- 2.5 `game.state_sync` / `player.list` / `player.deaths` / `player.action_state`（D017）
+含む:
+- `Setup → Night0 → Dawn → Day → Vote → [Runoff] → Execution → Night → …` の状態機械
+- 条件つきフェーズ（Night0 / Runoff）の仕組み
+- 日番号の採番（Night0 → Dawn 1 → Day 1）
+- `phase_ends_at` と `chat_enabled_at` の算出（15秒ルール、延長）
+- `available_from_night` による能力の有効／無効
 
-完了条件: 複数Dummy Clientが別プロセスから接続し1ゲーム完走。
+含まない:
+- 投票の集計（1.4）、夜行動の解決（1.5）
+- 実時間のタイマー駆動（テストは論理時刻で進める）
 
-## Phase 3 — AI Client Skeleton
+完了条件:
+- Night0 から GameEnd まで、フェーズだけを空回しで一巡できる
+- Night0 で人狼の襲撃能力が無効になる
+- `runoff: true/false` で Runoff の有無が変わる
 
-- 3.1 Network Client
-- 3.2 World State / Memory
-- 3.3 Dummy Brain（Brain Interface）
-- 3.4 Reaction / Chat Controller
-- 3.5 Vote Controller / Ability Controller
+参照: DESIGN.md §6.1 §6.2 / TEST_POLICY §3
 
-完了条件: RuleBased AI 9人でゲーム完走。
+## 1.4 投票と処刑
 
-## Phase 4 — Local LLM
+含む:
+- 投票の予約と締切での確定
+- 決選投票 / 同数時のランダム処刑 / 処刑見送り / 無効票 / 自己投票
+- `VoteResult`（処刑あり / 処刑なし / 決選投票へ）
+- 処刑による死亡（`DeathCause.lynched`）
+- `TIE_RESOLVED_RANDOM` などランダム結果のイベント記録
 
-- 4.1 LLM backend interface（OpenAI互換）
-- 4.2 Structured Output
-- 4.3 発言生成
-- 4.4 投票・能力選択
+含まない:
+- 猫又の道連れ（1.5 の Passive 側で扱う）
+- 勝敗判定（1.6）
 
-完了条件: 1体のAI ClientをLLMで動かせる。
+完了条件:
+- D006 の投票設定がすべて動き、それぞれ両方の値でテストが通る
+- 投票同数の4パターンが再現できる
 
-## Phase 5 — 9 AI Agents
+参照: DESIGN.md §5 §6.3 / TEST_POLICY §11
 
-- 共有LLMサーバ / 生成キュー / 発言頻度調整 / 短文チャット
+## 1.5 夜行動の予約と Action Resolver
 
-完了条件: AI 9人で自動ゲーム完走。
+含む:
+- `submit_action`（予約）と `resolve_pending_actions`（解決）の分離
+- 予約の上書き。使用回数は解決時に消費
+- priority 順の解決（DESIGN.md §7.1 の表）
+- Effect の実装（Protect / Inspect / Attack / Kill / InspectRole / PublicNotify / MediumInspect）
+- Passive の実装（`retaliate_on_death` / `on_inspected` / `public_notify_if_alive`）
+- `DeathCause` と公開死因の導出、死亡連鎖と深さ上限
+- 能力結果の通知範囲（DESIGN.md §7.4）
 
-## Phase 6 — 議論品質
+含まない:
+- 勝敗判定（1.6）
+- Modifier の具体実装（Phase 8）
 
-- Belief / Suspicion / Strategy / 重要イベント記憶 / 反応スコア
-- 質問応答・反論・意見変更・ライン切り・CO判断・投票前再評価
+完了条件:
+- TEST_POLICY §4 §5 §6 §7 §9 が通る
+- 呪殺・護衛・襲撃・道連れの相互作用がすべてテストされている
+- 内部死因がクライアント向けイベントに出ない
 
-完了条件: 前の発言を受けた会話が成立する。
+参照: DESIGN.md §7 §6.3 / TEST_POLICY §4 §5 §6 §7 §9
 
-## Phase 7 — UI
+## 1.6 WinCondition 評価と勝敗
 
-- Web UI（チャット / 生死 / 残り時間 / 投票 / 能力 / 入力中 / 結果 / 観戦）
+含む:
+- 3型（`eliminate_role_tag` / `count_parity` / `survive_when_others_win`）の評価
+- `win_evaluation_order` に従う評価と便乗型の適用
+- 生存者0人 → `draw`（全員敗北）
+- `GAME_ENDED` イベントと `GameResult`
+- 判定を走らせる位置（Execution 内・Night 内の各1回）
 
-## Phase 8 — Role Expansion / MOD
+含まない:
+- レーティング、戦績
 
-- 第三陣営 / Passive / Effect拡張 / WinCondition拡張 / MODローダー
-- 具体的な Modifier（恋人 / 狐憑き / 手玉 / 呪い）
-- Role Replacement（変化系・怪盗の交換）の設計と実装
+完了条件: TEST_POLICY §8 が通る
 
-## 将来候補（今は触らない）
+参照: DESIGN.md §8 / TEST_POLICY §8
+
+## 1.7 get_available_actions
+
+含む:
+- `game.get_available_actions(player_id)`
+- 制約宣言（`target` / `restrictions` / `uses` / `available_from_night`）から
+  検証と列挙の両方を導く
+- プレイヤー視点で組み立てる（そのプレイヤーが知ってよい情報のみ）
+- 各フェーズの行動（チャット / CO / 投票 / 夜能力）
+
+含まない:
+- ネットワーク送信（Phase 2）
+
+完了条件: TEST_POLICY §10 が通る
+
+参照: DESIGN.md §9.3 §6.3 / TEST_POLICY §10
+
+## 1.8 13役職の動作確認と完走テスト
+
+含む:
+- Dummy 操作による標準9人村の完走
+- 妖狐入り構成、猫又入り構成、狂人系3種を含む構成での完走
+- TEST_POLICY 全項目の通過確認
+
+完了条件:
+- 標準9人村を Dummy 操作だけで最後まで進行できる
+- 13役職すべてが content の YAML だけで動作する
+- 狂人 / 狂信者 / 囁く狂人 がコアの分岐なしに区別される
+- **Phase 1 完了。`handoffs/PHASE1_HANDOFF.md` を作成する**
+
+参照: TEST_POLICY 全体
+
+---
+
+# Phase 2 — Network Server
+
+## 2.1 プロトコル定義
+
+含む: 共通メッセージ形、`protocol_version`、`seq`、エラー（`action.rejected`）
+完了条件: 言語非依存のスキーマとして定義され、バージョン方針が決まっている
+参照: DESIGN.md §9.1 / OPEN_QUESTIONS Q6
+
+## 2.2 WebSocket サーバと Session
+
+含む: 接続、Join、Ready、切断
+含まない: 再接続UI
+
+## 2.3 公開と private の送信分離
+
+含む: ブロードキャストと個別送信の経路分離、チャットチャネルの権限管理
+完了条件: 権限の無いチャネルの内容が届かないことをテストで確認できる
+参照: DESIGN.md §4.6 / OPEN_QUESTIONS Q11
+
+## 2.4 Chat / Vote / Ability / CO の受付
+
+含む: `co.declare` / `co.report`（D007）、行動の受理と拒否
+完了条件: 偽COをサーバが拒否しない。回数制限は拒否する
+参照: DESIGN.md §9.4 / TEST_POLICY §12
+
+## 2.5 状態配信
+
+含む: `player.list` / `player.deaths` / `player.action_state` / `game.state_sync`
+完了条件: 再接続したクライアントが `game.state_sync` だけで状態を復元できる
+参照: DESIGN.md §9.2 §9.3
+
+## 2.6 完走
+
+完了条件: 複数 Dummy Client が別プロセスから接続し1ゲーム完走。Phase 2 handoff 作成
+
+---
+
+# Phase 3 — AI Client Skeleton
+
+3.1 Network Client / 3.2 World State・Memory / 3.3 Brain Interface と Dummy Brain /
+3.4 Reaction・Chat Controller / 3.5 Vote・Ability Controller
+
+完了条件: RuleBased AI 9人でゲーム完走
+
+# Phase 4 — Local LLM
+
+4.1 LLM backend interface / 4.2 Structured Output / 4.3 発言生成 / 4.4 投票・能力選択
+
+完了条件: 1体のAI ClientをLLMで動かせる
+
+# Phase 5 — 9 AI Agents
+
+共有LLMサーバ / 生成キュー / 発言頻度調整 / 短文チャット
+
+完了条件: AI 9人で自動ゲーム完走。OPEN_QUESTIONS Q8 の実測を行う
+
+# Phase 6 — 議論品質
+
+Belief / Suspicion / Strategy / 重要イベント記憶 / 反応スコア /
+質問応答・反論・意見変更・ライン切り・CO判断・投票前再評価
+
+完了条件: 前の発言を受けた会話が成立する
+
+# Phase 7 — UI
+
+Web UI（チャット / 生死 / 残り時間 / 投票 / 能力 / 入力中 / 結果 / 観戦 / 墓場）
+
+# Phase 8 — Role Expansion / MOD
+
+第三陣営の追加 / Passive・Effect・WinCondition の拡張 / MODローダー /
+具体的な Modifier（恋人・狐憑き・手玉・呪い）/ Role Replacement（変化系・怪盗）
+
+---
+
+# 将来候補（今は触らない）
 
 観戦者、GM、部屋一覧、ランダムマッチ、BOT補充、再接続UI、Elo、戦績、
 リプレイ再生、AI思考可視化、トーナメント、複数LLM比較、音声、Discord連携、

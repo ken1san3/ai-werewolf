@@ -5,6 +5,8 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 
 ## Always read
 
+- `RUNBOOK.md` — 指示に対応する手順。**まずこれ**
+- `ROADMAP.md` — 対象サブPhaseのスコープ
 - `CURRENT_STATE.md`
 - `REVIEW_INBOX.md`（OPEN の Critical / High があれば新機能より先に対応）
 
