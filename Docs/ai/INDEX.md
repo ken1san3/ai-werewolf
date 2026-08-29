@@ -14,10 +14,14 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 
 Relevant:
 - `spec/AI_WEREWOLF_CODEX_HANDOFF.md` の §1, §2, §5〜§11, §26, §30, §31, §32, §37
+- `spec/JUDGMENT_REFERENCE.md`（参照実装の事実。**再調査せずここを見る**）
 - `SPEC_REVIEW.md`
 - `OPEN_QUESTIONS.md`（Q1〜Q4 は Phase 1 実装前に決める必要がある）
 - `decisions/D001_SERVER_AUTHORITATIVE.md`
 - `decisions/D002_ROLE_ABILITY_EFFECT_MODEL.md`
+- `decisions/D003_ROLE_ATTRIBUTE_MODEL.md`
+- `decisions/D004_REFERENCE_IMPLEMENTATION.md`
+- `decisions/D005_WIN_CONDITIONS.md`
 
 ## Read only if needed
 
