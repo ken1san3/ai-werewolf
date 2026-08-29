@@ -2,7 +2,7 @@
 
 from .content import ContentPack, ContentValidationError, Preset, load_content, load_preset
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
-from .game import GamePhase, GameState, Player, PlayerConfig, RandomSource
+from .game import ActionSpec, GamePhase, GameState, Player, PlayerConfig, RandomSource
 from .models import (
     AppliedModifier,
     EffectiveAttributes,
@@ -16,6 +16,7 @@ from .models import (
 
 __all__ = [
     "AppliedModifier",
+    "ActionSpec",
     "ContentPack",
     "ContentValidationError",
     "EffectiveAttributes",

@@ -58,7 +58,7 @@ class GameStateTests(unittest.TestCase):
         sink = InMemoryEventSink()
         game = self.create_game(rng=Random(17), event_sink=sink)
 
-        self.assertEqual(game.phase, GamePhase.SETUP)
+        self.assertEqual(game.phase, GamePhase.NIGHT0)
         self.assertEqual(game.day, 0)
         self.assertEqual(game.pending_actions, {})
         self.assertEqual(set(game.players), {player.player_id for player in self.player_configs})
@@ -72,7 +72,7 @@ class GameStateTests(unittest.TestCase):
         assignments = [event for event in game.event_bus.events if event.type == "ROLE_ASSIGNED"]
         self.assertEqual(len(assignments), len(self.player_configs))
         self.assertTrue(all(event.visibility is EventVisibility.PRIVATE for event in assignments))
-        self.assertEqual([event.sequence for event in game.event_bus.events], list(range(1, 11)))
+        self.assertEqual([event.sequence for event in game.event_bus.events], list(range(1, 12)))
         self.assertEqual(sink.events, list(game.event_bus.events))
 
     def test_public_log_omits_role_assignment_and_private_log_records_it(self) -> None:
@@ -84,7 +84,9 @@ class GameStateTests(unittest.TestCase):
             public_entries = _read_jsonl(event_log.paths[EventVisibility.PUBLIC])
             private_entries = _read_jsonl(event_log.paths[EventVisibility.PRIVATE])
 
-            self.assertEqual([entry["type"] for entry in public_entries], ["GAME_CREATED"])
+            self.assertEqual(
+                [entry["type"] for entry in public_entries], ["GAME_CREATED", "PHASE_STARTED"]
+            )
             self.assertNotIn("role_id", json.dumps(public_entries))
             self.assertEqual(
                 [entry["type"] for entry in private_entries],
