@@ -8,6 +8,7 @@ chat_channels: [public]
 abilities: []
 passives:
   - type: public_notify_if_alive
+    priority: 0
     rules:
       - when:
           event: dawn

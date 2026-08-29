@@ -7,9 +7,10 @@ content never silently relies on an unavailable future implementation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from functools import cache
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, get_type_hints
 import re
 
 import yaml
@@ -102,19 +103,27 @@ _WIN_CONDITION_TYPES = frozenset(
     {"eliminate_role_tag", "count_parity", "survive_when_others_win"}
 )
 _ENABLED_WHEN_PATTERN = re.compile(
-    r"^rules\.(?P<path>[a-z_]+(?:\.[a-z_]+)?)\s*==\s*(?P<value>true|false)$"
+    r"^rules\.(?P<path>[a-z_]+(?:\.[a-z_]+)*)\s*==\s*(?P<value>true|false)$"
 )
-_BOOLEAN_RULE_PATHS = frozenset(
-    {
-        "role_missing",
-        "vote.runoff",
-        "vote.self_vote",
-        "guard.consecutive",
-        "guard.self_guard",
-        "co.allow_from_day2",
-        "co.allow_villager_claim",
-    }
-)
+
+
+@cache
+def _boolean_rule_paths(rules_type: type[Any]) -> frozenset[str]:
+    """Derive every nested bool path from the RulesConfig dataclass schema."""
+
+    paths: set[str] = set()
+
+    def visit(data_class: type[Any], prefix: str = "") -> None:
+        for field in fields(data_class):
+            path = f"{prefix}.{field.name}" if prefix else field.name
+            field_type = get_type_hints(data_class)[field.name]
+            if field_type is bool:
+                paths.add(path)
+            elif is_dataclass(field_type):
+                visit(field_type, path)
+
+    visit(rules_type)
+    return frozenset(paths)
 
 
 def load_content(content_root: str | Path) -> ContentPack:
@@ -535,10 +544,11 @@ def _parse_passive(
     death_causes: Mapping[str, DeathCause],
 ) -> Passive:
     mapping = _mapping(data, path)
-    _keys(mapping, required={"type", "rules"}, optional={"effects"}, path=path)
+    _keys(mapping, required={"type", "priority", "rules"}, optional={"effects"}, path=path)
     passive_type = _identifier(mapping["type"], f"{path}.type")
     if passive_type not in passive_definitions:
         raise ContentValidationError(f"{path}.type references unregistered passive '{passive_type}'")
+    passive_priority = _integer(mapping["priority"], f"{path}.priority", minimum=0)
     rules = tuple(
         _mapping(rule, f"{path}.rules[{index}]")
         for index, rule in enumerate(_list(mapping["rules"], f"{path}.rules"))
@@ -549,8 +559,14 @@ def _parse_passive(
         _validate_death_cause_references(rule, f"{path}.rules[{index}]", death_causes)
     return Passive(
         type=passive_type,
+        priority=passive_priority,
         rules=rules,
-        effects=_registered_ids(mapping.get("effects", []), f"{path}.effects", effects, "effect"),
+        effects=_parse_effect_references(
+            mapping.get("effects", []),
+            f"{path}.effects",
+            effects,
+            passive_priority,
+        ),
     )
 
 
@@ -872,7 +888,7 @@ def _validate_enabled_when(value: Any, path: str) -> str | None:
         raise ContentValidationError(
             f"{path} must compare a boolean RulesConfig path to true or false"
         )
-    if match.group("path") not in _BOOLEAN_RULE_PATHS:
+    if match.group("path") not in _boolean_rule_paths(RulesConfig):
         raise ContentValidationError(
             f"{path} references unknown or non-boolean rule path 'rules.{match.group('path')}'"
         )

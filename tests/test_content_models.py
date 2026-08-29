@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -23,9 +23,11 @@ from server.aiwolf_core.models import (
     Modifier,
     ModifierGrant,
     ModifierWinCondition,
+    RulesConfig,
     WinCondition,
 )
 from server.aiwolf_core.content import (
+    _boolean_rule_paths,
     _parse_ability,
     _parse_modifier,
     _parse_passive,
@@ -38,6 +40,17 @@ from server.aiwolf_core.content import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONTENT_ROOT = PROJECT_ROOT / "content"
 PRESET_PATH = CONTENT_ROOT / "presets" / "standard_9.yaml"
+
+
+@dataclass(frozen=True)
+class NestedBoolRules:
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class TestRulesConfig:
+    nested: NestedBoolRules
+    name: str
 
 
 def make_modifier(
@@ -123,6 +136,19 @@ class ContentLoadingTests(unittest.TestCase):
             [("attack", 50), ("inspect_role", 75)],
         )
 
+    def test_passives_and_medium_declare_effect_priorities(self) -> None:
+        nekomata = self.content.roles["nekomata"].passives[0]
+        fox = self.content.roles["fox"].passives[0]
+        medium = self.content.roles["medium"].abilities[0]
+
+        self.assertEqual([(reference.id, reference.priority) for reference in nekomata.effects], [("kill", 78)])
+        self.assertEqual([(reference.id, reference.priority) for reference in fox.effects], [("kill", 40)])
+        self.assertEqual([(reference.id, reference.priority) for reference in medium.effects], [("medium_inspect", 45)])
+
+    def test_enabled_when_boolean_paths_are_derived_from_dataclasses(self) -> None:
+        self.assertIn("guard.consecutive", _boolean_rule_paths(RulesConfig))
+        self.assertEqual(_boolean_rule_paths(TestRulesConfig), frozenset({"nested.enabled"}))
+
     def test_preset_loads_with_explicit_rules(self) -> None:
         preset = load_preset(PRESET_PATH, self.content)
         self.assertEqual(preset.role_counts["villager"], 3)
@@ -200,7 +226,7 @@ class ContentLoadingTests(unittest.TestCase):
                 self.content.death_causes,
             )
 
-        passive = {"type": "unknown_passive", "rules": [{"when": {}}], "effects": []}
+        passive = {"type": "unknown_passive", "priority": 0, "rules": [{"when": {}}], "effects": []}
         with self.assertRaisesRegex(ContentValidationError, "unregistered passive"):
             _parse_passive(
                 passive,
@@ -210,8 +236,24 @@ class ContentLoadingTests(unittest.TestCase):
                 self.content.death_causes,
             )
 
+        unknown_passive_effect = {
+            "type": "on_inspected",
+            "priority": 40,
+            "rules": [{"when": {"event": "inspected"}}],
+            "effects": ["unknown_effect"],
+        }
+        with self.assertRaisesRegex(ContentValidationError, "unregistered effect"):
+            _parse_passive(
+                unknown_passive_effect,
+                "test.passive",
+                self.content.effects,
+                self.content.passives,
+                self.content.death_causes,
+            )
+
         unknown_cause = {
             "type": "retaliate_on_death",
+            "priority": 78,
             "rules": [{"when": {"death_cause": "unknown_cause"}}],
             "effects": ["kill"],
         }

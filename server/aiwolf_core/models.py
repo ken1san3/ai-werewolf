@@ -123,8 +123,9 @@ class Passive:
     """A registered passive type with one or more declarative trigger rules."""
 
     type: str
+    priority: int
     rules: tuple[Mapping[str, Any], ...]
-    effects: tuple[str, ...]
+    effects: tuple[EffectReference, ...]
 
 
 @dataclass(frozen=True)

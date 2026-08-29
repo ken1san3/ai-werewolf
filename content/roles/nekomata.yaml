@@ -8,6 +8,7 @@ chat_channels: [public]
 abilities: []
 passives:
   - type: retaliate_on_death
+    priority: 78
     rules:
       - when:
           death_cause: attacked

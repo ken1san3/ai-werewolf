@@ -8,6 +8,7 @@ chat_channels: [public, fox]
 abilities: []
 passives:
   - type: on_inspected
+    priority: 40
     rules:
       - when:
           event: inspected
