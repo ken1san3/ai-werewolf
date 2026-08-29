@@ -86,3 +86,14 @@ Reviewer 推奨: ハンドシェイクで `protocol_version`、全イベント�
 参照実装の昼は1〜6分、さらに時短・延長で伸縮する。
 8GB VRAM 共有LLMで9エージェントが1回の昼に何発言できるかを実測し、
 議論時間・発言レート上限・サーバ側の発話制限を決める。
+
+---
+
+## Q24 [Phase 8] 複数 Modifier による同一属性の上書き優先順位
+
+複数の Modifier が同じ実効属性（`team` / `count_as` / `attack_result` /
+`inspect_result` / `medium_result`）を異なる値で上書きするときの優先順位が未定義。
+
+Phase 1.1 は曖昧な状態を許可せず、同じ属性を二重に上書きする付与をエラーにする。
+Phase 8 で具体的な Modifier を追加する前に、priority・付与順・相互排他のいずれで
+解決するかを決める必要がある。

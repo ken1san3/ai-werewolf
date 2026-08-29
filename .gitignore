@@ -25,3 +25,6 @@ models/
 .idea/
 .DS_Store
 Thumbs.db
+
+# reviewer/session artifacts
+_to_delete/
