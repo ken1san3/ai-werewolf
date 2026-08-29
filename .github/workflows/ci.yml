@@ -41,9 +41,23 @@ jobs:
       - name: Load content pack
         run: |
           python - <<'PY'
+          from pathlib import Path
+
           from server.aiwolf_core.content import load_content, load_preset
+
           content = load_content("content")
           load_preset("content/presets/standard_9.yaml", content)
-          print(f"roles={len(content.roles)} teams={len(content.teams)}")
-          assert len(content.roles) == 13, "expected 13 roles"
+
+          # 期待値は content/roles/ の実ファイルから導出する。
+          # 役職数を直値で持つと、YAML だけの役職追加で CI が落ち、
+          # 「役職追加に Python の変更は要らない」という性質を壊してしまう。
+          declared = {path.stem for path in Path("content/roles").glob("*.yaml")}
+          loaded = set(content.roles)
+          missing = declared - loaded
+          extra = loaded - declared
+
+          print(f"roles={len(loaded)} teams={len(content.teams)}")
+          assert not missing, f"declared but not loaded: {sorted(missing)}"
+          assert not extra, f"loaded but not declared as a file: {sorted(extra)}"
+          assert declared, "content/roles/ must declare at least one role"
           PY

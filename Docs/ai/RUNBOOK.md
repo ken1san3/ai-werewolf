@@ -56,6 +56,7 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
     Test Status には commit hash を入れる
 [ ] 新しい判断があれば decisions/、再発しそうな失敗があれば failures/
 [ ] Phase 全体が完了したときのみ handoffs/PHASE<N>_HANDOFF.md を作成
+[ ] コミット後、人間へ `git push` を促す（エージェント環境に GitHub 認証情報は無い）
 ```
 
 報告は「実装したもの / テスト結果 / 未実装 / 次にやること」を各数行。
