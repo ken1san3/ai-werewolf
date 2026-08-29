@@ -166,3 +166,71 @@ Phase 1 全体はまだ終わらないので handoff は作らない。
 作業中の説明は短く。詳細はコードと状態ファイルに残す。
 最後に「実装したもの / テスト結果 / 未実装 / 次にやること」を各数行でまとめる。
 ```
+
+---
+
+## レビュー修正セッション用（そのまま貼る）
+
+```
+このセッションは実装担当（Implementer）。レビュー指摘の修正のみを行う。新機能は実装しない。
+
+## 最初にやること
+
+前回セッションの成果物が未コミットのままなので、まず現状をコミットする。
+（content/ server/ tests/ pyproject.toml が untracked）
+コミットしないと次回の差分レビューができない。
+
+## 読むもの
+
+1. AGENTS.md
+2. Docs/ai/CURRENT_STATE.md
+3. Docs/ai/REVIEW_INBOX.md   ← 対応対象はこのファイル。SPEC_REVIEW.md ではない
+4. Docs/ai/spec/DESIGN.md の、指摘が参照している節だけ
+5. 指摘された実装ファイル
+
+Docs/ai/SPEC_REVIEW.md は元仕様への指摘履歴であり、今回の対象ではない。
+
+## 対応順
+
+1. High: R-20260829-01, R-20260829-02
+2. Medium: R-20260829-03, R-20260829-04
+3. Low: R-20260829-06, R-20260829-07, R-20260829-08
+
+R-20260829-05 は Reviewer（DESIGN.md の担当）が対応する。**触らないこと。**
+medium の priority 75 もそのまま残す。
+
+R-20260829-04 は Reviewer 推奨（グローバル rules.first_night_seer を正とし、
+role option を削除）で進める。異論があれば実装せず OPEN_QUESTIONS.md へ起票する。
+
+## 設計変更を伴う場合（R-20260829-01）
+
+Ability の effect 参照に priority を持たせる形は Codex が決めてよい。
+ただし決めたら Docs/ai/decisions/ へ D018 として記録する。
+**DESIGN.md は書き換えない**（Reviewer が反映する）。
+
+## 各指摘の完了時
+
+Docs/ai/REVIEW_INBOX.md の該当項目を編集する。
+
+- [OPEN] を [FIXED] に変える
+- 直下に「Fix:」の1行を足し、何をどう直したかを書く
+
+対応しないと判断した場合は [REJECTED] または [DEFERRED] にし、理由を書く。
+勝手に消さない。
+
+## テスト
+
+各指摘に Verification がある場合はその内容をテストにする。
+TEST_POLICY.md に無い項目を追加したときは TEST_POLICY.md にも追記する。
+
+## 終了時
+
+1. テストを実行し、成功数・失敗数・重要エラーだけを報告する
+2. git diff を確認してコミット
+3. Docs/ai/CURRENT_STATE.md を更新（Test Status に commit hash を入れる）
+4. Docs/ai/REVIEW_INBOX.md に [OPEN] が残っていないか確認する
+
+## 報告
+
+最後に「対応した指摘ID / 変更したファイル / テスト結果 / 未対応と理由」を各数行でまとめる。
+```
