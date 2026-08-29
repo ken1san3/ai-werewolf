@@ -19,6 +19,10 @@
 - [ ] 狂人を占って「人狼でない」が返る
 - [ ] 人狼を占って「人狼である」が返る
 - [ ] 未実装の Effect / Passive を参照する定義が起動時にエラーになる
+- [ ] 未登録の selector / restriction type を参照する定義が起動時にエラーになる
+- [ ] `enabled_when` が不正な構文、または非boolのルールパスを参照するとエラーになる
+- [ ] `effects` の省略形が Ability の priority を継承する
+- [ ] `effects` で priority を明示した effect が別の priority で解決される
 - [ ] 設定ファイルの不正値・順序未定義が起動時にエラーになる
 
 ## 2. Modifier

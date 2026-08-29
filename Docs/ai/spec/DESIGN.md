@@ -97,10 +97,33 @@ abilities:
     restrictions:
       - type: no_same_target_consecutive
         enabled_when: rules.guard.consecutive == false
+    effects: [protect]
 ```
 
 `target` / `restrictions` / `uses` / `available_from_night` の宣言が、
 行動の**検証**と**選択肢の列挙**の両方の根拠になる。
+
+`selector` / `restrictions[].type` / `effects[]` は、いずれも content の registry
+（`selectors.yaml` / `restriction_types.yaml` / `effects.yaml`）に登録された
+IDでなければならない。未登録の参照は起動時にエラーとする。
+
+`enabled_when` は `rules.<path> == true|false` の形に限る。
+参照先は `RulesConfig` の bool フィールドであることを起動時に検証する。
+
+### effect の解決 priority
+
+1つの Ability が、異なる priority の effect を持つことがある。
+賢狼は襲撃（50）と役職確認（75）を同じ能力から発生させる。
+
+```yaml
+effects:
+  - id: attack
+  - id: inspect_role
+    priority: 75
+```
+
+省略形の `effects: [protect]` は、その Ability の `priority` を継承する。
+priority を明示した effect だけが別枠で解決される。
 
 ### 4.3 Passive
 
@@ -244,6 +267,9 @@ roles:
 ```
 
 役職固有オプションは役職定義側に持たせる。
+ただし**同じ挙動をグローバルと役職の両方に置かない。**
+初日占いはゲーム進行の規則なのでグローバル `rules.first_night_seer` を唯一の設定源とし、
+役職側には持たせない（`decisions/D018`）。
 
 ```yaml
 id: seer
@@ -331,6 +357,7 @@ GameEnd
 |---|---|
 | 30 | Protect |
 | 40 | Inspect（呪殺の死亡フラグもここ） |
+| 45 | MediumInspect（霊能。前日以前の死亡者が対象） |
 | 50 | Attack |
 | 70 | DeathResolve |
 | 75 | InspectDeadRole |
