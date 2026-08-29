@@ -10,7 +10,7 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 
 ## Current phase
 
-**Phase 0: リポジトリ初期化 / Phase 1 着手前**
+**Phase 1.1 着手可（設計判断は D001〜D007 で確定済み）**
 
 Relevant:
 - `spec/AI_WEREWOLF_CODEX_HANDOFF.md` の §1, §2, §5〜§11, §26, §30, §31, §32, §37
@@ -22,6 +22,7 @@ Relevant:
 - `decisions/D003_ROLE_ATTRIBUTE_MODEL.md`
 - `decisions/D004_REFERENCE_IMPLEMENTATION.md`
 - `decisions/D005_WIN_CONDITIONS.md`
+- `decisions/D006_RULE_OPTIONS.md`
 
 ## Read only if needed
 
