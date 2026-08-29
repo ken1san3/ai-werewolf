@@ -4,7 +4,7 @@
 
 ## Phase 1 — Game Core（LLM不使用）
 
-- 1.1 Team / Alignment / Role / Ability / Passive / Effect のデータモデル + YAMLローダー
+- 1.1 Role属性5軸 / Team / Ability / Passive / Effect / Modifier のデータモデル + YAMLローダー
 - 1.2 GameState / Player / Event Bus
 - 1.3 Phase Manager（昼 / 投票 / 夜 / 朝）
 - 1.4 投票と処刑（同数時ルールを設定化）
@@ -63,6 +63,8 @@
 ## Phase 8 — Role Expansion / MOD
 
 - 第三陣営 / Passive / Effect拡張 / WinCondition拡張 / MODローダー
+- 具体的な Modifier（恋人 / 狐憑き / 手玉 / 呪い）
+- Role Replacement（変化系・怪盗の交換）の設計と実装
 
 ## 将来候補（今は触らない）
 

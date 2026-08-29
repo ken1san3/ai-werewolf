@@ -23,6 +23,7 @@ Relevant:
 - `decisions/D004_REFERENCE_IMPLEMENTATION.md`
 - `decisions/D005_WIN_CONDITIONS.md`
 - `decisions/D006_RULE_OPTIONS.md`
+- `decisions/D008_ROLE_MODIFIER.md`
 
 ## Read only if needed
 
