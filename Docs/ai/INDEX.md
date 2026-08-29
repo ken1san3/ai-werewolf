@@ -28,6 +28,10 @@ Relevant:
 - `decisions/D010_WISE_WEREWOLF_INFO.md`
 - `decisions/D011_NEKOMATA_RETALIATION.md`
 - `decisions/D012_DEATH_CAUSE.md`
+- `decisions/D013_LOGGING_AND_REPLAY.md`
+- `decisions/D014_DRAW.md`
+- `decisions/D015_PHASE_MACHINE.md`
+- `decisions/D016_NIGHT_RESOLUTION_AND_NOTIFICATION.md`
 
 ## Read only if needed
 

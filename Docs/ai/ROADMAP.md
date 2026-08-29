@@ -5,11 +5,11 @@
 ## Phase 1 — Game Core（LLM不使用）
 
 - 1.1 Role属性5軸 / Team / Ability / Passive / Effect / Modifier のデータモデル + YAMLローダー
-- 1.2 GameState / Player / Event Bus
-- 1.3 Phase Manager（昼 / 投票 / 夜 / 朝）
+- 1.2 GameState / Player / Event Bus / イベントログ出力（D013の3系統分離）
+- 1.3 Phase Manager（D015: Night0 / Dawn / Day / Vote / [Runoff] / Execution / Night）
 - 1.4 投票と処刑（同数時ルールを設定化）
 - 1.5 夜行動と Action Resolver（priority順の解決、DeathCause、死亡連鎖の停止規則）
-- 1.6 WinCondition 評価
+- 1.6 WinCondition 評価（D005 / D014。引き分けを含む）
 - 1.7 13役職の実装（D009）と Dummy操作での完走テスト
 
 完了条件:
