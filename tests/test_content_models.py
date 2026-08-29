@@ -48,7 +48,7 @@ class NestedBoolRules:
 
 
 @dataclass(frozen=True)
-class TestRulesConfig:
+class RulesConfigFixture:
     nested: NestedBoolRules
     name: str
 
@@ -147,7 +147,7 @@ class ContentLoadingTests(unittest.TestCase):
 
     def test_enabled_when_boolean_paths_are_derived_from_dataclasses(self) -> None:
         self.assertIn("guard.consecutive", _boolean_rule_paths(RulesConfig))
-        self.assertEqual(_boolean_rule_paths(TestRulesConfig), frozenset({"nested.enabled"}))
+        self.assertEqual(_boolean_rule_paths(RulesConfigFixture), frozenset({"nested.enabled"}))
 
     def test_preset_loads_with_explicit_rules(self) -> None:
         preset = load_preset(PRESET_PATH, self.content)

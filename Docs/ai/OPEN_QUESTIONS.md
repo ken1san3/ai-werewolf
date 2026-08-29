@@ -97,3 +97,16 @@ Reviewer 推奨: ハンドシェイクで `protocol_version`、全イベント�
 Phase 1.1 は曖昧な状態を許可せず、同じ属性を二重に上書きする付与をエラーにする。
 Phase 8 で具体的な Modifier を追加する前に、priority・付与順・相互排他のいずれで
 解決するかを決める必要がある。
+
+---
+
+## Q25 [Phase 1.2] 役職欠けの置換先役職を content でどう指定するか
+
+`rules.role_missing: true` は「ランダムに役職が市民に置き換わる」設定だが、
+DESIGN.md の `RulesConfig` は bool だけで、どの Role を置換先の市民として使うかを
+role 名非依存で指定する方法がない。コアに `"villager"` を埋め込むと、役職追加・
+差し替えに Python 変更を不要とする不変条件に反する。
+
+決めること:
+
+- 置換先 Role を preset / content のどこで指定するか

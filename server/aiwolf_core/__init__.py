@@ -1,6 +1,8 @@
 """Content-driven domain models for the game core."""
 
 from .content import ContentPack, ContentValidationError, Preset, load_content, load_preset
+from .events import EventBus, EventVisibility, GameEvent, JsonlEventLog
+from .game import GamePhase, GameState, Player, PlayerConfig, RandomSource
 from .models import (
     AppliedModifier,
     EffectiveAttributes,
@@ -17,13 +19,22 @@ __all__ = [
     "ContentPack",
     "ContentValidationError",
     "EffectiveAttributes",
+    "EventBus",
+    "EventVisibility",
     "EffectReference",
+    "GameEvent",
+    "GamePhase",
+    "GameState",
+    "JsonlEventLog",
     "Knowledge",
     "PlayerRoleState",
+    "Player",
+    "PlayerConfig",
     "Preset",
     "expire_modifiers_at_dawn",
     "load_content",
     "load_preset",
     "resolve_effective_attributes",
     "resolve_effective_win_conditions",
+    "RandomSource",
 ]
