@@ -24,6 +24,7 @@ Relevant:
 - `decisions/D005_WIN_CONDITIONS.md`
 - `decisions/D006_RULE_OPTIONS.md`
 - `decisions/D008_ROLE_MODIFIER.md`
+- `decisions/D009_INITIAL_ROLE_SET.md`（実装対象13役職の属性表）
 
 ## Read only if needed
 
