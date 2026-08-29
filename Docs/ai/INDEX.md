@@ -25,6 +25,8 @@ Relevant:
 - `decisions/D006_RULE_OPTIONS.md`
 - `decisions/D008_ROLE_MODIFIER.md`
 - `decisions/D009_INITIAL_ROLE_SET.md`（実装対象13役職の属性表）
+- `decisions/D010_WISE_WEREWOLF_INFO.md`
+- `decisions/D011_NEKOMATA_RETALIATION.md`
 
 ## Read only if needed
 
