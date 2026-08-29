@@ -1,0 +1,11 @@
+selectors:
+  - id: alive_all
+    name: 生存者全員
+  - id: alive_by_tag
+    name: タグを持つ生存者
+  - id: alive_other
+    name: 自分以外の生存者
+  - id: alive_without_tag
+    name: タグを持たない生存者
+  - id: unexamined_dead_by_cause
+    name: 未判定の死者

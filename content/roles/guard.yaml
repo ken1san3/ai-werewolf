@@ -1,0 +1,24 @@
+id: guard
+name: 狩人
+team: village
+attack_result: die
+tags: []
+knows_teammates: false
+chat_channels: [public]
+abilities:
+  - id: protect
+    timing: night_action
+    available_from_night: 1
+    priority: 30
+    target:
+      selector: alive_other
+      count: 1
+    uses:
+      per_night: 1
+      per_game: null
+    restrictions:
+      - type: no_same_target_consecutive
+        enabled_when: rules.guard.consecutive == false
+    effects: [protect]
+passives: []
+options: {}

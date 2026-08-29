@@ -1,0 +1,22 @@
+id: seer
+name: 占い師
+team: village
+attack_result: die
+tags: []
+knows_teammates: false
+chat_channels: [public]
+abilities:
+  - id: inspect
+    timing: night_action
+    available_from_night: 0
+    priority: 40
+    target:
+      selector: alive_other
+      count: 1
+    uses:
+      per_night: 1
+      per_game: null
+    restrictions: []
+    effects: [inspect]
+passives: []
+options: {}

@@ -1,0 +1,23 @@
+id: medium
+name: 霊能者
+team: village
+attack_result: die
+tags: []
+knows_teammates: false
+chat_channels: [public]
+abilities:
+  - id: medium_inspect
+    timing: night_action
+    available_from_night: 1
+    priority: 75
+    target:
+      selector: unexamined_dead_by_cause
+      causes: [lynched, sudden_death]
+      count: 1
+    uses:
+      per_night: 1
+      per_game: null
+    restrictions: []
+    effects: [medium_inspect]
+passives: []
+options: {}

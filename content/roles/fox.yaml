@@ -1,0 +1,15 @@
+id: fox
+name: 妖狐
+team: fox
+attack_result: immune
+tags: [fox]
+knows_teammates: true
+chat_channels: [public, fox]
+abilities: []
+passives:
+  - type: on_inspected
+    rules:
+      - when:
+          event: inspected
+    effects: [kill]
+options: {}

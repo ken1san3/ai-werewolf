@@ -1,0 +1,28 @@
+id: nekomata
+name: 猫又
+team: village
+attack_result: die
+tags: []
+knows_teammates: false
+chat_channels: [public]
+abilities: []
+passives:
+  - type: retaliate_on_death
+    rules:
+      - when:
+          death_cause: attacked
+        target:
+          selector: alive_by_tag
+          tag: werewolf
+          count: 1
+          pick: random
+        death_cause: retaliation
+      - when:
+          death_cause: lynched
+        target:
+          selector: alive_all
+          count: 1
+          pick: random
+        death_cause: retaliation
+    effects: [kill]
+options: {}

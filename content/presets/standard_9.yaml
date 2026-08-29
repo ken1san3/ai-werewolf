@@ -1,0 +1,41 @@
+rules:
+  first_night_seer: random_white
+  vote:
+    runoff: true
+    tie_after_runoff: no_lynch
+    tie_without_runoff: no_lynch
+    skip_lynch_count: 0
+    no_selection: invalid_vote
+    self_vote: false
+  guard:
+    consecutive: false
+    self_guard: false
+  medium:
+    notify_timing: night
+    targets: [lynched, sudden_death]
+  wolf_attack:
+    target_decision: majority
+    tie: random
+  co:
+    max_per_day: 3
+    allow_from_day2: true
+    allow_villager_claim: false
+  death:
+    public_detail: phase
+  role_missing: false
+  day_seconds: 180
+  night_seconds: 60
+  silence_after_dawn_seconds: 15
+  extension:
+    max_count: 0
+    seconds_per_extension: 120
+    approval: majority
+  win_evaluation_order: [village, wolf, fox]
+
+roles:
+  villager: 3
+  werewolf: 2
+  seer: 1
+  guard: 1
+  madman: 1
+  medium: 1

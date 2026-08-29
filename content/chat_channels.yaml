@@ -1,0 +1,15 @@
+chat_channels:
+  - id: public
+    name: 公開チャット
+  - id: wolf
+    name: 人狼チャット
+  - id: fox
+    name: 妖狐チャット
+  - id: lover
+    name: 恋人チャット
+  - id: system
+    name: システム通知
+  - id: graveyard
+    name: 墓場チャット
+  - id: spectator
+    name: 観戦チャット

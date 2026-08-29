@@ -1,0 +1,7 @@
+passives:
+  - id: on_inspected
+    name: 占い時発動
+  - id: public_notify_if_alive
+    name: 生存中の定期公開通知
+  - id: retaliate_on_death
+    name: 死亡時の道連れ

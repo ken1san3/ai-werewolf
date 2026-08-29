@@ -1,0 +1,15 @@
+effects:
+  - id: attack
+    name: 襲撃
+  - id: inspect
+    name: 占い判定
+  - id: medium_inspect
+    name: 霊能判定
+  - id: protect
+    name: 護衛
+  - id: kill
+    name: 死亡処理
+  - id: public_notify
+    name: 公開通知
+  - id: inspect_role
+    name: 役職確認

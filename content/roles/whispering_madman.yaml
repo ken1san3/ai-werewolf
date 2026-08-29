@@ -1,0 +1,13 @@
+id: whispering_madman
+name: 囁く狂人
+team: wolf
+count_as: village
+attack_result: die
+inspect_result: not_wolf
+medium_result: not_wolf
+tags: []
+knows_teammates: true
+chat_channels: [public, wolf]
+abilities: []
+passives: []
+options: {}

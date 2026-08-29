@@ -1,0 +1,32 @@
+teams:
+  - id: village
+    name: 市民陣営
+    default_attributes:
+      count_as: village
+      inspect_result: not_wolf
+      medium_result: not_wolf
+    win_conditions:
+      - type: eliminate_role_tag
+        tag: werewolf
+
+  - id: wolf
+    name: 人狼陣営
+    default_attributes:
+      count_as: wolf
+      inspect_result: wolf
+      medium_result: wolf
+    win_conditions:
+      - type: count_parity
+        subject: wolf
+        against: village
+        operator: gte
+
+  - id: fox
+    name: 妖狐陣営
+    default_attributes:
+      count_as: none
+      inspect_result: not_wolf
+      medium_result: not_wolf
+    win_conditions:
+      - type: survive_when_others_win
+        replaces: true

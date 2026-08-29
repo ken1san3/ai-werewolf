@@ -1,0 +1,16 @@
+id: baker
+name: パン屋
+team: village
+attack_result: die
+tags: []
+knows_teammates: false
+chat_channels: [public]
+abilities: []
+passives:
+  - type: public_notify_if_alive
+    rules:
+      - when:
+          event: dawn
+          actor_alive: true
+    effects: [public_notify]
+options: {}

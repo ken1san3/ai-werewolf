@@ -1,0 +1,26 @@
+id: wise_werewolf
+name: 賢狼
+team: wolf
+attack_result: immune
+tags: [werewolf]
+knows_teammates: true
+chat_channels: [public, wolf]
+abilities:
+  - id: attack
+    timing: night_action
+    available_from_night: 1
+    priority: 50
+    target:
+      selector: alive_without_tag
+      tag: werewolf
+      count: 1
+    uses:
+      per_night: 1
+      per_game: null
+    restrictions: []
+    effects:
+      - id: attack
+      - id: inspect_role
+        priority: 75
+passives: []
+options: {}

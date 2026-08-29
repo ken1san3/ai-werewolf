@@ -1,0 +1,15 @@
+death_causes:
+  - id: lynched
+    name: 処刑
+  - id: attacked
+    name: 襲撃
+  - id: retaliation
+    name: 道連れ
+  - id: cursed
+    name: 呪殺
+  - id: follow_death
+    name: 後追い
+  - id: sudden_death
+    name: 突然死
+  - id: ability
+    name: 能力
