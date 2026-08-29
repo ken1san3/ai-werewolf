@@ -3,6 +3,17 @@
 AI人狼プロジェクトの恒久ルール。ここには**短く安定した規約のみ**を書く。
 現在の進捗・タスク・設計理由はここに書かない（置き場所は下記）。
 
+## Roles
+
+| 役割 | 担当 | やること |
+|---|---|---|
+| Implementer | **Codex** | 実装 / テスト / CURRENT_STATE・handoff・decision・failure の更新 |
+| Reviewer | **Claude (Cowork)** | 仕様整合レビュー / 指摘の REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備 |
+
+- Reviewer は原則コードを書かない。指摘は `Docs/ai/REVIEW_INBOX.md` へ残し、修正は Implementer が行う。
+- Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。
+- 仕様・ルールの最終決定権はユーザーにある。両者とも決定を `Docs/ai/decisions/` へ記録する。
+
 ## Start of session
 
 1. Read `Docs/ai/INDEX.md`

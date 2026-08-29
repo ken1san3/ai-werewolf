@@ -3,9 +3,11 @@
 各セッション開始時に貼るテンプレート。
 同じ内容を AGENTS.md や CURRENT_STATE.md へ複製しない（置き場所はここだけ）。
 
+役割分担は `AGENTS.md` の Roles を参照。実装は Codex、レビューは Claude (Cowork)。
+
 ---
 
-## Implementer（実装セッション）
+## Implementer（実装セッション） — 担当: Codex
 
 ```
 このセッションでは現在Phaseの実装のみ行う。
@@ -38,7 +40,7 @@
 
 ---
 
-## Reviewer（レビュー専用セッション）
+## Reviewer（レビュー専用セッション） — 担当: Claude (Cowork)
 
 ```
 このチャットはレビュー専用。実装は原則行わない。
@@ -70,7 +72,7 @@ ID(R-YYYYMMDD-NN) / 重要度 / 対象ファイル / 問題 / 必要な修正 / 
 
 ---
 
-## Phase終了時
+## Phase終了時 — 担当: Codex
 
 ```
 このPhaseを終了する。次のPhaseの実装には入らない。
