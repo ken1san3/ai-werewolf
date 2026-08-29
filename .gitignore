@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# runtime
+logs/
+*.log
+replays/
+.env
+
+# models
+models/
+*.gguf
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
