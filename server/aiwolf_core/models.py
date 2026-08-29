@@ -298,6 +298,12 @@ class DeathRules:
 
 
 @dataclass(frozen=True)
+class RoleMissingRules:
+    enabled: bool
+    replacement_role_id: str
+
+
+@dataclass(frozen=True)
 class ExtensionRules:
     max_count: int
     seconds_per_extension: int
@@ -313,7 +319,7 @@ class RulesConfig:
     wolf_attack: WolfAttackRules
     co: CoRules
     death: DeathRules
-    role_missing: bool
+    role_missing: RoleMissingRules
     day_seconds: int
     night_seconds: int
     silence_after_dawn_seconds: int

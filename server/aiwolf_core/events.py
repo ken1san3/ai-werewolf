@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 
 class EventVisibility(str, Enum):
@@ -15,6 +16,7 @@ class EventVisibility(str, Enum):
     PUBLIC = "public"
     PRIVATE = "private"
     AI = "ai"
+    SERVER = "server"
 
 
 @dataclass(frozen=True)
@@ -30,11 +32,30 @@ class GameEvent:
     def __post_init__(self) -> None:
         if not self.type:
             raise ValueError("event type must not be empty")
-        if self.recipient_player_id is not None and self.visibility is not EventVisibility.PRIVATE:
+        if self.visibility is EventVisibility.PRIVATE and self.recipient_player_id is None:
+            raise ValueError("private events require a recipient player")
+        if self.visibility is not EventVisibility.PRIVATE and self.recipient_player_id is not None:
             raise ValueError("only private events may name a recipient player")
 
 
 EventSubscriber = Callable[[GameEvent], None]
+
+
+class EventSink(Protocol):
+    """A destination that records events routed by the EventBus."""
+
+    def record(self, event: GameEvent) -> None:
+        ...
+
+
+class InMemoryEventSink:
+    """An event sink for game-core tests that must not touch the filesystem."""
+
+    def __init__(self) -> None:
+        self.events: list[GameEvent] = []
+
+    def record(self, event: GameEvent) -> None:
+        self.events.append(event)
 
 
 class EventBus:
@@ -59,7 +80,7 @@ class EventBus:
     def publish(self, event: GameEvent) -> GameEvent:
         if event.sequence is not None:
             raise ValueError("EventBus assigns event sequences")
-        recorded = replace(event, payload=dict(event.payload), sequence=self._next_sequence)
+        recorded = replace(event, payload=deepcopy(dict(event.payload)), sequence=self._next_sequence)
         self._next_sequence += 1
         self._events.append(recorded)
         for subscriber in tuple(self._subscribers[recorded.visibility]):
@@ -77,6 +98,7 @@ class JsonlEventLog:
             EventVisibility.PUBLIC: self.directory / "public.jsonl",
             EventVisibility.PRIVATE: self.directory / "private.jsonl",
             EventVisibility.AI: self.directory / "ai.jsonl",
+            EventVisibility.SERVER: self.directory / "private.jsonl",
         }
         for path in self._paths.values():
             path.touch(exist_ok=True)
@@ -89,6 +111,7 @@ class JsonlEventLog:
         entry: dict[str, Any] = {
             "sequence": event.sequence,
             "type": event.type,
+            "visibility": event.visibility.value,
             "payload": event.payload,
         }
         if event.recipient_player_id is not None:

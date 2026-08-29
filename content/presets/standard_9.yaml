@@ -22,7 +22,9 @@ rules:
     allow_villager_claim: false
   death:
     public_detail: phase
-  role_missing: false
+  role_missing:
+    enabled: false
+    replacement_role_id: villager
   day_seconds: 180
   night_seconds: 60
   silence_after_dawn_seconds: 15

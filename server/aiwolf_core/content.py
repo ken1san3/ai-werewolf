@@ -39,6 +39,7 @@ from .models import (
     RestrictionType,
     Role,
     RoleAttributes,
+    RoleMissingRules,
     RoleOption,
     RulesConfig,
     TargetSpec,
@@ -698,6 +699,11 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
     )
     co = _parse_co_rules(_mapping(data["co"], f"{path}.rules.co"), f"{path}.rules.co")
     death = _parse_death_rules(_mapping(data["death"], f"{path}.rules.death"), f"{path}.rules.death")
+    role_missing = _parse_role_missing_rules(
+        _mapping(data["role_missing"], f"{path}.rules.role_missing"),
+        f"{path}.rules.role_missing",
+        content,
+    )
     extension = _parse_extension_rules(
         _mapping(data["extension"], f"{path}.rules.extension"), f"{path}.rules.extension"
     )
@@ -720,7 +726,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         wolf_attack=wolf_attack,
         co=co,
         death=death,
-        role_missing=_boolean(data["role_missing"], f"{path}.rules.role_missing"),
+        role_missing=role_missing,
         day_seconds=_integer(data["day_seconds"], f"{path}.rules.day_seconds", minimum=1),
         night_seconds=_integer(data["night_seconds"], f"{path}.rules.night_seconds", minimum=1),
         silence_after_dawn_seconds=_integer(
@@ -728,6 +734,22 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         ),
         extension=extension,
         win_evaluation_order=order,
+    )
+
+
+def _parse_role_missing_rules(
+    data: Mapping[str, Any], path: str, content: ContentPack
+) -> RoleMissingRules:
+    _keys(data, required={"enabled", "replacement_role_id"}, optional=set(), path=path)
+    replacement_role_id = _registered_id(
+        data["replacement_role_id"],
+        f"{path}.replacement_role_id",
+        content.roles,
+        "role",
+    )
+    return RoleMissingRules(
+        enabled=_boolean(data["enabled"], f"{path}.enabled"),
+        replacement_role_id=replacement_role_id,
     )
 
 

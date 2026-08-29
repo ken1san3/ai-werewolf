@@ -154,6 +154,17 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertEqual(preset.role_counts["villager"], 3)
         self.assertEqual(preset.rules.win_evaluation_order, ("village", "wolf", "fox"))
         self.assertFalse(preset.rules.guard.consecutive)
+        self.assertFalse(preset.rules.role_missing.enabled)
+        self.assertEqual(preset.rules.role_missing.replacement_role_id, "villager")
+
+    def test_role_missing_replacement_role_is_selected_from_yaml_rules(self) -> None:
+        rules = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
+        rules["role_missing"] = {"enabled": True, "replacement_role_id": "baker"}
+
+        parsed = _parse_rules(rules, "test", self.content)
+
+        self.assertTrue(parsed.role_missing.enabled)
+        self.assertEqual(parsed.role_missing.replacement_role_id, "baker")
 
     def test_first_night_seer_is_configured_only_by_the_global_rule(self) -> None:
         preset = load_preset(PRESET_PATH, self.content)
@@ -279,11 +290,13 @@ class ContentLoadingTests(unittest.TestCase):
         base = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
         invalid_value = deepcopy(base)
         invalid_value["first_night_seer"] = "invalid"
+        invalid_role_missing = deepcopy(base)
+        invalid_role_missing["role_missing"]["replacement_role_id"] = "unknown_role"
         unknown_key = deepcopy(base)
         unknown_key["unknown_rule"] = True
         incomplete_order = deepcopy(base)
         incomplete_order["win_evaluation_order"] = ["village", "wolf"]
-        for rules in (invalid_value, unknown_key, incomplete_order):
+        for rules in (invalid_value, invalid_role_missing, unknown_key, incomplete_order):
             with self.subTest(rules=rules):
                 with self.assertRaises(ContentValidationError):
                     _parse_rules(rules, "test", self.content)

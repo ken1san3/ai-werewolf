@@ -9,7 +9,14 @@ from random import Random
 from typing import MutableSequence, Protocol, Sequence
 
 from .content import ContentPack, Preset
-from .events import EventBus, EventVisibility, GameEvent, JsonlEventLog
+from .events import (
+    EventBus,
+    EventSink,
+    EventVisibility,
+    GameEvent,
+    InMemoryEventSink,
+    JsonlEventLog,
+)
 from .models import AppliedModifier, Role, RulesConfig
 
 
@@ -60,7 +67,7 @@ class GameState:
     players: dict[str, Player]
     rng: RandomSource
     event_bus: EventBus
-    event_log: JsonlEventLog
+    event_sink: EventSink
     day: int = 0
     phase: GamePhase = GamePhase.SETUP
     pending_actions: dict[str, object] = field(default_factory=dict)
@@ -73,9 +80,9 @@ class GameState:
         player_configs: Sequence[PlayerConfig],
         *,
         game_id: str,
-        logs_root: str | Path,
+        logs_root: str | Path | None = None,
         rng: RandomSource | None = None,
-        role_missing_replacement_role_id: str | None = None,
+        event_sink: EventSink | None = None,
     ) -> "GameState":
         """Build the Setup state and record all random assignment outcomes."""
 
@@ -94,12 +101,14 @@ class GameState:
                 "preset role count must equal player count: "
                 f"{len(role_ids)} roles for {len(player_configs)} players"
             )
-        _role_missing_candidates(content, preset.rules, role_ids, role_missing_replacement_role_id)
+        role_missing_candidates = _role_missing_candidates(preset.rules, role_ids)
 
         event_bus = EventBus()
-        event_log = JsonlEventLog(logs_root, game_id)
+        sink = event_sink
+        if sink is None:
+            sink = JsonlEventLog(logs_root, game_id) if logs_root is not None else InMemoryEventSink()
         for visibility in EventVisibility:
-            event_bus.subscribe(visibility, event_log.record)
+            event_bus.subscribe(visibility, sink.record)
         state = cls(
             game_id=game_id,
             content=content,
@@ -107,10 +116,10 @@ class GameState:
             players={},
             rng=assigned_rng,
             event_bus=event_bus,
-            event_log=event_log,
+            event_sink=sink,
         )
         state._record_game_created(player_configs)
-        state._apply_role_missing(role_ids, role_missing_replacement_role_id)
+        state._apply_role_missing(role_ids, role_missing_candidates)
         state.rng.shuffle(role_ids)
         state._assign_roles(player_configs, role_ids)
         return state
@@ -133,19 +142,17 @@ class GameState:
         )
 
     def _apply_role_missing(
-        self, role_ids: list[str], replacement_role_id: str | None
+        self, role_ids: list[str], candidates: Sequence[str]
     ) -> None:
-        candidates = _role_missing_candidates(
-            self.content, self.rules, role_ids, replacement_role_id
-        )
-        if not candidates or replacement_role_id is None:
+        if not candidates:
             return
         missing_role_id = self.rng.choice(candidates)
+        replacement_role_id = self.rules.role_missing.replacement_role_id
         role_ids[role_ids.index(missing_role_id)] = replacement_role_id
         self.event_bus.publish(
             GameEvent(
                 type="ROLE_MISSING_APPLIED",
-                visibility=EventVisibility.PRIVATE,
+                visibility=EventVisibility.SERVER,
                 payload={
                     "missing_role_id": missing_role_id,
                     "replacement_role_id": replacement_role_id,
@@ -180,19 +187,12 @@ def _role_cards(content: ContentPack, preset: Preset) -> list[str]:
     return role_ids
 
 
-def _role_missing_candidates(
-    content: ContentPack,
-    rules: RulesConfig,
-    role_ids: Sequence[str],
-    replacement_role_id: str | None,
-) -> list[str]:
-    if not rules.role_missing:
+def _role_missing_candidates(rules: RulesConfig, role_ids: Sequence[str]) -> list[str]:
+    if not rules.role_missing.enabled:
         return []
-    if replacement_role_id is None:
-        raise ValueError("role_missing requires an explicit replacement role until Q25 is decided")
-    if replacement_role_id not in content.roles:
-        raise ValueError(f"role_missing replacement role is not registered: '{replacement_role_id}'")
-    candidates = [role_id for role_id in role_ids if role_id != replacement_role_id]
+    candidates = [
+        role_id for role_id in role_ids if role_id != rules.role_missing.replacement_role_id
+    ]
     if not candidates:
         raise ValueError("role_missing requires at least one non-replacement role card")
     return candidates

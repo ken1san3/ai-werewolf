@@ -11,7 +11,7 @@ Phase 1.2 では Event Bus と public / private / ai の JSONL ログを追加�
 
 ## Decision
 
-各 `GameEvent` は `public` / `private` / `ai` の公開範囲を1つ持つ。
+各 `GameEvent` は `public` / `private` / `ai` / `server` の公開範囲を1つ持つ。
 `EventBus` は一致する公開範囲の購読者にだけ配信し、`JsonlEventLog` は event 自身の公開範囲から
 出力先の JSONL を決める。公開範囲をまたぐ購読は持たない。
 
@@ -20,6 +20,7 @@ Event Bus はゲーム内の単調増加 sequence を割り当てる。この se
 
 ## Consequences
 
-- `ROLE_ASSIGNED` と `ROLE_MISSING_APPLIED` は private event として記録する。
+- `ROLE_ASSIGNED` は recipient 付き private event、`ROLE_MISSING_APPLIED` は server event とする。
+- server event はクライアント送信経路を持たず、ログでは private.jsonl へ記録する。
 - `public.jsonl` へ役職・Modifier・内部死因を含む payload を発行してはならない。
 - ログは event を再計算せず、そのまま再生するための順序付き記録となる。
