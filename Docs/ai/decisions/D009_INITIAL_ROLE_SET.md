@@ -71,16 +71,13 @@ Accepted (2026-08-29) — ユーザー決定
 
 この13役職から、マスター仕様に無い機能要求が判明した。
 
-### 1. 死因（death cause）の区別が必須
+### 1. 死因（DeathCause）の区別が必須
 
 猫又は「襲撃された場合」と「処刑された場合」で道連れ対象が違う。
-マスター仕様の Effect 一覧には死因の概念がない。
+マスター仕様の Effect 一覧・イベント一覧には死因の概念がない。
 
-```
-DeathCause: lynched | attacked | cursed | follow_death | sudden_death | ability
-```
-
-`PLAYER_DIED` イベントは死因を必ず含めること。
+→ `decisions/D012` で第一級の概念として定義した。
+**内部死因と公開死因を分離すること**（呪殺を襲撃と区別させない）。
 
 ### 2. 使用回数に `per_game` が必要
 

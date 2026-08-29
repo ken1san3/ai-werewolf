@@ -106,7 +106,7 @@ passives:
 
 ## Consequences
 
-- `DeathCause` が Phase 1 で必須（`decisions/D009`）
+- `DeathCause` が Phase 1 で必須（`decisions/D012`）
 - Passive のスキーマが `rules[]` になる
 - 最終日に猫又を処刑し、道連れで最後の人狼が死んだ場合、
   `decisions/D005` の「全死亡処理の解決後に GAME_END_CHECK を1回」により
