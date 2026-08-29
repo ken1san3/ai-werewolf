@@ -11,6 +11,7 @@
 - 1.5 夜行動と Action Resolver（priority順の解決、DeathCause、死亡連鎖の停止規則）
 - 1.6 WinCondition 評価（D005 / D014。引き分けを含む）
 - 1.7 13役職の実装（D009）と Dummy操作での完走テスト
+- 1.8 `get_available_actions(player_id)` の実装（D017）
 
 完了条件:
 
@@ -25,7 +26,7 @@
 - 2.2 Session / Join / Ready
 - 2.3 公開ブロードキャストと private 送信の分離
 - 2.4 Chat / Vote / Ability の受付と検証
-- 2.5 `game.state_sync`（再接続用スナップショット）
+- 2.5 `game.state_sync` / `player.list` / `player.deaths` / `player.action_state`（D017）
 
 完了条件: 複数Dummy Clientが別プロセスから接続し1ゲーム完走。
 

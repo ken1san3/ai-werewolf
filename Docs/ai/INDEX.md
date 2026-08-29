@@ -32,6 +32,7 @@ Relevant:
 - `decisions/D014_DRAW.md`
 - `decisions/D015_PHASE_MACHINE.md`
 - `decisions/D016_NIGHT_RESOLUTION_AND_NOTIFICATION.md`
+- `decisions/D017_ACTION_STATE_AND_PUSH.md`
 
 ## Read only if needed
 

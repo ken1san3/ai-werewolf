@@ -27,25 +27,7 @@
 | Q21 | 引き分けの扱い | `decisions/D014`（draw = 全員敗北） |
 | Q22 | 能力結果の通知範囲 | `decisions/D016` |
 | Q7  | ログの公開・秘匿分離 | `decisions/D013`（public / private / ai の3系統） |
-
----
-
-## Q23 [Phase 1 前] available_actions をゲームコアが返せるようにするか
-
-マスター仕様 §33 は「サーバはAIへ現在可能な操作を具体的に返す」と定めている。
-これは Phase 2 の話に見えるが、
-**ゲームコア側に「あるプレイヤーが今できる行動の一覧」を返す API が無いと、
-Phase 2 でネットワーク層に判定ロジックを再実装することになる**
-（＝ルールが2箇所に分散し、D001 のサーバ権威が崩れる）。
-
-Reviewer 推奨: Phase 1 の時点で
-
-```python
-game.get_available_actions(player_id) -> list[ActionSpec]
-```
-
-を用意し、Dummy Client のテストでもこれを経由させる。
-ネットワーク層は**この結果をそのまま整形して送るだけ**にする。
+| Q23 | available_actions の生成場所と送信 | `decisions/D017` |
 
 ---
 
