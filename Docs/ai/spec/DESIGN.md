@@ -257,6 +257,9 @@ rules:
     max_count: 0
     seconds_per_extension: 120
     approval: majority             # all | majority
+  shortening:
+    enabled: false                 # 時短。生存者の合意で締切を早める
+    approval: majority             # all | majority
   win_evaluation_order: [village, wolf, fox]
 
 roles:
@@ -300,7 +303,7 @@ Setup
   ↓
 Night0        初日の夜。ゲームはここから始まる
   ↓
-Dawn          結果発表 + 発言禁止時間
+Dawn          結果発表。この間は全チャネルで発言できない（15秒ルールの実体）
   ↓
 Day           議論（リアルタイムチャット）
   ↓
@@ -488,8 +491,12 @@ GameResult
 時限で変わるものは終了時刻を渡す。クライアント側でタイマーを持つ。
 
 ```json
-{ "phase_ends_at": 1735000000, "chat_enabled_at": 1734999860 }
+{ "phase_ends_at": 1735000000 }
 ```
+
+発言解禁時刻は別フィールドで持たない。
+夜明け直後の発言禁止は Dawn フェーズそのもので表現し（`decisions/D022`）、
+「Day が始まったら話せる」という規則に還元する。
 
 サーバは締切を自ら強制する。クライアントの時刻を信用しない。
 
