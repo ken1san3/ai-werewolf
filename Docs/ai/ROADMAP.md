@@ -8,7 +8,7 @@
 - 1.2 GameState / Player / Event Bus / イベントログ出力（D013の3系統分離）
 - 1.3 Phase Manager（D015: Night0 / Dawn / Day / Vote / [Runoff] / Execution / Night）
 - 1.4 投票と処刑（同数時ルールを設定化）
-- 1.5 夜行動と Action Resolver（priority順の解決、DeathCause、死亡連鎖の停止規則）
+- 1.5 夜行動の予約と Action Resolver（priority順の解決、DeathCause、死亡連鎖の停止規則、D017の予約→解決）
 - 1.6 WinCondition 評価（D005 / D014。引き分けを含む）
 - 1.7 13役職の実装（D009）と Dummy操作での完走テスト
 - 1.8 `get_available_actions(player_id)` の実装（D017）
