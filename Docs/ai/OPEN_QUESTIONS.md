@@ -73,6 +73,43 @@ Reviewer 推奨: **AI/Dummyクライアントはランダム、人間プレイ�
 
 ---
 
+## Q28 [Phase 1.5] 人狼襲撃の `designated` / `random` の決定規則
+
+`rules.wolf_attack.target_decision` は `majority | designated | random` を持つが、
+`designated` の指定者をどこで宣言するか、`random` が「提出された候補」か
+「有効対象全員」から選ぶかが DESIGN.md にない。
+
+標準プリセットの `majority` は、提出された単一襲撃先を多数決し、同数は
+`rules.wolf_attack.tie` に従って `game.rng` で選ぶものとして実装する。
+`designated` と `random` はこの決定まで有効化しない。
+
+---
+
+## Q29 [Phase 1.5] 死亡連鎖の深さ上限の content 設定
+
+DESIGN.md §7.2 は安全弁として死亡連鎖の深さ上限を要求するが、ルール設定のキー・
+既定値・上限到達時の公開／ログ形式を定義していない。コードに既定値を埋め込むことは
+D006 に反する。
+
+現行 content の猫又 passive は `attacked` / `lynched` のみで発火し、
+`retaliation` では発火しないため、標準役職だけの連鎖は構造的に停止する。
+設定が決まるまで上限に依存する拡張 passive は実装しない。
+
+---
+
+## Q30 [Phase 1.5] `guard.self_guard` と target selector の対応
+
+標準の狩人 ability は `target.selector: alive_other` で自分を対象外にしている一方、
+`rules.guard.self_guard` は true / false を持つ。true のとき selector をどの content
+宣言へ変更するかが未定義で、コアが `protect` effect や role ID を特別扱いすると
+「同じ宣言から検証と列挙を導く」方針を壊す。
+
+選択肢: (A) `alive_other` にルール参照を持たせる、(B) self 可否を restriction として
+content へ明示する、(C) true 用に別 selector を登録する。DESIGN.md の決定待ち。
+現行の `self_guard: false` と `alive_other` は矛盾しないため、標準設定は実装可能である。
+
+---
+
 ## Q6 [Phase 2 前] プロトコルのバージョニングと順序保証
 
 - 全メッセージに `protocol_version` を入れるか、ハンドシェイクのみか

@@ -17,7 +17,19 @@ from .events import (
     InMemoryEventSink,
     JsonlEventLog,
 )
-from .models import AppliedModifier, CoreDeathCause, GamePhase, Role, RulesConfig
+from .models import (
+    Ability,
+    AppliedModifier,
+    CoreDeathCause,
+    EffectReference,
+    GamePhase,
+    Passive,
+    PlayerRoleState,
+    Role,
+    RulesConfig,
+    TargetSpec,
+    resolve_effective_attributes,
+)
 
 
 class RandomSource(Protocol):
@@ -103,9 +115,46 @@ class Player:
     alive: bool = True
 
 
+@dataclass(frozen=True)
+class ActionReservation:
+    """One server-private ability reservation, replaced by the actor's next one."""
+
+    actor_player_id: str
+    ability_id: str
+    target_player_ids: tuple[str, ...]
+    submitted_at: int
+
+
+@dataclass(frozen=True)
+class DeathRecord:
+    """Server-side death data used by effects and passives, never sent as-is to clients."""
+
+    player_id: str
+    cause: str
+    phase: GamePhase
+    day: int
+
+
+@dataclass(frozen=True)
+class _ScheduledEffect:
+    priority: int
+    effect_id: str
+    actor_player_id: str
+    ability_id: str
+    target_player_ids: tuple[str, ...]
+    death_cause: str | None = None
+
+
+@dataclass(frozen=True)
+class _DeathRequest:
+    player_id: str
+    cause: str
+    priority: int
+
+
 @dataclass
 class GameState:
-    """Authoritative mutable state; action resolution is added in Phase 1.5."""
+    """Authoritative mutable state, including server-private night-action reservations."""
 
     game_id: str
     content: ContentPack
@@ -119,7 +168,14 @@ class GameState:
     phase_started_at: int | None = None
     phase_ends_at: int | None = None
     extensions_used: int = 0
-    pending_actions: dict[str, object] = field(default_factory=dict)
+    pending_actions: dict[str, ActionReservation] = field(default_factory=dict)
+    ability_uses_per_game: dict[tuple[str, str], int] = field(default_factory=dict)
+    ability_uses_this_night: dict[tuple[str, str], int] = field(default_factory=dict)
+    last_resolved_targets: dict[tuple[str, str], tuple[str, ...]] = field(default_factory=dict)
+    death_records: dict[str, DeathRecord] = field(default_factory=dict)
+    medium_examined_deaths: set[tuple[str, str]] = field(default_factory=set)
+    queued_dawn_notifications: list[GameEvent] = field(default_factory=list)
+    night_actions_resolved: bool = False
     pending_votes: dict[str, str | None] = field(default_factory=dict)
     abstentions_used: dict[str, int] = field(default_factory=dict)
     runoff_candidate_player_ids: tuple[str, ...] = ()
@@ -213,6 +269,8 @@ class GameState:
             raise ValueError("vote phases must advance through resolve_votes")
         if game_ended and self.phase not in {GamePhase.EXECUTION, GamePhase.NIGHT}:
             raise ValueError("game_ended is only valid after death resolution")
+        if self.phase in {GamePhase.NIGHT0, GamePhase.NIGHT}:
+            self.resolve_pending_actions(now)
 
         next_phase = self._next_phase(game_ended=game_ended)
         self._enter_phase(next_phase, now)
@@ -289,6 +347,366 @@ class GameState:
             )
         )
         return True
+
+    def submit_action(
+        self,
+        now: int,
+        actor_player_id: str,
+        ability_id: str,
+        target_player_ids: Sequence[str],
+    ) -> None:
+        """Reserve an ability without changing game state until the night resolves."""
+
+        now = _timestamp(now)
+        if self.phase not in {GamePhase.NIGHT0, GamePhase.NIGHT}:
+            raise ValueError("abilities can only be submitted during a night phase")
+        if self.phase_started_at is None or self.phase_ends_at is None:
+            raise RuntimeError("night actions require an authoritative deadline")
+        if now < self.phase_started_at:
+            raise ValueError("abilities cannot be submitted before the phase starts")
+        if now >= self.phase_ends_at:
+            raise ValueError("abilities cannot be submitted after the deadline")
+        if self.night_actions_resolved:
+            raise ValueError("night actions have already been resolved")
+        actor = self._alive_player(actor_player_id, "action actor")
+        ability = self._ability_for(actor, ability_id)
+        self._validate_ability_available(actor, ability)
+        targets = self._validate_action_targets(actor, ability, target_player_ids)
+        self._validate_action_restrictions(actor, ability, targets)
+
+        reservation = ActionReservation(actor.player_id, ability.id, targets, now)
+        self.pending_actions[actor.player_id] = reservation
+        self.event_bus.publish(
+            GameEvent(
+                type="ACTION_SUBMITTED",
+                visibility=EventVisibility.SERVER,
+                payload={
+                    "day": self.day,
+                    "phase": self.phase.value,
+                    "actor_player_id": actor.player_id,
+                    "ability_id": ability.id,
+                    "target_player_ids": list(targets),
+                    "submitted_at": now,
+                },
+            )
+        )
+
+    def resolve_pending_actions(self, now: int) -> None:
+        """Resolve the final reservation for each actor at a night deadline exactly once."""
+
+        if self.phase not in {GamePhase.NIGHT0, GamePhase.NIGHT}:
+            raise ValueError("actions can only be resolved during a night phase")
+        now = _timestamp(now)
+        if self.phase_started_at is None or self.phase_ends_at is None:
+            raise RuntimeError("night actions require an authoritative deadline")
+        if now < self.phase_ends_at:
+            raise ValueError("actions cannot be resolved before their deadline")
+        if self.night_actions_resolved:
+            return
+
+        reservations = list(self.pending_actions.values())
+        reservations.extend(self._first_night_reservations(now))
+        scheduled: list[_ScheduledEffect] = []
+        for reservation in sorted(reservations, key=lambda item: item.actor_player_id):
+            actor = self._alive_player(reservation.actor_player_id, "action actor")
+            ability = self._ability_for(actor, reservation.ability_id)
+            self._consume_resolved_ability(reservation)
+            for effect in ability.effects:
+                scheduled.append(
+                    _ScheduledEffect(
+                        priority=effect.priority,
+                        effect_id=effect.id,
+                        actor_player_id=reservation.actor_player_id,
+                        ability_id=ability.id,
+                        target_player_ids=reservation.target_player_ids,
+                    )
+                )
+            self.event_bus.publish(
+                GameEvent(
+                    type="ACTION_RESOLVED",
+                    visibility=EventVisibility.SERVER,
+                    payload={
+                        "day": self.day,
+                        "phase": self.phase.value,
+                        "actor_player_id": reservation.actor_player_id,
+                        "ability_id": ability.id,
+                        "target_player_ids": list(reservation.target_player_ids),
+                    },
+                )
+            )
+
+        protected_player_ids: set[str] = set()
+        death_requests: dict[str, _DeathRequest] = {}
+        attack_targets_by_actor: dict[str, set[str]] = {}
+        pending_priorities = {70, *(effect.priority for effect in scheduled)}
+        processed_priorities: set[int] = set()
+        while pending_priorities:
+            priority = min(pending_priorities)
+            pending_priorities.remove(priority)
+            processed_priorities.add(priority)
+            effects = sorted(
+                (effect for effect in scheduled if effect.priority == priority),
+                key=lambda effect: (effect.effect_id, effect.actor_player_id, effect.ability_id),
+            )
+            for effect_id in sorted({effect.effect_id for effect in effects}):
+                group = [effect for effect in effects if effect.effect_id == effect_id]
+                if effect_id == "protect":
+                    protected_player_ids.update(
+                        target_player_id
+                        for effect in group
+                        for target_player_id in effect.target_player_ids
+                    )
+                elif effect_id == "inspect":
+                    for effect in group:
+                        self._resolve_inspect(effect, death_requests)
+                elif effect_id == "medium_inspect":
+                    for effect in group:
+                        self._resolve_medium_inspect(effect)
+                elif effect_id == "attack":
+                    self._resolve_attack_effects(
+                        group,
+                        protected_player_ids,
+                        death_requests,
+                        attack_targets_by_actor,
+                    )
+                elif effect_id == "inspect_role":
+                    for effect in group:
+                        self._resolve_inspect_dead_role(effect, attack_targets_by_actor)
+                elif effect_id == "kill":
+                    for effect in group:
+                        self._resolve_kill_effect(effect)
+                else:
+                    raise RuntimeError(f"effect '{effect_id}' has no Phase 1.5 implementation")
+
+            if priority == 70:
+                scheduled.extend(self._resolve_death_requests(death_requests))
+                pending_priorities.update(
+                    effect.priority
+                    for effect in scheduled
+                    if effect.priority not in processed_priorities
+                )
+
+        self.pending_actions.clear()
+        self.night_actions_resolved = True
+
+    def _first_night_reservations(self, now: int) -> list[ActionReservation]:
+        if self.phase is not GamePhase.NIGHT0 or self.rules.first_night_seer != "random_white":
+            return []
+
+        reservations: list[ActionReservation] = []
+        for actor in self.players.values():
+            if not actor.alive:
+                continue
+            for ability in actor.role.abilities:
+                if "inspect" not in {effect.id for effect in ability.effects}:
+                    continue
+                if ability.available_from_night > 0:
+                    continue
+                candidates = [
+                    player_id
+                    for player_id in self._valid_target_ids(actor, ability.target)
+                    if self._effective_attributes(self.players[player_id]).inspect_result == "not_wolf"
+                ]
+                if not candidates:
+                    continue
+                target_player_id = self.rng.choice(candidates)
+                reservations.append(
+                    ActionReservation(actor.player_id, ability.id, (target_player_id,), now)
+                )
+                self.event_bus.publish(
+                    GameEvent(
+                        type="FIRST_NIGHT_INSPECT_TARGET_SELECTED",
+                        visibility=EventVisibility.SERVER,
+                        payload={
+                            "actor_player_id": actor.player_id,
+                            "target_player_id": target_player_id,
+                        },
+                    )
+                )
+        return reservations
+
+    def _resolve_inspect(
+        self, effect: _ScheduledEffect, death_requests: dict[str, _DeathRequest]
+    ) -> None:
+        for target_player_id in effect.target_player_ids:
+            target = self._alive_player(target_player_id, "inspect target")
+            self.event_bus.publish(
+                GameEvent(
+                    type="INSPECT_RESULT",
+                    visibility=EventVisibility.PRIVATE,
+                    recipient_player_id=effect.actor_player_id,
+                    payload={
+                        "target_player_id": target.player_id,
+                        "result": self._effective_attributes(target).inspect_result,
+                    },
+                )
+            )
+            death_priority = self._on_inspected_kill_priority(target)
+            if death_priority is not None:
+                self._request_death(
+                    death_requests,
+                    target.player_id,
+                    CoreDeathCause.CURSED.value,
+                    death_priority,
+                )
+
+    def _resolve_medium_inspect(self, effect: _ScheduledEffect) -> None:
+        for target_player_id in effect.target_player_ids:
+            target = self.players[target_player_id]
+            self.medium_examined_deaths.add((effect.actor_player_id, target_player_id))
+            event = GameEvent(
+                type="MEDIUM_RESULT",
+                visibility=EventVisibility.PRIVATE,
+                recipient_player_id=effect.actor_player_id,
+                payload={
+                    "target_player_id": target_player_id,
+                    "result": self._effective_attributes(target).medium_result,
+                },
+            )
+            if self.rules.medium.notify_timing == "night":
+                self.event_bus.publish(event)
+            else:
+                self.queued_dawn_notifications.append(event)
+
+    def _resolve_attack_effects(
+        self,
+        effects: Sequence[_ScheduledEffect],
+        protected_player_ids: set[str],
+        death_requests: dict[str, _DeathRequest],
+        attack_targets_by_actor: dict[str, set[str]],
+    ) -> None:
+        direct_effects: list[_ScheduledEffect] = []
+        group_effects: list[_ScheduledEffect] = []
+        for effect in effects:
+            actor = self.players[effect.actor_player_id]
+            if len(effect.target_player_ids) > 1 or "werewolf" not in actor.role.tags:
+                direct_effects.append(effect)
+            else:
+                group_effects.append(effect)
+
+        for effect in direct_effects:
+            for target_player_id in effect.target_player_ids:
+                attack_targets_by_actor.setdefault(effect.actor_player_id, set()).add(target_player_id)
+                self._request_attack(
+                    target_player_id, effect.priority, protected_player_ids, death_requests
+                )
+        if not group_effects:
+            return
+        if self.rules.wolf_attack.target_decision != "majority":
+            raise NotImplementedError(
+                "wolf attack target_decision requires the Q28 decision before it can resolve"
+            )
+        tallies: dict[str, int] = {}
+        for effect in group_effects:
+            target_player_id = effect.target_player_ids[0]
+            tallies[target_player_id] = tallies.get(target_player_id, 0) + 1
+        highest = max(tallies.values())
+        candidates = tuple(sorted(target for target, count in tallies.items() if count == highest))
+        target_player_id = candidates[0] if len(candidates) == 1 else self.rng.choice(candidates)
+        if len(candidates) > 1:
+            self.event_bus.publish(
+                GameEvent(
+                    type="WOLF_ATTACK_TIE_RESOLVED_RANDOM",
+                    visibility=EventVisibility.SERVER,
+                    payload={
+                        "candidate_player_ids": list(candidates),
+                        "selected_player_id": target_player_id,
+                    },
+                )
+            )
+        self.event_bus.publish(
+            GameEvent(
+                type="WOLF_ATTACK_TARGET_RESOLVED",
+                visibility=EventVisibility.SERVER,
+                payload={
+                    "target_player_id": target_player_id,
+                    "tallies": dict(sorted(tallies.items())),
+                },
+            )
+        )
+        self._request_attack(
+            target_player_id,
+            group_effects[0].priority,
+            protected_player_ids,
+            death_requests,
+        )
+        for effect in group_effects:
+            attack_targets_by_actor.setdefault(effect.actor_player_id, set()).add(target_player_id)
+
+    def _request_attack(
+        self,
+        target_player_id: str,
+        priority: int,
+        protected_player_ids: set[str],
+        death_requests: dict[str, _DeathRequest],
+    ) -> None:
+        target = self._alive_player(target_player_id, "attack target")
+        if target.player_id in protected_player_ids:
+            for protector_player_id, reservation in self.pending_actions.items():
+                if target.player_id in reservation.target_player_ids:
+                    ability = self._ability_for(self.players[protector_player_id], reservation.ability_id)
+                    if "protect" in {effect.id for effect in ability.effects}:
+                        self.event_bus.publish(
+                            GameEvent(
+                                type="GUARD_SUCCEEDED",
+                                visibility=EventVisibility.PRIVATE,
+                                recipient_player_id=protector_player_id,
+                                payload={"target_player_id": target.player_id},
+                            )
+                        )
+            return
+        if self._effective_attributes(target).attack_result != "die":
+            return
+        self._request_death(death_requests, target.player_id, CoreDeathCause.ATTACKED.value, priority)
+
+    def _resolve_inspect_dead_role(
+        self, effect: _ScheduledEffect, attack_targets_by_actor: Mapping[str, set[str]]
+    ) -> None:
+        for target_player_id in sorted(
+            attack_targets_by_actor.get(effect.actor_player_id, set(effect.target_player_ids))
+        ):
+            death = self.death_records.get(target_player_id)
+            if death is None or death.cause != CoreDeathCause.ATTACKED.value:
+                continue
+            self.event_bus.publish(
+                GameEvent(
+                    type="INSPECT_DEAD_ROLE_RESULT",
+                    visibility=EventVisibility.PRIVATE,
+                    recipient_player_id=effect.actor_player_id,
+                    payload={"target_player_id": target_player_id, "role_id": self.players[target_player_id].role.id},
+                )
+            )
+
+    def _resolve_kill_effect(self, effect: _ScheduledEffect) -> None:
+        if effect.death_cause is None:
+            raise RuntimeError("a kill effect must declare its internal death cause")
+        for target_player_id in effect.target_player_ids:
+            if self.players[target_player_id].alive:
+                self._record_player_death(target_player_id, effect.death_cause)
+
+    def _request_death(
+        self,
+        requests: dict[str, _DeathRequest],
+        player_id: str,
+        cause: str,
+        priority: int,
+    ) -> None:
+        previous = requests.get(player_id)
+        if previous is None or priority < previous.priority:
+            requests[player_id] = _DeathRequest(player_id, cause, priority)
+
+    def _resolve_death_requests(
+        self, requests: Mapping[str, _DeathRequest]
+    ) -> list[_ScheduledEffect]:
+        scheduled: list[_ScheduledEffect] = []
+        for request in sorted(requests.values(), key=lambda item: (item.priority, item.player_id)):
+            if self.players[request.player_id].alive:
+                scheduled.extend(
+                    self._record_player_death(
+                        request.player_id, request.cause, collect_passive_effects=True
+                    )
+                )
+        return scheduled
 
     def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
         """Reserve or replace one alive player's vote for the current vote round.
@@ -479,7 +897,13 @@ class GameState:
             )
         )
 
-    def _record_player_death(self, player_id: str | None, internal_cause: str) -> None:
+    def _record_player_death(
+        self,
+        player_id: str | None,
+        internal_cause: str,
+        *,
+        collect_passive_effects: bool = False,
+    ) -> list[_ScheduledEffect]:
         if player_id is None:
             raise RuntimeError("a death event must identify a player")
         player = self._alive_player(player_id, "dying player")
@@ -487,6 +911,12 @@ class GameState:
             raise RuntimeError(f"content must register death cause '{internal_cause}'")
         phase_at_death = self.phase
         self.players[player.player_id] = replace(player, alive=False)
+        self.death_records[player.player_id] = DeathRecord(
+            player_id=player.player_id,
+            cause=internal_cause,
+            phase=phase_at_death,
+            day=self.day,
+        )
         self.event_bus.publish(
             GameEvent(
                 type="PLAYER_DIED",
@@ -511,6 +941,10 @@ class GameState:
                 payload=payload,
             )
         )
+        if collect_passive_effects:
+            return self._scheduled_death_passive_effects(player, internal_cause)
+        self._resolve_death_passives_immediately(player, internal_cause)
+        return []
 
     def _validate_abstention(self, voter_player_id: str) -> None:
         abstain = self.rules.vote.abstain
@@ -528,6 +962,196 @@ class GameState:
                 self.abstentions_used[voter_player_id] = (
                     self.abstentions_used.get(voter_player_id, 0) + 1
                 )
+
+    def _ability_for(self, player: Player, ability_id: str) -> Ability:
+        for ability in player.role.abilities:
+            if ability.id == ability_id:
+                return ability
+        raise ValueError(f"player '{player.player_id}' does not have ability '{ability_id}'")
+
+    def _validate_ability_available(self, actor: Player, ability: Ability) -> None:
+        timing = self.content.action_timings[ability.timing]
+        if self.phase.value not in timing.phases:
+            raise ValueError(f"ability '{ability.id}' is unavailable during phase '{self.phase.value}'")
+        night_number = _night_number(self.phase, self.day)
+        if night_number is None or ability.available_from_night > night_number:
+            raise ValueError(f"ability '{ability.id}' is unavailable on this night")
+        if self.phase is GamePhase.NIGHT0 and "inspect" in {effect.id for effect in ability.effects}:
+            if self.rules.first_night_seer != "free":
+                raise ValueError("the first-night inspection is not player-selected by the current rules")
+        key = (actor.player_id, ability.id)
+        if ability.uses.per_game is not None and self.ability_uses_per_game.get(key, 0) >= ability.uses.per_game:
+            raise ValueError(f"ability '{ability.id}' has no remaining game uses")
+        if ability.uses.per_night is not None and self.ability_uses_this_night.get(key, 0) >= ability.uses.per_night:
+            raise ValueError(f"ability '{ability.id}' has no remaining uses this night")
+
+    def _validate_action_targets(
+        self, actor: Player, ability: Ability, target_player_ids: Sequence[str]
+    ) -> tuple[str, ...]:
+        if isinstance(target_player_ids, str):
+            raise TypeError("action targets must be a sequence of player ids")
+        targets = tuple(target_player_ids)
+        if any(not isinstance(player_id, str) for player_id in targets):
+            raise TypeError("action target ids must be strings")
+        if len(targets) != ability.target.count:
+            raise ValueError(f"ability '{ability.id}' requires exactly {ability.target.count} target(s)")
+        if len(targets) != len(set(targets)):
+            raise ValueError("action targets must be unique")
+        valid_target_ids = set(self._valid_target_ids(actor, ability.target))
+        invalid = set(targets) - valid_target_ids
+        if invalid:
+            raise ValueError(
+                f"ability '{ability.id}' has invalid target(s): {', '.join(sorted(invalid))}"
+            )
+        return targets
+
+    def _validate_action_restrictions(
+        self, actor: Player, ability: Ability, targets: tuple[str, ...]
+    ) -> None:
+        for restriction in ability.restrictions:
+            if not self._enabled_when(restriction.enabled_when):
+                continue
+            if restriction.type == "no_same_target_consecutive":
+                if self.last_resolved_targets.get((actor.player_id, ability.id)) == targets:
+                    raise ValueError(f"ability '{ability.id}' cannot target the same player consecutively")
+                continue
+            raise RuntimeError(f"restriction '{restriction.type}' has no Phase 1.5 implementation")
+
+    def _valid_target_ids(self, actor: Player, target: TargetSpec) -> tuple[str, ...]:
+        if target.selector == "alive_all":
+            return tuple(player_id for player_id, player in self.players.items() if player.alive)
+        if target.selector == "alive_other":
+            return tuple(
+                player_id
+                for player_id, player in self.players.items()
+                if player.alive and player_id != actor.player_id
+            )
+        if target.selector in {"alive_by_tag", "alive_without_tag"}:
+            tag = target.options.get("tag")
+            if not isinstance(tag, str):
+                raise RuntimeError(f"selector '{target.selector}' requires a string tag")
+            include_tag = target.selector == "alive_by_tag"
+            return tuple(
+                player_id
+                for player_id, player in self.players.items()
+                if player.alive and ((tag in player.role.tags) == include_tag)
+            )
+        if target.selector == "unexamined_dead_by_cause":
+            causes = target.options.get("causes")
+            if not isinstance(causes, Sequence) or isinstance(causes, str):
+                raise RuntimeError("unexamined_dead_by_cause requires a causes sequence")
+            allowed_causes = set(causes)
+            return tuple(
+                player_id
+                for player_id, death in self.death_records.items()
+                if death.cause in allowed_causes
+                and (actor.player_id, player_id) not in self.medium_examined_deaths
+            )
+        raise RuntimeError(f"selector '{target.selector}' has no Phase 1.5 implementation")
+
+    def _enabled_when(self, expression: str | None) -> bool:
+        if expression is None:
+            return True
+        path, expected = expression.removeprefix("rules.").split(" == ", maxsplit=1)
+        value: object = self.rules
+        for attribute in path.split("."):
+            value = getattr(value, attribute)
+        return value is (expected == "true")
+
+    def _consume_resolved_ability(self, reservation: ActionReservation) -> None:
+        player = self.players[reservation.actor_player_id]
+        ability = self._ability_for(player, reservation.ability_id)
+        key = (reservation.actor_player_id, reservation.ability_id)
+        self.ability_uses_this_night[key] = self.ability_uses_this_night.get(key, 0) + 1
+        if ability.uses.per_game is not None:
+            self.ability_uses_per_game[key] = self.ability_uses_per_game.get(key, 0) + 1
+        self.last_resolved_targets[key] = reservation.target_player_ids
+
+    @staticmethod
+    def _effective_attributes(player: Player):
+        return resolve_effective_attributes(
+            PlayerRoleState(player.player_id, player.role, player.modifiers)
+        )
+
+    @staticmethod
+    def _passives_for(player: Player) -> tuple[Passive, ...]:
+        return tuple(player.role.passives) + tuple(
+            passive for modifier in player.modifiers for passive in modifier.definition.passives
+        )
+
+    def _on_inspected_kill_priority(self, player: Player) -> int | None:
+        priorities = [
+            effect.priority
+            for passive in self._passives_for(player)
+            if passive.type == "on_inspected"
+            and any(rule.get("when", {}).get("event") == "inspected" for rule in passive.rules)
+            for effect in passive.effects
+            if effect.id == "kill"
+        ]
+        return min(priorities, default=None)
+
+    def _scheduled_death_passive_effects(
+        self, player: Player, internal_cause: str
+    ) -> list[_ScheduledEffect]:
+        scheduled: list[_ScheduledEffect] = []
+        for passive in self._passives_for(player):
+            if passive.type != "retaliate_on_death":
+                continue
+            for rule in passive.rules:
+                if rule.get("when", {}).get("death_cause") != internal_cause:
+                    continue
+                target = rule.get("target")
+                death_cause = rule.get("death_cause")
+                if not isinstance(target, Mapping) or not isinstance(death_cause, str):
+                    raise RuntimeError("retaliate_on_death requires target and death_cause declarations")
+                target_spec = TargetSpec(
+                    selector=target["selector"],
+                    count=target["count"],
+                    options={key: value for key, value in target.items() if key not in {"selector", "count"}},
+                )
+                candidates = list(self._valid_target_ids(player, target_spec))
+                if len(candidates) < target_spec.count:
+                    continue
+                if target.get("pick") != "random":
+                    raise RuntimeError("retaliate_on_death requires pick: random")
+                selected: list[str] = []
+                for _ in range(target_spec.count):
+                    picked = self.rng.choice(candidates)
+                    candidates.remove(picked)
+                    selected.append(picked)
+                self.event_bus.publish(
+                    GameEvent(
+                        type="PASSIVE_TARGET_SELECTED",
+                        visibility=EventVisibility.SERVER,
+                        payload={
+                            "passive_type": passive.type,
+                            "source_player_id": player.player_id,
+                            "candidate_player_ids": list(self._valid_target_ids(player, target_spec)),
+                            "selected_player_ids": selected,
+                        },
+                    )
+                )
+                for effect in passive.effects:
+                    if effect.id != "kill":
+                        raise RuntimeError(
+                            f"passive effect '{effect.id}' has no Phase 1.5 implementation"
+                        )
+                    scheduled.append(
+                        _ScheduledEffect(
+                            priority=effect.priority,
+                            effect_id=effect.id,
+                            actor_player_id=player.player_id,
+                            ability_id=f"passive:{passive.type}",
+                            target_player_ids=tuple(selected),
+                            death_cause=death_cause,
+                        )
+                    )
+        return scheduled
+
+    def _resolve_death_passives_immediately(self, player: Player, internal_cause: str) -> None:
+        scheduled = self._scheduled_death_passive_effects(player, internal_cause)
+        for effect in sorted(scheduled, key=lambda item: item.priority):
+            self._resolve_kill_effect(effect)
 
     def _alive_player(self, player_id: str, description: str) -> Player:
         try:
@@ -596,6 +1220,10 @@ class GameState:
         now = _timestamp(now)
         if phase is GamePhase.DAWN:
             self.day += 1
+        if phase in {GamePhase.NIGHT0, GamePhase.NIGHT}:
+            self.pending_actions.clear()
+            self.ability_uses_this_night.clear()
+            self.night_actions_resolved = False
         if phase is GamePhase.VOTE:
             self.pending_votes.clear()
             self.runoff_candidate_player_ids = ()
@@ -616,6 +1244,10 @@ class GameState:
                 },
             )
         )
+        if phase is GamePhase.DAWN:
+            for event in self.queued_dawn_notifications:
+                self.event_bus.publish(event)
+            self.queued_dawn_notifications.clear()
 
     def _record_game_created(self, player_configs: Sequence[PlayerConfig]) -> None:
         self.event_bus.publish(
