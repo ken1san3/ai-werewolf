@@ -228,9 +228,11 @@ rules:
   vote:
     runoff: true
     tie_after_runoff: no_lynch     # no_lynch | random
-    tie_without_runoff: no_lynch
-    skip_lynch_count: 0
-    no_selection: invalid_vote     # invalid_vote | skip_lynch
+    tie_without_runoff: no_lynch   # no_lynch | random
+    abstain:
+      enabled: true                # 「投票しない」を選べるか
+      max_per_player: null         # null=無制限 / 整数=1人あたりゲーム全体の上限
+    no_selection: invalid_vote     # 時間切れ未選択の扱い: invalid_vote | abstain
     self_vote: false
     reveal: hidden                 # hidden | live | after（投票先の公開範囲）
   guard:
@@ -286,6 +288,22 @@ options:
     values: [none, free, random_white]
     default: random_white
 ```
+
+### 投票の棄権
+
+プレイヤーは投票先として**人を選ぶか、「投票しない」を選ぶ**。
+「投票しない」は集計上ひとつの候補として数え、**最多得票なら処刑なし**とする。
+単に集計から除くのではない（除くだけなら無効票と区別がつかない）。
+
+- `abstain.enabled: false` のとき「投票しない」は選択肢に出ない
+- `abstain.max_per_player` は1人がゲーム全体で棄権できる回数の上限。
+  既定は無制限。使い切ったプレイヤーの選択肢から「投票しない」が外れる
+- `no_selection` は**時間切れで何も選ばなかった場合**の扱いであり、
+  棄権の選択とは別物。`invalid_vote` は集計から除外、`abstain` は棄権票として数える
+- **未選択者がいることだけを理由に、ラウンド全体を処刑なしにしてはならない**
+
+同数時の扱いは `tie_after_runoff` / `tie_without_runoff` の
+`no_lynch` / `random` で切り替える。
 
 役職欠け（`role_missing`）は bool ではなくオブジェクトとして持つ。
 置換先の Role をコアに埋め込むと「役職追加に Python の変更は要らない」という
