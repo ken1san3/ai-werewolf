@@ -16,11 +16,13 @@ Execution の制限時間は定義されていない。
   `phase_ends_at` をサーバ側の締切として検証する。
 - Night0 / Night は `rules.night_seconds`、Dawn は
   `rules.silence_after_dawn_seconds`、Day は `rules.day_seconds` を使う。
-  Dawn の `chat_enabled_at` はその終了時刻、Day は開始時刻とする。
+  Dawn は発言禁止時間そのものとし、Day 開始時から content が許可するチャットを使える。
 - Vote / Runoff / Execution は時間設定がないため `phase_ends_at` を持たない。
   Phase 1.4 の投票結果と Phase 1.6 の勝敗結果が、それぞれ遷移を明示して進める。
 - Day の延長は `rules.extension` の alive-player quorum と回数上限を満たすと、
   `seconds_per_extension` を現在の締切へ加算する。
+- Day の時短は `rules.shortening.enabled` と alive-player quorum を満たすと、
+  締切を合意時刻へ引き下げる。
 - Phase 1.3 は Effect を解決せず、role content の `available_from_night` と
   chat channel 宣言だけから、開始フェーズに利用可能な action を列挙する。
 

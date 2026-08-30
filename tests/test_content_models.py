@@ -147,6 +147,7 @@ class ContentLoadingTests(unittest.TestCase):
 
     def test_enabled_when_boolean_paths_are_derived_from_dataclasses(self) -> None:
         self.assertIn("guard.consecutive", _boolean_rule_paths(RulesConfig))
+        self.assertIn("shortening.enabled", _boolean_rule_paths(RulesConfig))
         self.assertEqual(_boolean_rule_paths(RulesConfigFixture), frozenset({"nested.enabled"}))
 
     def test_preset_loads_with_explicit_rules(self) -> None:
@@ -156,6 +157,7 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertFalse(preset.rules.guard.consecutive)
         self.assertFalse(preset.rules.role_missing.enabled)
         self.assertEqual(preset.rules.role_missing.replacement_role_id, "villager")
+        self.assertFalse(preset.rules.shortening.enabled)
 
     def test_role_missing_replacement_role_is_selected_from_yaml_rules(self) -> None:
         rules = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
@@ -191,6 +193,7 @@ class ContentLoadingTests(unittest.TestCase):
                 ability,
                 "test.ability",
                 self.content.effects,
+                self.content.action_timings,
                 self.content.selectors,
                 self.content.restriction_types,
                 self.content.death_causes,
@@ -204,6 +207,21 @@ class ContentLoadingTests(unittest.TestCase):
                 unknown_selector,
                 "test.ability",
                 self.content.effects,
+                self.content.action_timings,
+                self.content.selectors,
+                self.content.restriction_types,
+                self.content.death_causes,
+            )
+
+        unknown_timing = deepcopy(ability)
+        unknown_timing["effects"] = ["inspect"]
+        unknown_timing["timing"] = "unknown_timing"
+        with self.assertRaisesRegex(ContentValidationError, "unregistered action timing"):
+            _parse_ability(
+                unknown_timing,
+                "test.ability",
+                self.content.effects,
+                self.content.action_timings,
                 self.content.selectors,
                 self.content.restriction_types,
                 self.content.death_causes,
@@ -217,6 +235,7 @@ class ContentLoadingTests(unittest.TestCase):
                 unknown_restriction,
                 "test.ability",
                 self.content.effects,
+                self.content.action_timings,
                 self.content.selectors,
                 self.content.restriction_types,
                 self.content.death_causes,
@@ -232,6 +251,7 @@ class ContentLoadingTests(unittest.TestCase):
                 unknown_rule_path,
                 "test.ability",
                 self.content.effects,
+                self.content.action_timings,
                 self.content.selectors,
                 self.content.restriction_types,
                 self.content.death_causes,
@@ -321,6 +341,7 @@ class ContentLoadingTests(unittest.TestCase):
             self.content.passives,
             self.content.selectors,
             self.content.restriction_types,
+            self.content.action_timings,
             self.content.chat_channels,
             self.content.death_causes,
         )

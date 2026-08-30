@@ -17,6 +17,7 @@ import yaml
 
 from .models import (
     ATTRIBUTE_NAMES,
+    ActionTiming,
     Ability,
     AppliedModifier,
     AttributeOverrides,
@@ -42,6 +43,7 @@ from .models import (
     RoleMissingRules,
     RoleOption,
     RulesConfig,
+    ShorteningRules,
     TargetSpec,
     TargetSelector,
     Team,
@@ -65,6 +67,7 @@ class ContentPack:
     passives: Mapping[str, PassiveDefinition]
     selectors: Mapping[str, TargetSelector]
     restriction_types: Mapping[str, RestrictionType]
+    action_timings: Mapping[str, ActionTiming]
     chat_channels: Mapping[str, ChatChannel]
     death_causes: Mapping[str, DeathCause]
     modifiers: Mapping[str, Modifier]
@@ -105,6 +108,9 @@ _WIN_CONDITION_TYPES = frozenset(
 )
 _ENABLED_WHEN_PATTERN = re.compile(
     r"^rules\.(?P<path>[a-z_]+(?:\.[a-z_]+)*)\s*==\s*(?P<value>true|false)$"
+)
+_PHASE_IDS = frozenset(
+    {"setup", "night0", "dawn", "day", "vote", "runoff", "execution", "night", "game_end"}
 )
 
 
@@ -169,9 +175,16 @@ def load_content(content_root: str | Path) -> ContentPack:
         ),
         "restriction type",
     )
-    channels = _indexed(
+    action_timings = _index_models(
         (
-            _parse_named(item, "chat channel", f"chat_channels.yaml.chat_channels[{index}]")
+            _parse_action_timing(item, f"timings.yaml.timings[{index}]")
+            for index, item in enumerate(_list_at(root / "timings.yaml", "timings"))
+        ),
+        "action timing",
+    )
+    channels = _index_models(
+        (
+            _parse_chat_channel(item, f"chat_channels.yaml.chat_channels[{index}]")
             for index, item in enumerate(_list_at(root / "chat_channels.yaml", "chat_channels"))
         ),
         "chat channel",
@@ -195,9 +208,6 @@ def load_content(content_root: str | Path) -> ContentPack:
         identifier: RestrictionType(**record)
         for identifier, record in restriction_definitions.items()
     }
-    typed_channels = {
-        identifier: ChatChannel(**record) for identifier, record in channels.items()
-    }
     typed_causes = {
         identifier: DeathCause(**record) for identifier, record in death_causes.items()
     }
@@ -218,7 +228,8 @@ def load_content(content_root: str | Path) -> ContentPack:
             typed_passives,
             typed_selectors,
             typed_restrictions,
-            typed_channels,
+            action_timings,
+            channels,
             typed_causes,
         )
         if role.id in roles:
@@ -240,7 +251,7 @@ def load_content(content_root: str | Path) -> ContentPack:
                 typed_passives,
                 typed_selectors,
                 typed_restrictions,
-                typed_channels,
+                channels,
                 typed_causes,
             )
             if modifier.id in modifiers:
@@ -254,7 +265,8 @@ def load_content(content_root: str | Path) -> ContentPack:
         passives=typed_passives,
         selectors=typed_selectors,
         restriction_types=typed_restrictions,
-        chat_channels=typed_channels,
+        action_timings=action_timings,
+        chat_channels=channels,
         death_causes=typed_causes,
         modifiers=modifiers,
     )
@@ -328,6 +340,26 @@ def _parse_named(data: Any, kind: str, path: str) -> dict[str, str]:
     }
 
 
+def _parse_action_timing(data: Any, path: str) -> ActionTiming:
+    mapping = _mapping(data, path)
+    _keys(mapping, required={"id", "name", "phases"}, optional=set(), path=path)
+    return ActionTiming(
+        id=_identifier(mapping["id"], f"{path}.id"),
+        name=_non_empty_string(mapping["name"], f"{path}.name"),
+        phases=_phase_ids(mapping["phases"], f"{path}.phases", allow_empty=False),
+    )
+
+
+def _parse_chat_channel(data: Any, path: str) -> ChatChannel:
+    mapping = _mapping(data, path)
+    _keys(mapping, required={"id", "name", "phases"}, optional=set(), path=path)
+    return ChatChannel(
+        id=_identifier(mapping["id"], f"{path}.id"),
+        name=_non_empty_string(mapping["name"], f"{path}.name"),
+        phases=_phase_ids(mapping["phases"], f"{path}.phases", allow_empty=True),
+    )
+
+
 def _parse_role(
     data: Any,
     path: str,
@@ -336,6 +368,7 @@ def _parse_role(
     passive_definitions: Mapping[str, PassiveDefinition],
     selectors: Mapping[str, TargetSelector],
     restriction_types: Mapping[str, RestrictionType],
+    action_timings: Mapping[str, ActionTiming],
     channels: Mapping[str, ChatChannel],
     death_causes: Mapping[str, DeathCause],
 ) -> Role:
@@ -372,6 +405,7 @@ def _parse_role(
             item,
             f"{path}.abilities[{index}]",
             effects,
+            action_timings,
             selectors,
             restriction_types,
             death_causes,
@@ -464,6 +498,7 @@ def _parse_ability(
     data: Any,
     path: str,
     effects: Mapping[str, Effect],
+    action_timings: Mapping[str, ActionTiming],
     selectors: Mapping[str, TargetSelector],
     restriction_types: Mapping[str, RestrictionType],
     death_causes: Mapping[str, DeathCause],
@@ -507,7 +542,7 @@ def _parse_ability(
     )
     return Ability(
         id=_identifier(mapping["id"], f"{path}.id"),
-        timing=_identifier(mapping["timing"], f"{path}.timing"),
+        timing=_registered_id(mapping["timing"], f"{path}.timing", action_timings, "action timing"),
         available_from_night=_integer(mapping["available_from_night"], f"{path}.available_from_night", minimum=0),
         priority=ability_priority,
         target=TargetSpec(
@@ -684,6 +719,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
             "night_seconds",
             "silence_after_dawn_seconds",
             "extension",
+            "shortening",
             "win_evaluation_order",
         },
         optional=set(),
@@ -706,6 +742,9 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
     )
     extension = _parse_extension_rules(
         _mapping(data["extension"], f"{path}.rules.extension"), f"{path}.rules.extension"
+    )
+    shortening = _parse_shortening_rules(
+        _mapping(data["shortening"], f"{path}.rules.shortening"), f"{path}.rules.shortening"
     )
     order = tuple(_list(data["win_evaluation_order"], f"{path}.rules.win_evaluation_order"))
     if not order:
@@ -733,6 +772,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
             data["silence_after_dawn_seconds"], f"{path}.rules.silence_after_dawn_seconds", minimum=0
         ),
         extension=extension,
+        shortening=shortening,
         win_evaluation_order=order,
     )
 
@@ -819,6 +859,15 @@ def _parse_extension_rules(data: Mapping[str, Any], path: str) -> ExtensionRules
     )
 
 
+def _parse_shortening_rules(data: Mapping[str, Any], path: str) -> ShorteningRules:
+    _keys(data, required={"enabled", "approval"}, optional=set(), path=path)
+    _one_of(data["approval"], {"all", "majority"}, f"{path}.approval")
+    return ShorteningRules(
+        enabled=_boolean(data["enabled"], f"{path}.enabled"),
+        approval=data["approval"],
+    )
+
+
 def _validate_attributes(
     attributes: RoleAttributes, path: str, teams: Mapping[str, Team], *, allow_by_role: bool
 ) -> None:
@@ -853,6 +902,19 @@ def _channel_ids(value: Any, path: str, channels: Mapping[str, ChatChannel]) -> 
         if identifier not in channels and not identifier.startswith("private:"):
             raise ContentValidationError(f"{path} references unknown chat channel '{identifier}'")
     return ids
+
+
+def _phase_ids(value: Any, path: str, *, allow_empty: bool) -> tuple[str, ...]:
+    phases = tuple(_list(value, path))
+    if not phases and not allow_empty:
+        raise ContentValidationError(f"{path} must not be empty")
+    if len(phases) != len(set(phases)):
+        raise ContentValidationError(f"{path} contains duplicates")
+    for index, phase_id in enumerate(phases):
+        _identifier(phase_id, f"{path}[{index}]")
+        if phase_id not in _PHASE_IDS:
+            raise ContentValidationError(f"{path}[{index}] references unknown game phase '{phase_id}'")
+    return phases
 
 
 def _registered_ids(

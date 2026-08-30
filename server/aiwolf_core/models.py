@@ -77,6 +77,14 @@ class RestrictionType:
 class ChatChannel:
     id: str
     name: str
+    phases: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ActionTiming:
+    id: str
+    name: str
+    phases: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -311,6 +319,12 @@ class ExtensionRules:
 
 
 @dataclass(frozen=True)
+class ShorteningRules:
+    enabled: bool
+    approval: str
+
+
+@dataclass(frozen=True)
 class RulesConfig:
     first_night_seer: str
     vote: VoteRules
@@ -324,6 +338,7 @@ class RulesConfig:
     night_seconds: int
     silence_after_dawn_seconds: int
     extension: ExtensionRules
+    shortening: ShorteningRules
     win_evaluation_order: tuple[str, ...]
 
 

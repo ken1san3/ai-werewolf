@@ -1,0 +1,4 @@
+timings:
+  - id: night_action
+    name: 夜行動
+    phases: [night0, night]

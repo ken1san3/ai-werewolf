@@ -75,6 +75,19 @@ class GameStateTests(unittest.TestCase):
         self.assertEqual([event.sequence for event in game.event_bus.events], list(range(1, 12)))
         self.assertEqual(sink.events, list(game.event_bus.events))
 
+    def test_event_destination_must_be_explicit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "event_sink or explicit logs_root"):
+            GameState.create_from_preset(
+                self.content,
+                self.preset,
+                self.player_configs,
+                game_id="missing-event-destination",
+                rng=Random(19),
+            )
+
+        game = self.create_game(rng=Random(19), logs_root=None)
+        self.assertIsInstance(game.event_sink, InMemoryEventSink)
+
     def test_public_log_omits_role_assignment_and_private_log_records_it(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

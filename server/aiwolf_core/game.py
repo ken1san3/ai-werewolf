@@ -43,8 +43,8 @@ class GamePhase(str, Enum):
 
 
 @dataclass(frozen=True)
-class ActionSpec:
-    """One currently available action without resolving its target or effect."""
+class _PhaseActionKind:
+    """Phase-only action information, before Phase 1.7 builds ActionSpec."""
 
     type: str
     ability_id: str | None = None
@@ -56,6 +56,13 @@ class ActionSpec:
         if self.type == "chat" and self.channel and self.ability_id is None:
             return
         raise ValueError("an action must be either an ability or a chat action")
+
+
+class _UnspecifiedLogsRoot:
+    """Distinguish an omitted event destination from explicit in-memory logging."""
+
+
+_UNSPECIFIED_LOGS_ROOT = _UnspecifiedLogsRoot()
 
 
 @dataclass(frozen=True)
@@ -88,7 +95,6 @@ class GameState:
     phase: GamePhase = GamePhase.SETUP
     phase_started_at: int | None = None
     phase_ends_at: int | None = None
-    chat_enabled_at: int | None = None
     extensions_used: int = 0
     pending_actions: dict[str, object] = field(default_factory=dict)
 
@@ -100,7 +106,7 @@ class GameState:
         player_configs: Sequence[PlayerConfig],
         *,
         game_id: str,
-        logs_root: str | Path | None = None,
+        logs_root: str | Path | None | _UnspecifiedLogsRoot = _UNSPECIFIED_LOGS_ROOT,
         rng: RandomSource | None = None,
         event_sink: EventSink | None = None,
         started_at: int = 0,
@@ -125,9 +131,16 @@ class GameState:
         role_missing_candidates = _role_missing_candidates(preset.rules, role_ids)
 
         event_bus = EventBus()
-        sink = event_sink
-        if sink is None:
-            sink = JsonlEventLog(logs_root, game_id) if logs_root is not None else InMemoryEventSink()
+        if event_sink is not None:
+            if logs_root is not _UNSPECIFIED_LOGS_ROOT and logs_root is not None:
+                raise ValueError("logs_root and event_sink cannot both be provided")
+            sink = event_sink
+        elif logs_root is _UNSPECIFIED_LOGS_ROOT:
+            raise ValueError("an event_sink or explicit logs_root must be provided")
+        elif logs_root is None:
+            sink = InMemoryEventSink()
+        else:
+            sink = JsonlEventLog(logs_root, game_id)
         for visibility in EventVisibility:
             event_bus.subscribe(visibility, sink.record)
         state = cls(
@@ -183,10 +196,12 @@ class GameState:
     def advance_if_due(
         self, now: int, *, vote_tied: bool = False, game_ended: bool = False
     ) -> bool:
-        """Advance a timed phase only once its authoritative deadline has passed."""
+        """Advance only a deadline-driven phase once its authoritative time has passed."""
 
         now = _timestamp(now)
-        if self.phase_ends_at is None or now < self.phase_ends_at:
+        if self.phase_ends_at is None:
+            raise ValueError("advance_if_due requires a phase with a deadline")
+        if now < self.phase_ends_at:
             return False
         self.advance_phase(now, vote_tied=vote_tied, game_ended=game_ended)
         return True
@@ -204,16 +219,7 @@ class GameState:
         if now >= self.phase_ends_at or self.extensions_used >= self.rules.extension.max_count:
             return False
 
-        approvers = tuple(approver_player_ids)
-        if len(approvers) != len(set(approvers)):
-            raise ValueError("extension approvers must be unique")
-        alive_player_ids = {player_id for player_id, player in self.players.items() if player.alive}
-        unknown = set(approvers) - alive_player_ids
-        if unknown:
-            raise ValueError("extension approvers must be alive players")
-
-        required = _extension_approval_count(self.rules.extension.approval, len(alive_player_ids))
-        if len(approvers) < required:
+        if not self._has_alive_approval(approver_player_ids, self.rules.extension.approval):
             return False
 
         self.extensions_used += 1
@@ -232,8 +238,37 @@ class GameState:
         )
         return True
 
-    def get_available_actions(self, player_id: str) -> tuple[ActionSpec, ...]:
-        """List phase-legal actions from one player's permitted role declarations."""
+    def approve_day_shortening(self, now: int, approver_player_ids: Iterable[str]) -> bool:
+        """Set the Day deadline to now when the configured quorum approves shortening."""
+
+        now = _timestamp(now)
+        if self.phase is not GamePhase.DAY:
+            raise ValueError("time shortening is only available during the day phase")
+        if self.phase_started_at is None or self.phase_ends_at is None:
+            raise RuntimeError("the day phase must have a deadline")
+        if now < self.phase_started_at:
+            raise ValueError("time shortening cannot be approved before the day starts")
+        if now >= self.phase_ends_at or not self.rules.shortening.enabled:
+            return False
+        if not self._has_alive_approval(approver_player_ids, self.rules.shortening.approval):
+            return False
+
+        self.phase_ends_at = now
+        self.event_bus.publish(
+            GameEvent(
+                type="DAY_SHORTENED",
+                visibility=EventVisibility.PUBLIC,
+                payload={
+                    "day": self.day,
+                    "phase": self.phase.value,
+                    "phase_ends_at": self.phase_ends_at,
+                },
+            )
+        )
+        return True
+
+    def _phase_action_kinds(self, player_id: str) -> tuple[_PhaseActionKind, ...]:
+        """Return only the Phase 1.3 action kinds allowed by content declarations."""
 
         try:
             player = self.players[player_id]
@@ -242,22 +277,32 @@ class GameState:
         if not player.alive:
             return ()
 
-        actions: list[ActionSpec] = []
-        if self.phase in {GamePhase.NIGHT0, GamePhase.NIGHT}:
-            night_number = 0 if self.phase is GamePhase.NIGHT0 else self.day
-            actions.extend(
-                ActionSpec(type="ability", ability_id=ability.id)
-                for ability in player.role.abilities
-                if ability.timing == "night_action" and ability.available_from_night <= night_number
-            )
-            actions.extend(
-                ActionSpec(type="chat", channel=channel)
-                for channel in player.role.chat_channels
-                if channel not in {"public", "system"}
-            )
-        elif self.phase is GamePhase.DAY and "public" in player.role.chat_channels:
-            actions.append(ActionSpec(type="chat", channel="public"))
+        phase_id = self.phase.value
+        night_number = _night_number(self.phase, self.day)
+        actions: list[_PhaseActionKind] = []
+        for ability in player.role.abilities:
+            timing = self.content.action_timings[ability.timing]
+            if phase_id not in timing.phases:
+                continue
+            if night_number is not None and ability.available_from_night > night_number:
+                continue
+            actions.append(_PhaseActionKind(type="ability", ability_id=ability.id))
+        for channel_id in player.role.chat_channels:
+            channel = self.content.chat_channels[channel_id]
+            if phase_id in channel.phases:
+                actions.append(_PhaseActionKind(type="chat", channel=channel_id))
         return tuple(actions)
+
+    def _has_alive_approval(self, approver_player_ids: Iterable[str], approval: str) -> bool:
+        approvers = tuple(approver_player_ids)
+        if len(approvers) != len(set(approvers)):
+            raise ValueError("time-change approvers must be unique")
+        alive_player_ids = {player_id for player_id, player in self.players.items() if player.alive}
+        unknown = set(approvers) - alive_player_ids
+        if unknown:
+            raise ValueError("time-change approvers must be alive players")
+        required = _extension_approval_count(approval, len(alive_player_ids))
+        return len(approvers) >= required
 
     def _next_phase(self, *, vote_tied: bool, game_ended: bool) -> GamePhase:
         if self.phase is GamePhase.SETUP:
@@ -288,7 +333,6 @@ class GameState:
         self.phase_started_at = now
         duration = _phase_duration(phase, self.rules)
         self.phase_ends_at = now + duration if duration is not None else None
-        self.chat_enabled_at = _chat_enabled_at(phase, now, duration)
         self.event_bus.publish(
             GameEvent(
                 type="PHASE_STARTED",
@@ -297,7 +341,6 @@ class GameState:
                     "phase": self.phase.value,
                     "day": self.day,
                     "phase_ends_at": self.phase_ends_at,
-                    "chat_enabled_at": self.chat_enabled_at,
                 },
             )
         )
@@ -392,13 +435,11 @@ def _phase_duration(phase: GamePhase, rules: RulesConfig) -> int | None:
     return None
 
 
-def _chat_enabled_at(phase: GamePhase, now: int, duration: int | None) -> int | None:
-    if phase is GamePhase.DAY:
-        return now
-    if phase is GamePhase.DAWN:
-        if duration is None:
-            raise RuntimeError("the dawn phase must have a duration")
-        return now + duration
+def _night_number(phase: GamePhase, day: int) -> int | None:
+    if phase is GamePhase.NIGHT0:
+        return 0
+    if phase is GamePhase.NIGHT:
+        return day
     return None
 
 

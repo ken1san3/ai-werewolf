@@ -6,7 +6,6 @@ from random import Random
 import unittest
 
 from server.aiwolf_core import (
-    ActionSpec,
     GamePhase,
     GameState,
     InMemoryEventSink,
@@ -29,10 +28,11 @@ class PhaseManagerTests(unittest.TestCase):
             PlayerConfig(f"player-{index}", f"Player {index}") for index in range(1, 10)
         )
 
-    def create_game(self, *, rules=None, started_at: int = 100) -> GameState:
+    def create_game(self, *, content=None, rules=None, started_at: int = 100) -> GameState:
+        selected_content = content or self.content
         preset = replace(self.preset, rules=rules or self.preset.rules)
         return GameState.create_from_preset(
-            self.content,
+            selected_content,
             preset,
             self.player_configs,
             game_id="phase-test",
@@ -53,13 +53,12 @@ class PhaseManagerTests(unittest.TestCase):
         self.assertEqual(game.phase, GamePhase.NIGHT0)
         self.assertEqual(game.day, 0)
         self.assertEqual(game.phase_ends_at, 110)
-        self.assertIsNone(game.chat_enabled_at)
         self.assertFalse(game.advance_if_due(109))
 
         self.assertEqual(game.advance_phase(110), GamePhase.DAWN)
-        self.assertEqual((game.day, game.phase_ends_at, game.chat_enabled_at), (1, 113, 113))
+        self.assertEqual((game.day, game.phase_ends_at), (1, 113))
         self.assertEqual(game.advance_phase(113), GamePhase.DAY)
-        self.assertEqual((game.day, game.phase_ends_at, game.chat_enabled_at), (1, 133, 113))
+        self.assertEqual((game.day, game.phase_ends_at), (1, 133))
         self.assertEqual(game.advance_phase(133), GamePhase.VOTE)
         self.assertIsNone(game.phase_ends_at)
         self.assertEqual(game.advance_phase(133), GamePhase.EXECUTION)
@@ -83,6 +82,8 @@ class PhaseManagerTests(unittest.TestCase):
         )
         runoff_game = self.create_game(rules=runoff_rules)
         self._advance_to_vote(runoff_game)
+        with self.assertRaisesRegex(ValueError, "requires a phase with a deadline"):
+            runoff_game.advance_if_due(103)
         self.assertEqual(runoff_game.advance_phase(103, vote_tied=True), GamePhase.RUNOFF)
         self.assertEqual(runoff_game.advance_phase(103), GamePhase.EXECUTION)
 
@@ -105,28 +106,90 @@ class PhaseManagerTests(unittest.TestCase):
         guard_player = self._player_with_role(game, "guard")
 
         self.assertEqual(
-            game.get_available_actions(wolf_player),
-            (ActionSpec(type="chat", channel="wolf"),),
+            self._action_tuples(game._phase_action_kinds(wolf_player)),
+            (("chat", None, "wolf"),),
         )
         self.assertIn(
-            ActionSpec(type="ability", ability_id="inspect"),
-            game.get_available_actions(seer_player),
+            ("ability", "inspect", None),
+            self._action_tuples(game._phase_action_kinds(seer_player)),
         )
         self.assertNotIn(
-            ActionSpec(type="ability", ability_id="protect"),
-            game.get_available_actions(guard_player),
+            ("ability", "protect", None),
+            self._action_tuples(game._phase_action_kinds(guard_player)),
         )
 
         self._advance_to_vote(game)
         game.advance_phase(103)
         self.assertEqual(game.advance_phase(103), GamePhase.NIGHT)
         self.assertIn(
-            ActionSpec(type="ability", ability_id="attack"),
-            game.get_available_actions(wolf_player),
+            ("ability", "attack", None),
+            self._action_tuples(game._phase_action_kinds(wolf_player)),
         )
         self.assertIn(
-            ActionSpec(type="ability", ability_id="protect"),
-            game.get_available_actions(guard_player),
+            ("ability", "protect", None),
+            self._action_tuples(game._phase_action_kinds(guard_player)),
+        )
+        self.assertFalse(hasattr(game, "get_available_actions"))
+
+    def test_chat_channel_phase_declarations_allow_content_only_channel_renames(self) -> None:
+        renamed_timings = {
+            ("after_dark" if timing_id == "night_action" else timing_id): replace(
+                timing,
+                id="after_dark" if timing_id == "night_action" else timing.id,
+            )
+            for timing_id, timing in self.content.action_timings.items()
+        }
+        renamed_channels = {
+            ("day_chat" if channel_id == "public" else channel_id): replace(
+                channel,
+                id="day_chat" if channel_id == "public" else channel.id,
+            )
+            for channel_id, channel in self.content.chat_channels.items()
+        }
+        renamed_roles = {
+            role_id: replace(
+                role,
+                chat_channels=tuple(
+                    "day_chat" if channel_id == "public" else channel_id
+                    for channel_id in role.chat_channels
+                ),
+                abilities=tuple(
+                    replace(
+                        ability,
+                        timing="after_dark" if ability.timing == "night_action" else ability.timing,
+                    )
+                    for ability in role.abilities
+                ),
+            )
+            for role_id, role in self.content.roles.items()
+        }
+        renamed_content = replace(
+            self.content,
+            action_timings=renamed_timings,
+            chat_channels=renamed_channels,
+            roles=renamed_roles,
+        )
+        rules = replace(
+            self.preset.rules,
+            night_seconds=1,
+            silence_after_dawn_seconds=1,
+            day_seconds=1,
+        )
+        game = self.create_game(content=renamed_content, rules=rules)
+        self._advance_to_day(game)
+
+        player_id = next(iter(game.players))
+        self.assertIn(
+            ("chat", None, "day_chat"),
+            self._action_tuples(game._phase_action_kinds(player_id)),
+        )
+        game.advance_phase(103)
+        game.advance_phase(103)
+        game.advance_phase(103)
+        wolf_player = self._player_with_role(game, "werewolf")
+        self.assertIn(
+            ("ability", "attack", None),
+            self._action_tuples(game._phase_action_kinds(wolf_player)),
         )
 
     def test_day_extension_uses_the_configured_quorum_limit_and_duration(self) -> None:
@@ -153,16 +216,44 @@ class PhaseManagerTests(unittest.TestCase):
         all_rules = replace(
             majority_rules,
             extension=replace(majority_rules.extension, approval="all"),
+            shortening=replace(
+                majority_rules.shortening,
+                enabled=True,
+                approval="all",
+            ),
         )
         all_game = self.create_game(rules=all_rules)
         self._advance_to_day(all_game)
         all_player_ids = tuple(all_game.players)
         self.assertFalse(all_game.approve_day_extension(150, all_player_ids[:-1]))
         self.assertTrue(all_game.approve_day_extension(150, all_player_ids))
+        self.assertFalse(all_game.approve_day_shortening(150, all_player_ids[:-1]))
+        self.assertTrue(all_game.approve_day_shortening(150, all_player_ids))
+        self.assertEqual(all_game.advance_phase(150), GamePhase.VOTE)
+
+        shortening_rules = replace(
+            majority_rules,
+            shortening=replace(
+                majority_rules.shortening,
+                enabled=True,
+                approval="majority",
+            ),
+        )
+        shortening_game = self.create_game(rules=shortening_rules)
+        self._advance_to_day(shortening_game)
+        shortening_player_ids = tuple(shortening_game.players)
+        self.assertFalse(shortening_game.approve_day_shortening(150, shortening_player_ids[:4]))
+        self.assertTrue(shortening_game.approve_day_shortening(150, shortening_player_ids[:5]))
+        self.assertEqual(shortening_game.phase_ends_at, 150)
+        self.assertEqual(shortening_game.advance_phase(150), GamePhase.VOTE)
 
     @staticmethod
     def _player_with_role(game: GameState, role_id: str) -> str:
         return next(player_id for player_id, player in game.players.items() if player.role.id == role_id)
+
+    @staticmethod
+    def _action_tuples(actions: object) -> tuple[tuple[str, str | None, str | None], ...]:
+        return tuple((action.type, action.ability_id, action.channel) for action in actions)
 
     @staticmethod
     def _advance_to_day(game: GameState) -> None:

@@ -1,15 +1,22 @@
 chat_channels:
   - id: public
     name: 公開チャット
+    phases: [day]
   - id: wolf
     name: 人狼チャット
+    phases: [night0, night]
   - id: fox
     name: 妖狐チャット
+    phases: [night0, night]
   - id: lover
     name: 恋人チャット
+    phases: [night0, night]
   - id: system
     name: システム通知
+    phases: []
   - id: graveyard
     name: 墓場チャット
+    phases: []
   - id: spectator
     name: 観戦チャット
+    phases: []

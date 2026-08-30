@@ -32,6 +32,9 @@ rules:
     max_count: 0
     seconds_per_extension: 120
     approval: majority
+  shortening:
+    enabled: false
+    approval: majority
   win_evaluation_order: [village, wolf, fox]
 
 roles:
