@@ -76,6 +76,20 @@ game : -ngl 99 -c 8192 --jinja
 `--n-cpu-moe 999` が dev の要点。35B MoE のエキスパートを CPU/RAM 側へ逃がすことで
 8GB VRAM に収めている。
 
+## 使われたかを確認する
+
+`lib/llm.py` が呼び出しごとに `C:\AIagent\agent\usage.jsonl` へ1行書く。
+**自己申告ではなく実際の記録**である。
+
+```bat
+python tools\usage.py            :: 直近20件
+python tools\usage.py --today    :: 今日の分だけ
+```
+
+記録が無ければ「一度も使われていません」と出る。
+エージェントの報告と突き合わせるための客観記録であり、
+「使ったつもり」「言い忘れ」の両方を検出できる。
+
 ## 実測値（2026-08-30 / RTX 3070 Ti 8GB + i7-12700K + RAM 32GB）
 
 | profile | 生成 | プロンプト処理 |
