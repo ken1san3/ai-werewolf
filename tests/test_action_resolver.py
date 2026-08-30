@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Sequence, TypeVar
 import unittest
 
 from server.aiwolf_core import (
+    EventSink,
     EventVisibility,
     GamePhase,
     GameState,
     InMemoryEventSink,
+    JsonlEventLog,
     Player,
     load_content,
     load_preset,
@@ -42,8 +46,10 @@ class ActionResolverTests(unittest.TestCase):
         self.content = load_content(CONTENT_ROOT)
         self.preset = load_preset(PRESET_PATH, self.content)
 
-    def make_game(self, roles: dict[str, str], *, rules=None) -> GameState:
-        sink = InMemoryEventSink()
+    def make_game(
+        self, roles: dict[str, str], *, rules=None, event_sink: EventSink | None = None
+    ) -> GameState:
+        sink = event_sink or InMemoryEventSink()
         game = GameState(
             game_id="action-test",
             content=self.content,
@@ -61,7 +67,7 @@ class ActionResolverTests(unittest.TestCase):
         return game
 
     @staticmethod
-    def _event_bus(sink: InMemoryEventSink):
+    def _event_bus(sink: EventSink):
         from server.aiwolf_core import EventBus
 
         event_bus = EventBus()
@@ -337,6 +343,50 @@ class ActionResolverTests(unittest.TestCase):
             {"candidate_player_ids": ["first", "submitted"], "selected_player_id": "first"},
         )
 
+    def test_wolf_attack_tie_records_the_server_random_choice_and_hides_it_from_public_log(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            event_log = JsonlEventLog(Path(temporary_directory), "action-test")
+            game = self.make_game(
+                {
+                    "first_wolf": "werewolf",
+                    "second_wolf": "werewolf",
+                    "first": "villager",
+                    "second": "villager",
+                },
+                event_sink=event_log,
+            )
+            game.submit_action(101, "first_wolf", "attack", ("first",))
+            game.submit_action(101, "second_wolf", "attack", ("second",))
+            game.resolve_pending_actions(110)
+            public_entries = _read_jsonl(event_log.paths[EventVisibility.PUBLIC])
+
+        tie_event = next(
+            event
+            for event in game.event_bus.events
+            if event.type == "WOLF_ATTACK_TIE_RESOLVED_RANDOM"
+        )
+        self.assertEqual(tie_event.visibility, EventVisibility.SERVER)
+        self.assertEqual(
+            tie_event.payload,
+            {"candidate_player_ids": ["first", "second"], "selected_player_id": "first"},
+        )
+        self.assertEqual(game.rng.choice_inputs, [("first", "second")])
+        self.assertFalse(game.players["first"].alive)
+        self.assertTrue(game.players["second"].alive)
+        self.assertEqual(game.death_records["first"].cause, "attacked")
+        self.assertEqual(
+            [
+                event.type
+                for event in game.event_bus.events
+                if event.type
+                in {"WOLF_ATTACK_TIE_RESOLVED_RANDOM", "WOLF_ATTACK_TARGET_RESOLVED"}
+            ],
+            ["WOLF_ATTACK_TIE_RESOLVED_RANDOM", "WOLF_ATTACK_TARGET_RESOLVED"],
+        )
+        self.assertNotIn(
+            "WOLF_ATTACK_TIE_RESOLVED_RANDOM", [entry["type"] for entry in public_entries]
+        )
+
     def test_living_bakers_emit_one_public_notification_per_dawn_without_identity(self) -> None:
         game = self.make_game(
             {"first_baker": "baker", "second_baker": "baker", "wolf": "werewolf"}
@@ -515,6 +565,10 @@ class ActionResolverTests(unittest.TestCase):
         game.resolve_pending_actions(110)
 
         self.assertFalse(any(event.type == "INSPECT_RESULT" for event in game.event_bus.events))
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 if __name__ == "__main__":
