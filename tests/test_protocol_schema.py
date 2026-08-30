@@ -29,6 +29,11 @@ class ProtocolSchemaTests(unittest.TestCase):
             registry=registry,
             format_checker=format_checker,
         )
+        self.envelope_validator = Draft202012Validator(
+            {"$ref": f"{self.schema['$id']}#/$defs/envelope"},
+            registry=registry,
+            format_checker=format_checker,
+        )
 
     def test_schema_declares_language_independent_protocol_version_policy(self) -> None:
         self.assertEqual(
@@ -36,6 +41,7 @@ class ProtocolSchemaTests(unittest.TestCase):
         )
         self.assertEqual(self.schema["$id"], "urn:aiwolf:protocol:1.0")
         self.assertIn("major versions", self.schema["description"])
+        self.assertIn("only by seq", self.schema["description"])
         self.assertEqual(
             self.schema["$defs"]["protocol_version"]["pattern"],
             "^[0-9]+\\.[0-9]+$",
@@ -61,6 +67,19 @@ class ProtocolSchemaTests(unittest.TestCase):
         self.assert_valid(self.client_validator, request)
         self.assert_invalid(self.client_validator, dict(request, seq=1))
 
+    def test_common_schema_does_not_assign_message_types_to_a_direction(self) -> None:
+        self.assert_valid(
+            self.client_validator,
+            self.make_client_request(event_type="game.state_sync"),
+        )
+
+    def test_strict_envelope_rejects_unknown_header_fields(self) -> None:
+        request = self.make_client_request()
+        event = self.make_server_event()
+        self.assert_valid(self.envelope_validator, request)
+        self.assert_invalid(self.client_validator, dict(request, evil=True))
+        self.assert_invalid(self.server_validator, dict(event, admin=True))
+
     def test_action_rejected_requires_machine_readable_action_and_reason(self) -> None:
         rejected = self.make_server_event(
             event_type="action.rejected",
@@ -75,10 +94,6 @@ class ProtocolSchemaTests(unittest.TestCase):
             self.server_validator,
             dict(rejected, payload={"action": "", "reason": "invalid_target"}),
         )
-        self.assert_invalid(
-            self.client_validator,
-            self.make_client_request(event_type="action.rejected"),
-        )
 
     def test_common_identifiers_version_and_timestamp_are_validated(self) -> None:
         event = self.make_server_event()
@@ -91,6 +106,11 @@ class ProtocolSchemaTests(unittest.TestCase):
             dict(event, protocol_version="1"),
         )
         self.assert_invalid(self.server_validator, dict(event, timestamp=-1))
+
+    def test_client_timestamp_is_diagnostic_only(self) -> None:
+        description = self.schema["$defs"]["client_timestamp"]["description"]
+        self.assertIn("Client local timestamp", description)
+        self.assertIn("never uses it", description)
 
     @staticmethod
     def make_server_event(
