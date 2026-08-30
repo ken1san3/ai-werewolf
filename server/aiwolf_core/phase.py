@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 DAWN_PASSIVE_DISPATCH_IDS = frozenset({"public_notify_if_alive"})
 DAWN_PASSIVE_EFFECT_DISPATCH_IDS = frozenset({"public_notify"})
+TICK_NOOP_PHASES = frozenset({GamePhase.SETUP, GamePhase.GAME_END})
 
 
 class PhaseManager:
@@ -56,10 +57,26 @@ class PhaseManager:
         return self.game.phase
 
     def advance_if_due(self, now: int, *, game_ended: bool = False) -> bool:
-        """Advance only a deadline-driven phase once its authoritative time has passed."""
+        """Advance one core-owned tick step when the current phase is ready."""
 
         now = timestamp(now)
+        if self.game.phase in {GamePhase.VOTE, GamePhase.RUNOFF}:
+            if self.game.phase_ends_at is None:
+                raise RuntimeError("vote phases must have an authoritative deadline")
+            if now < self.game.phase_ends_at:
+                return False
+            from .voting import VoteResolver
+
+            VoteResolver(self.game).resolve(now)
+            return True
+        if self.game.phase is GamePhase.EXECUTION:
+            self.advance(now, game_ended=game_ended)
+            return True
         if self.game.phase_ends_at is None:
+            if self.game.phase not in TICK_NOOP_PHASES:
+                raise RuntimeError(
+                    f"phase '{self.game.phase.value}' has no core tick progression strategy"
+                )
             return False
         if now < self.game.phase_ends_at:
             return False

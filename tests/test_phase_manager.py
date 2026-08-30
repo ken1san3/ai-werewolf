@@ -75,6 +75,26 @@ class PhaseManagerTests(unittest.TestCase):
             ["night0", "dawn", "day", "vote", "execution", "night", "game_end"],
         )
 
+    def test_tick_resolves_votes_and_completes_execution_inside_the_core(self) -> None:
+        rules = replace(
+            self.preset.rules,
+            night_seconds=10,
+            silence_after_dawn_seconds=3,
+            day_seconds=20,
+            vote_seconds=4,
+            vote=replace(self.preset.rules.vote, runoff=False),
+        )
+        game = self.create_game(rules=rules)
+
+        self.assertTrue(game.advance_if_due(110))
+        self.assertTrue(game.advance_if_due(113))
+        self.assertTrue(game.advance_if_due(133))
+        self.assertEqual(game.phase, GamePhase.VOTE)
+        self.assertTrue(game.advance_if_due(137))
+        self.assertEqual(game.phase, GamePhase.EXECUTION)
+        self.assertTrue(game.advance_if_due(137))
+        self.assertEqual(game.phase, GamePhase.NIGHT)
+
     def test_runoff_is_selected_only_when_configured_and_the_vote_ties(self) -> None:
         runoff_rules = replace(
             self.preset.rules,

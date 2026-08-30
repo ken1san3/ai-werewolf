@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
+from dataclasses import replace
 from random import Random
 from pathlib import Path
 import unittest
@@ -25,9 +27,11 @@ GAME_ID = "123e4567-e89b-12d3-a456-426614174100"
 SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
 
 
-def make_game(game_id: str = GAME_ID) -> GameState:
+def make_game(game_id: str = GAME_ID, *, rules=None) -> GameState:
     content = load_content(PROJECT_ROOT / "content")
     preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
+    if rules is not None:
+        preset = replace(preset, rules=rules)
     players = [
         PlayerConfig(player_id=f"player-{index}", display_name=f"Player {index}")
         for index in range(sum(preset.role_counts.values()))
@@ -262,6 +266,42 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
 
 
 class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_server_ticker_completes_a_standard_game_without_manual_phase_calls(self) -> None:
+        content = load_content(PROJECT_ROOT / "content")
+        preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
+        rules = replace(
+            preset.rules,
+            night_seconds=1,
+            silence_after_dawn_seconds=1,
+            day_seconds=1,
+            vote_seconds=1,
+        )
+        game = make_game(rules=rules)
+        registry = GameRegistry({game.game_id: game})
+        current_time = 0
+
+        def tick_clock() -> int:
+            nonlocal current_time
+            current_time += 1
+            return current_time
+
+        server = WebSocketGameServer(
+            registry,
+            ticker=TickDriver(registry, clock=tick_clock),
+            tick_interval_seconds=0.001,
+        )
+        listener = await server.start("127.0.0.1", 0)
+        try:
+            with self.assertNoLogs("server.network.session", level="ERROR"):
+                for _ in range(40):
+                    if game.game_result is not None:
+                        break
+                    await asyncio.sleep(0.01)
+            self.assertIsNotNone(listener)
+            self.assertIsNotNone(game.game_result)
+        finally:
+            await server.close()
+
     async def test_websocket_join_sends_the_token_only_on_that_connection(self) -> None:
         game = make_game()
         registry = GameRegistry({game.game_id: game})
