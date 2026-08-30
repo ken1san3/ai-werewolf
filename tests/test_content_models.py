@@ -160,8 +160,11 @@ class ContentLoadingTests(unittest.TestCase):
         wise = self.content.roles["wise_werewolf"]
         self.assertEqual(wolf.attributes, greedy.attributes)
         self.assertEqual(wolf.attributes, wise.attributes)
+        self.assertEqual(wolf.tags, greedy.tags)
+        self.assertEqual(wolf.tags, wise.tags)
         self.assertNotEqual(wolf.abilities, greedy.abilities)
         self.assertNotEqual(wolf.abilities, wise.abilities)
+        self.assertNotEqual(greedy.abilities, wise.abilities)
 
     def test_wise_werewolf_declares_inspect_role_after_death_resolution(self) -> None:
         wise_ability = self.content.roles["wise_werewolf"].abilities[0]

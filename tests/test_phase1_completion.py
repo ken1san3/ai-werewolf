@@ -54,6 +54,16 @@ class PhaseOneCompletionTests(unittest.TestCase):
 
         self.assertEqual({player.role.id for player in game.players.values()}, set(self.content.roles))
         self.run_dummy_game(game)
+        event_types = {event.type for event in game.event_bus.events}
+        self.assertTrue(
+            {
+                "INSPECT_RESULT",
+                "MEDIUM_RESULT",
+                "GUARD_SUCCEEDED",
+                "INSPECT_DEAD_ROLE_RESULT",
+            }.issubset(event_types)
+        )
+        self.assertNotIn("ACTION_NO_SELECTION_RANDOM_TARGETS_SELECTED", event_types)
 
     def test_fox_nekomata_and_madman_variants_complete(self) -> None:
         cases = {
@@ -124,6 +134,9 @@ class PhaseOneCompletionTests(unittest.TestCase):
                 game.resolve_votes(game.phase_ends_at)
                 continue
 
+            if game.phase in {GamePhase.NIGHT0, GamePhase.NIGHT}:
+                self.submit_dummy_night_actions(game)
+
             now = game.phase_started_at if game.phase is GamePhase.EXECUTION else game.phase_ends_at
             if now is None:
                 self.fail(f"phase '{game.phase.value}' has no advance time")
@@ -144,6 +157,45 @@ class PhaseOneCompletionTests(unittest.TestCase):
                 else vote_action.valid_targets[0]
             )
             game.submit_vote(player_id, selected_target)
+
+    def submit_dummy_night_actions(self, game: GameState) -> None:
+        """Submit the first selectable ability for every actor's one-action reservation."""
+
+        now = game.phase_started_at
+        if now is None:
+            self.fail("night phase has no start time")
+        for player_id, player in game.players.items():
+            if not player.alive:
+                continue
+            for action in game.get_available_actions(player_id):
+                if (
+                    action.type != "ability"
+                    or action.ability_id is None
+                    or action.target_count is None
+                    or action.uses_remaining == 0
+                    or len(action.valid_targets) < action.target_count
+                ):
+                    continue
+                target_player_ids = self.dummy_ability_targets(
+                    game, action.ability_id, action.valid_targets, action.target_count
+                )
+                game.submit_action(
+                    now,
+                    player_id,
+                    action.ability_id,
+                    target_player_ids,
+                )
+                break
+
+    @staticmethod
+    def dummy_ability_targets(
+        game: GameState, ability_id: str, valid_targets: tuple[str, ...], target_count: int
+    ) -> tuple[str, ...]:
+        """Choose legal targets while covering both attack and guard resolution paths."""
+
+        if ability_id == "protect" and game.day == 1:
+            return valid_targets[-target_count:]
+        return valid_targets[:target_count]
 
     @staticmethod
     def dummy_vote_target(game: GameState) -> str:

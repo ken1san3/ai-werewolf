@@ -198,10 +198,10 @@ class GameStateTests(unittest.TestCase):
         )
 
     def test_game_core_does_not_call_the_random_module_directly(self) -> None:
-        game_source = (PROJECT_ROOT / "server" / "aiwolf_core" / "game.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("random.", game_source)
+        core_root = PROJECT_ROOT / "server" / "aiwolf_core"
+        for source_path in sorted(core_root.rglob("*.py")):
+            with self.subTest(module=source_path.relative_to(core_root)):
+                self.assertNotIn("random.", source_path.read_text(encoding="utf-8"))
 
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
