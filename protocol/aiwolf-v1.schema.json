@@ -78,6 +78,60 @@
       "unevaluatedProperties": false,
       "description": "A strict client-to-server request. Requests omit seq. The common envelope does not assign individual message types to a direction."
     },
+    "session_join_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "session.join" },
+            "payload": {
+              "type": "object",
+              "required": ["player_id"],
+              "properties": {
+                "player_id": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Initial binding of one pre-registered, unbound game seat."
+    },
+    "session_resume_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "session.resume" },
+            "payload": {
+              "type": "object",
+              "required": ["connection_token", "last_seq"],
+              "properties": {
+                "connection_token": { "type": "string", "minLength": 1 },
+                "last_seq": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Reconnect by bearer token without resubmitting a player id."
+    },
+    "session_ready_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "session.ready" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Mark the authenticated game seat as ready."
+    },
     "action_rejected_payload": {
       "type": "object",
       "required": ["action", "reason"],
@@ -123,6 +177,66 @@
       ],
       "unevaluatedProperties": false,
       "description": "A strict server-to-client event. seq is present only on this direction."
+    },
+    "session_joined_event": {
+      "allOf": [
+        { "$ref": "#/$defs/server_event" },
+        {
+          "properties": {
+            "type": { "const": "session.joined" },
+            "payload": {
+              "type": "object",
+              "required": ["player_id", "connection_token"],
+              "properties": {
+                "player_id": { "type": "string", "minLength": 1 },
+                "connection_token": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Private direct reply carrying the newly issued connection token."
+    },
+    "session_resumed_event": {
+      "allOf": [
+        { "$ref": "#/$defs/server_event" },
+        {
+          "properties": {
+            "type": { "const": "session.resumed" },
+            "payload": {
+              "type": "object",
+              "required": ["player_id", "last_seq"],
+              "properties": {
+                "player_id": { "type": "string", "minLength": 1 },
+                "last_seq": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Authenticated reconnect acknowledgement; state replay follows in Phase 2.5."
+    },
+    "session_ready_event": {
+      "allOf": [
+        { "$ref": "#/$defs/server_event" },
+        {
+          "properties": {
+            "type": { "const": "session.ready" },
+            "payload": {
+              "type": "object",
+              "required": ["player_id", "ready"],
+              "properties": {
+                "player_id": { "type": "string", "minLength": 1 },
+                "ready": { "const": true }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Private direct acknowledgement for an authenticated ready request."
     }
   }
 }
