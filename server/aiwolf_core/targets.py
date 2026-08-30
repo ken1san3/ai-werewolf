@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from .models import Passive, PlayerRoleState, TargetSpec, resolve_effective_attributes
 from .state import Player
 
 if TYPE_CHECKING:
     from .game import GameState
+
+
+TARGET_SELECTOR_DISPATCH_IDS = frozenset(
+    {
+        "alive_all",
+        "alive_by_tag",
+        "alive_other",
+        "alive_without_tag",
+        "unexamined_dead_by_cause",
+    }
+)
 
 
 def alive_player(game: GameState, player_id: str, description: str) -> Player:
@@ -42,6 +53,8 @@ def passives_for(player: Player) -> tuple[Passive, ...]:
 def valid_target_ids(game: GameState, actor: Player, target: TargetSpec) -> tuple[str, ...]:
     """Resolve a content-declared target selector against authoritative state."""
 
+    if target.selector not in TARGET_SELECTOR_DISPATCH_IDS:
+        raise RuntimeError(f"selector '{target.selector}' has no Phase 1.5 implementation")
     if target.selector == "alive_all":
         return tuple(player_id for player_id, player in game.players.items() if player.alive)
     if target.selector == "alive_other":

@@ -37,6 +37,9 @@ one of those features must not start and silently ignore it.
 - Adding a role remains YAML-only when it uses capabilities implemented by the
   selected build; selecting an unimplemented role produces a deterministic
   startup validation error instead of a silent no-op.
+- Phase 1 presets select roles only. If Phase 3 adds preset-selected Modifiers,
+  its loader must pass their selected definitions to
+  `unsupported_runtime_references(..., modifiers=...)` before game startup.
 
 ## Verification
 

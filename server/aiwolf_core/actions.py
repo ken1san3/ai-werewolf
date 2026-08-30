@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Mapping, Sequence
 
-from .capabilities import (
-    IMPLEMENTED_EFFECT_IDS,
-    IMPLEMENTED_RESTRICTION_TYPE_IDS,
-)
 from .clock import timestamp
 from .death import DeathResolver
 from .events import EventVisibility, GameEvent
@@ -18,6 +14,12 @@ from .targets import alive_player, effective_attributes, night_number, valid_tar
 if TYPE_CHECKING:
     from .game import GameState
     from .state import Player
+
+
+ACTION_EFFECT_DISPATCH_IDS = frozenset(
+    {"protect", "inspect", "medium_inspect", "attack", "inspect_role", "kill"}
+)
+ACTION_RESTRICTION_DISPATCH_IDS = frozenset({"no_same_target_consecutive"})
 
 
 class ActionResolver:
@@ -128,7 +130,7 @@ class ActionResolver:
                 key=lambda effect: (effect.effect_id, effect.actor_player_id, effect.ability_id),
             )
             for effect_id in sorted({effect.effect_id for effect in effects}):
-                if effect_id not in IMPLEMENTED_EFFECT_IDS:
+                if effect_id not in ACTION_EFFECT_DISPATCH_IDS:
                     raise RuntimeError(f"effect '{effect_id}' has no Phase 1.5 implementation")
                 group = [effect for effect in effects if effect.effect_id == effect_id]
                 if effect_id == "protect":
@@ -420,7 +422,7 @@ class ActionResolver:
         self, actor: Player, ability: Ability, targets: tuple[str, ...]
     ) -> None:
         for restriction in ability.restrictions:
-            if restriction.type not in IMPLEMENTED_RESTRICTION_TYPE_IDS:
+            if restriction.type not in ACTION_RESTRICTION_DISPATCH_IDS:
                 raise RuntimeError(
                     f"restriction '{restriction.type}' has no Phase 1.5 implementation"
                 )

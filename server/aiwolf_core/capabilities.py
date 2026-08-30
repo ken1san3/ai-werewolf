@@ -31,7 +31,13 @@ IMPLEMENTED_RESTRICTION_TYPE_IDS = frozenset({"no_same_target_consecutive"})
 def unsupported_runtime_references(
     roles: Iterable[Role], modifiers: Iterable[Modifier] = ()
 ) -> tuple[str, ...]:
-    """Return deterministic descriptions for content this core cannot execute."""
+    """Return deterministic descriptions for content this core cannot execute.
+
+    Phase 1 presets select only roles, so ``load_preset`` currently supplies
+    that concrete role set. When Phase 3 adds preset-selected modifiers, its
+    loader path must pass those selected modifier definitions through this
+    argument before a game may start.
+    """
 
     errors: list[str] = []
     for role in roles:
