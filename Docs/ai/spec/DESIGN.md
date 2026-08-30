@@ -280,7 +280,6 @@ rules:
     tie: random
   co:
     max_per_day: 3                 # 1人あたり1日のCO回数上限（null=制限なし）
-    allow_from_day2: true          # false のとき CO は1日目のみ。2日目以降は不可
     allow_villager_claim: false    # 市民を騙れるか
   death:
     public_detail: phase           # phase | cause | none
@@ -737,13 +736,17 @@ CO は自由発言ではなくシステム操作。
                "target_player_id": "bob", "claimed_result": "not_wolf" } }
 ```
 
-サーバは回数制限・2日目の可否・市民騙りの可否を管理する。
+サーバは回数制限と市民騙りの可否を管理する。
 **CO の内容が真実かどうかは検証しない。** 偽COは正当な操作である。
 
-`rules.co` は受付だけでなく `get_available_actions` の列挙にも効く。
-判定に必要な状態が揃っているものは、その時点で列挙に反映する
-（`allow_from_day2` は `day` だけで判定できる）。
-`max_per_day` と `allow_villager_claim` は Phase 2.4 の受付実装と同時に反映する。
+**CO が行えるのは「その昼に発言できるとき」であり、日数による制限は無い**
+（ユーザー確認済み）。したがって CO の列挙は日番号ではなく**発言可否から導く**。
+公開チャネルへの発言が列挙されない状況（死亡、Dawn の沈黙時間、Day 以外のフェーズ）では
+CO も列挙しない。両者を別々の条件で書かない。
+
+`rules.co` の残りは受付だけでなく列挙にも効くが、`max_per_day` は日ごとの
+カウンタを、`allow_villager_claim` は CO 内容の検証を必要とするため、
+どちらも Phase 2.4 の受付実装と同時に反映する。
 
 ---
 
