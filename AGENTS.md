@@ -51,6 +51,7 @@ Do not scan the whole repository unless necessary.
 | 参照実装の事実 | `Docs/ai/spec/JUDGMENT_REFERENCE.md` |
 | 運用ガイド | `Docs/ai/spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
 | 開発補助のローカルLLM | `Docs/ai/decisions/D034_LOCAL_LLM_DEV_ASSIST.md` |
+| ローカルLLM環境の構成 | `Docs/ai/spec/LOCAL_LLM_SETUP.md` |
 | Phase間引継ぎ | `Docs/ai/handoffs/` |
 | 設計判断 | `Docs/ai/decisions/` |
 | 失敗記録 | `Docs/ai/failures/` |
