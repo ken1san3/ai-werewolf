@@ -86,7 +86,7 @@ class ActionResolverTests(unittest.TestCase):
         game = self.make_game({"guard": "guard", "wolf": "werewolf", "target": "villager"})
         with self.assertRaisesRegex(ValueError, "exactly 1 target"):
             game.submit_action(101, "guard", "protect", ())
-        with self.assertRaisesRegex(ValueError, "invalid target"):
+        with self.assertRaisesRegex(ValueError, "cannot target the actor"):
             game.submit_action(101, "guard", "protect", ("guard",))
         with self.assertRaisesRegex(ValueError, "after the deadline"):
             game.submit_action(110, "guard", "protect", ("target",))
@@ -171,6 +171,138 @@ class ActionResolverTests(unittest.TestCase):
         enabled_game._enter_phase(GamePhase.NIGHT, 120)
         enabled_game.submit_action(121, "guard", "protect", ("target",))
 
+    def test_self_guard_is_derived_from_the_content_restriction(self) -> None:
+        disabled_game = self.make_game({"guard": "guard", "target": "villager"})
+        with self.assertRaisesRegex(ValueError, "cannot target the actor"):
+            disabled_game.submit_action(101, "guard", "protect", ("guard",))
+
+        enabled_game = self.make_game(
+            {"guard": "guard", "target": "villager"},
+            rules=replace(
+                self.preset.rules,
+                night_seconds=10,
+                guard=replace(self.preset.rules.guard, self_guard=True),
+            ),
+        )
+        enabled_game.submit_action(101, "guard", "protect", ("guard",))
+        self.assertEqual(enabled_game.pending_actions["guard"].target_player_ids, ("guard",))
+
+    def test_no_selection_random_uses_every_valid_target_and_records_the_result(self) -> None:
+        game = self.make_game({"seer": "seer", "first": "villager", "second": "villager"})
+
+        game.resolve_pending_actions(110)
+
+        selected = next(
+            event
+            for event in game.event_bus.events
+            if event.type == "ACTION_NO_SELECTION_RANDOM_TARGETS_SELECTED"
+        )
+        self.assertEqual(
+            selected.payload,
+            {
+                "actor_player_id": "seer",
+                "ability_id": "inspect",
+                "candidate_player_ids": ["first", "second"],
+                "selected_player_ids": ["first"],
+            },
+        )
+        result = next(event for event in game.event_bus.events if event.type == "INSPECT_RESULT")
+        self.assertEqual(result.payload["target_player_id"], "first")
+        self.assertEqual(game.ability_uses_this_night[("seer", "inspect")], 1)
+
+    def test_no_selection_skip_does_not_resolve_or_consume_an_ability(self) -> None:
+        game = self.make_game({"medium": "medium", "dead": "werewolf", "other": "villager"})
+        game._record_player_death("dead", "lynched")
+
+        game.resolve_pending_actions(110)
+
+        self.assertFalse(any(event.type == "MEDIUM_RESULT" for event in game.event_bus.events))
+        self.assertNotIn(("medium", "medium_inspect"), game.ability_uses_this_night)
+
+    def test_global_no_selection_rule_overrides_ability_declarations(self) -> None:
+        random_rules = replace(
+            self.preset.rules,
+            night_seconds=10,
+            night_action=replace(self.preset.rules.night_action, no_selection="random"),
+        )
+        random_game = self.make_game(
+            {"medium": "medium", "dead": "werewolf", "other": "villager"},
+            rules=random_rules,
+        )
+        random_game._record_player_death("dead", "lynched")
+        random_game.resolve_pending_actions(110)
+        self.assertTrue(any(event.type == "MEDIUM_RESULT" for event in random_game.event_bus.events))
+
+        skip_rules = replace(
+            self.preset.rules,
+            night_seconds=10,
+            night_action=replace(self.preset.rules.night_action, no_selection="skip"),
+        )
+        skip_game = self.make_game({"seer": "seer", "target": "villager"}, rules=skip_rules)
+        skip_game.resolve_pending_actions(110)
+        self.assertFalse(any(event.type == "INSPECT_RESULT" for event in skip_game.event_bus.events))
+        self.assertNotIn(("seer", "inspect"), skip_game.ability_uses_this_night)
+
+    def test_all_unselected_actions_resolve_before_the_night_phase_advances(self) -> None:
+        game = self.make_game(
+            {"wolf": "werewolf", "first": "villager", "second": "villager", "third": "villager"}
+        )
+
+        self.assertEqual(game.advance_phase(110), GamePhase.DAWN)
+        self.assertTrue(game.night_actions_resolved)
+        self.assertTrue(
+            any(
+                event.type == "ACTION_NO_SELECTION_RANDOM_TARGETS_SELECTED"
+                for event in game.event_bus.events
+            )
+        )
+
+    def test_random_wolf_attack_ignores_submitted_targets_and_records_its_selection(self) -> None:
+        rules = replace(
+            self.preset.rules,
+            night_seconds=10,
+            wolf_attack=replace(self.preset.rules.wolf_attack, target_decision="random"),
+        )
+        game = self.make_game(
+            {"first_wolf": "werewolf", "second_wolf": "werewolf", "first": "villager", "submitted": "villager"},
+            rules=rules,
+        )
+        game.submit_action(101, "first_wolf", "attack", ("submitted",))
+        game.submit_action(101, "second_wolf", "attack", ("submitted",))
+
+        game.resolve_pending_actions(110)
+
+        self.assertFalse(game.players["first"].alive)
+        self.assertTrue(game.players["submitted"].alive)
+        selected = next(
+            event
+            for event in game.event_bus.events
+            if event.type == "WOLF_ATTACK_TARGET_SELECTED_RANDOM"
+        )
+        self.assertEqual(
+            selected.payload,
+            {"candidate_player_ids": ["first", "submitted"], "selected_player_id": "first"},
+        )
+
+    def test_living_bakers_emit_one_public_notification_per_dawn_without_identity(self) -> None:
+        game = self.make_game(
+            {"first_baker": "baker", "second_baker": "baker", "wolf": "werewolf"}
+        )
+
+        game._enter_phase(GamePhase.DAWN, 110)
+        game._enter_phase(GamePhase.DAWN, 120)
+
+        notifications = [event for event in game.event_bus.events if event.type == "PUBLIC_NOTIFY"]
+        self.assertEqual(len(notifications), 2)
+        self.assertTrue(all(event.visibility is EventVisibility.PUBLIC for event in notifications))
+        self.assertTrue(all(event.payload == {"notify_id": "baker_alive"} for event in notifications))
+
+        game._record_player_death("first_baker", "attacked")
+        game._record_player_death("second_baker", "attacked")
+        game._enter_phase(GamePhase.DAWN, 130)
+
+        self.assertEqual(len([event for event in game.event_bus.events if event.type == "PUBLIC_NOTIFY"]), 2)
+
     def test_replacing_a_greedy_double_attack_does_not_consume_its_game_use(self) -> None:
         game = self.make_game({"greedy": "greedy_werewolf", "first": "villager", "last": "villager"})
         game.submit_action(101, "greedy", "double_attack", ("first", "last"))
@@ -233,6 +365,7 @@ class ActionResolverTests(unittest.TestCase):
         rules = replace(
             self.preset.rules,
             night_seconds=10,
+            night_action=replace(self.preset.rules.night_action, no_selection="skip"),
             medium=replace(self.preset.rules.medium, notify_timing="dawn"),
         )
         game = self.make_game(

@@ -8,10 +8,15 @@ from .actions import ActionResolver
 from .clock import timestamp
 from .events import EventVisibility, GameEvent
 from .models import GamePhase, RulesConfig
+from .targets import passives_for
 from .wins import WinEvaluator
 
 if TYPE_CHECKING:
     from .game import GameState
+
+
+DAWN_PASSIVE_DISPATCH_IDS = frozenset({"public_notify_if_alive"})
+DAWN_PASSIVE_EFFECT_DISPATCH_IDS = frozenset({"public_notify"})
 
 
 class PhaseManager:
@@ -152,9 +157,41 @@ class PhaseManager:
             )
         )
         if phase is GamePhase.DAWN:
+            self.emit_dawn_public_notifications()
             for event in self.game.queued_dawn_notifications:
                 self.game.event_bus.publish(event)
             self.game.queued_dawn_notifications.clear()
+
+    def emit_dawn_public_notifications(self) -> None:
+        """Publish each content-declared alive notification once per Dawn."""
+
+        notify_ids: set[str] = set()
+        for player in self.game.players.values():
+            if not player.alive:
+                continue
+            for passive in passives_for(player):
+                if passive.type not in DAWN_PASSIVE_DISPATCH_IDS:
+                    continue
+                for rule in passive.rules:
+                    when = rule.get("when", {})
+                    if when.get("event") != "dawn" or when.get("actor_alive") is not True:
+                        continue
+                    if any(
+                        effect.id not in DAWN_PASSIVE_EFFECT_DISPATCH_IDS
+                        for effect in passive.effects
+                    ):
+                        raise RuntimeError(
+                            f"passive '{passive.type}' has no Phase 1.5 implementation"
+                        )
+                    notify_ids.add(rule["notify_id"])
+        for notify_id in sorted(notify_ids):
+            self.game.event_bus.publish(
+                GameEvent(
+                    type="PUBLIC_NOTIFY",
+                    visibility=EventVisibility.PUBLIC,
+                    payload={"notify_id": notify_id},
+                )
+            )
 
     def next_phase(self, *, game_ended: bool) -> GamePhase:
         """Return the legal successor after non-vote work has completed."""

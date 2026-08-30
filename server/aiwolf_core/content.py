@@ -35,6 +35,7 @@ from .models import (
     GuardRules,
     Knowledge,
     MediumRules,
+    NightActionRules,
     Modifier,
     ModifierGrant,
     ModifierWinCondition,
@@ -555,6 +556,7 @@ def _parse_ability(
             "priority",
             "target",
             "uses",
+            "no_selection",
             "restrictions",
         },
         optional={"description", "effects"},
@@ -582,6 +584,8 @@ def _parse_ability(
         _parse_restriction(item, f"{path}.restrictions[{index}]", restriction_types)
         for index, item in enumerate(_list(mapping["restrictions"], f"{path}.restrictions"))
     )
+    no_selection = mapping["no_selection"]
+    _one_of(no_selection, {"random", "skip"}, f"{path}.no_selection")
     return Ability(
         id=_identifier(mapping["id"], f"{path}.id"),
         timing=_registered_id(mapping["timing"], f"{path}.timing", action_timings, "action timing"),
@@ -596,6 +600,7 @@ def _parse_ability(
             per_night=_optional_integer(uses_mapping["per_night"], f"{path}.uses.per_night", minimum=0),
             per_game=_optional_integer(uses_mapping["per_game"], f"{path}.uses.per_game", minimum=0),
         ),
+        no_selection=no_selection,
         restrictions=restrictions,
         effects=effect_references,
         description=_optional_string(mapping.get("description"), f"{path}.description"),
@@ -635,17 +640,37 @@ def _parse_passive(
         raise ContentValidationError(f"{path}.rules must contain at least one rule")
     for index, rule in enumerate(rules):
         _validate_death_cause_references(rule, f"{path}.rules[{index}]", death_causes)
+    effect_references = _parse_effect_references(
+        mapping.get("effects", []),
+        f"{path}.effects",
+        effects,
+        passive_priority,
+    )
+    if passive_type == "public_notify_if_alive":
+        _validate_public_notify_if_alive(rules, effect_references, path)
     return Passive(
         type=passive_type,
         priority=passive_priority,
         rules=rules,
-        effects=_parse_effect_references(
-            mapping.get("effects", []),
-            f"{path}.effects",
-            effects,
-            passive_priority,
-        ),
+        effects=effect_references,
     )
+
+
+def _validate_public_notify_if_alive(
+    rules: tuple[Mapping[str, Any], ...], effects: tuple[EffectReference, ...], path: str
+) -> None:
+    if {effect.id for effect in effects} != {"public_notify"}:
+        raise ContentValidationError(f"{path}.effects must contain only public_notify")
+    for index, rule in enumerate(rules):
+        rule_path = f"{path}.rules[{index}]"
+        _keys(rule, required={"when", "notify_id"}, optional=set(), path=rule_path)
+        when = _mapping(rule["when"], f"{rule_path}.when")
+        _keys(when, required={"event", "actor_alive"}, optional=set(), path=f"{rule_path}.when")
+        if when["event"] != "dawn":
+            raise ContentValidationError(f"{rule_path}.when.event must be dawn")
+        if _boolean(when["actor_alive"], f"{rule_path}.when.actor_alive") is not True:
+            raise ContentValidationError(f"{rule_path}.when.actor_alive must be true")
+        _identifier(rule["notify_id"], f"{rule_path}.notify_id")
 
 
 def _parse_options(data: Any, path: str) -> Mapping[str, RoleOption]:
@@ -752,6 +777,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
             "first_night_seer",
             "vote",
             "guard",
+            "night_action",
             "medium",
             "wolf_attack",
             "co",
@@ -772,6 +798,10 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         raise ContentValidationError(f"{path}.rules.first_night_seer is invalid")
     vote = _parse_vote_rules(_mapping(data["vote"], f"{path}.rules.vote"), f"{path}.rules.vote")
     guard = _parse_guard_rules(_mapping(data["guard"], f"{path}.rules.guard"), f"{path}.rules.guard")
+    night_action = _parse_night_action_rules(
+        _mapping(data["night_action"], f"{path}.rules.night_action"),
+        f"{path}.rules.night_action",
+    )
     medium = _parse_medium_rules(_mapping(data["medium"], f"{path}.rules.medium"), f"{path}.rules.medium")
     wolf_attack = _parse_wolf_attack_rules(
         _mapping(data["wolf_attack"], f"{path}.rules.wolf_attack"), f"{path}.rules.wolf_attack"
@@ -804,6 +834,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         first_night_seer=data["first_night_seer"],
         vote=vote,
         guard=guard,
+        night_action=night_action,
         medium=medium,
         wolf_attack=wolf_attack,
         co=co,
@@ -874,6 +905,14 @@ def _parse_guard_rules(data: Mapping[str, Any], path: str) -> GuardRules:
     )
 
 
+def _parse_night_action_rules(data: Mapping[str, Any], path: str) -> NightActionRules:
+    _keys(data, required={"no_selection"}, optional=set(), path=path)
+    no_selection = data["no_selection"]
+    if no_selection is not None:
+        _one_of(no_selection, {"random", "skip"}, f"{path}.no_selection")
+    return NightActionRules(no_selection)
+
+
 def _parse_medium_rules(data: Mapping[str, Any], path: str) -> MediumRules:
     _keys(data, required={"notify_timing", "targets"}, optional=set(), path=path)
     _one_of(data["notify_timing"], {"night", "dawn"}, f"{path}.notify_timing")
@@ -887,7 +926,7 @@ def _parse_medium_rules(data: Mapping[str, Any], path: str) -> MediumRules:
 
 def _parse_wolf_attack_rules(data: Mapping[str, Any], path: str) -> WolfAttackRules:
     _keys(data, required={"target_decision", "tie"}, optional=set(), path=path)
-    _one_of(data["target_decision"], {"majority", "designated", "random"}, f"{path}.target_decision")
+    _one_of(data["target_decision"], {"majority", "random"}, f"{path}.target_decision")
     _one_of(data["tie"], {"random"}, f"{path}.tie")
     return WolfAttackRules(data["target_decision"], data["tie"])
 

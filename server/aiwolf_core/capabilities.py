@@ -15,8 +15,10 @@ from .models import Ability, Modifier, Passive, Role
 IMPLEMENTED_EFFECT_IDS = frozenset(
     {"attack", "inspect", "medium_inspect", "protect", "kill", "inspect_role"}
 )
-IMPLEMENTED_PASSIVE_IDS = frozenset({"on_inspected", "retaliate_on_death"})
-IMPLEMENTED_PASSIVE_EFFECT_IDS = frozenset({"kill"})
+IMPLEMENTED_PASSIVE_IDS = frozenset(
+    {"on_inspected", "retaliate_on_death", "public_notify_if_alive"}
+)
+IMPLEMENTED_PASSIVE_EFFECT_IDS = frozenset({"kill", "public_notify"})
 IMPLEMENTED_SELECTOR_IDS = frozenset(
     {
         "alive_all",
@@ -26,7 +28,9 @@ IMPLEMENTED_SELECTOR_IDS = frozenset(
         "unexamined_dead_by_cause",
     }
 )
-IMPLEMENTED_RESTRICTION_TYPE_IDS = frozenset({"no_same_target_consecutive"})
+IMPLEMENTED_RESTRICTION_TYPE_IDS = frozenset(
+    {"no_same_target_consecutive", "no_self_target"}
+)
 
 
 def unsupported_runtime_references(

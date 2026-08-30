@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import combinations
 from typing import TYPE_CHECKING, Mapping, Sequence
 
 from .clock import timestamp
@@ -19,7 +20,9 @@ if TYPE_CHECKING:
 ACTION_EFFECT_DISPATCH_IDS = frozenset(
     {"protect", "inspect", "medium_inspect", "attack", "inspect_role", "kill"}
 )
-ACTION_RESTRICTION_DISPATCH_IDS = frozenset({"no_same_target_consecutive"})
+ACTION_RESTRICTION_DISPATCH_IDS = frozenset(
+    {"no_same_target_consecutive", "no_self_target"}
+)
 
 
 class ActionResolver:
@@ -86,6 +89,7 @@ class ActionResolver:
             return
 
         reservations = list(self.game.pending_actions.values())
+        reservations.extend(self.no_selection_reservations(now))
         reservations.extend(self.first_night_reservations(now))
         scheduled: list[ScheduledEffect] = []
         for reservation in sorted(reservations, key=lambda item: item.actor_player_id):
@@ -116,7 +120,7 @@ class ActionResolver:
                 )
             )
 
-        protected_player_ids: set[str] = set()
+        protectors_by_target: dict[str, set[str]] = {}
         death_requests: dict[str, DeathRequest] = {}
         attack_targets_by_actor: dict[str, set[str]] = {}
         pending_priorities = {70, *(effect.priority for effect in scheduled)}
@@ -134,11 +138,11 @@ class ActionResolver:
                     raise RuntimeError(f"effect '{effect_id}' has no Phase 1.5 implementation")
                 group = [effect for effect in effects if effect.effect_id == effect_id]
                 if effect_id == "protect":
-                    protected_player_ids.update(
-                        target_player_id
-                        for effect in group
-                        for target_player_id in effect.target_player_ids
-                    )
+                    for effect in group:
+                        for target_player_id in effect.target_player_ids:
+                            protectors_by_target.setdefault(target_player_id, set()).add(
+                                effect.actor_player_id
+                            )
                 elif effect_id == "inspect":
                     for effect in group:
                         self.resolve_inspect(effect, death_requests)
@@ -147,7 +151,7 @@ class ActionResolver:
                         self.resolve_medium_inspect(effect)
                 elif effect_id == "attack":
                     self.resolve_attack_effects(
-                        group, protected_player_ids, death_requests, attack_targets_by_actor
+                        group, protectors_by_target, death_requests, attack_targets_by_actor
                     )
                 elif effect_id == "inspect_role":
                     for effect in group:
@@ -166,6 +170,60 @@ class ActionResolver:
 
         self.game.pending_actions.clear()
         self.game.night_actions_resolved = True
+
+    def no_selection_reservations(self, now: int) -> list[ActionReservation]:
+        """Create server-selected reservations for unsubmitted random abilities."""
+
+        reservations: list[ActionReservation] = []
+        submitted_actor_ids = set(self.game.pending_actions)
+        for actor_player_id in sorted(self.game.players):
+            if actor_player_id in submitted_actor_ids:
+                continue
+            actor = self.game.players[actor_player_id]
+            if not actor.alive:
+                continue
+            for ability in actor.role.abilities:
+                if self.no_selection_behavior(ability) != "random":
+                    continue
+                try:
+                    self.validate_ability_available(actor, ability)
+                except ValueError:
+                    continue
+                target_options = self.random_target_options(actor, ability)
+                if not target_options:
+                    continue
+                option_ids = [str(index) for index in range(len(target_options))]
+                selected_targets = target_options[int(self.game.rng.choice(option_ids))]
+                candidates = valid_target_ids(self.game, actor, ability.target)
+                self.game.event_bus.publish(
+                    GameEvent(
+                        type="ACTION_NO_SELECTION_RANDOM_TARGETS_SELECTED",
+                        visibility=EventVisibility.SERVER,
+                        payload={
+                            "actor_player_id": actor.player_id,
+                            "ability_id": ability.id,
+                            "candidate_player_ids": list(candidates),
+                            "selected_player_ids": list(selected_targets),
+                        },
+                    )
+                )
+                reservations.append(ActionReservation(actor.player_id, ability.id, selected_targets, now))
+        return reservations
+
+    def no_selection_behavior(self, ability: Ability) -> str:
+        return self.game.rules.night_action.no_selection or ability.no_selection
+
+    def random_target_options(self, actor: Player, ability: Ability) -> tuple[tuple[str, ...], ...]:
+        """Return target combinations satisfying the same restrictions as submission."""
+
+        options: list[tuple[str, ...]] = []
+        for targets in combinations(valid_target_ids(self.game, actor, ability.target), ability.target.count):
+            try:
+                self.validate_restrictions(actor, ability, targets)
+            except ValueError:
+                continue
+            options.append(targets)
+        return tuple(options)
 
     def first_night_reservations(self, now: int) -> list[ActionReservation]:
         if self.game.phase is not GamePhase.NIGHT0 or self.game.rules.first_night_seer != "random_white":
@@ -244,7 +302,7 @@ class ActionResolver:
     def resolve_attack_effects(
         self,
         effects: Sequence[ScheduledEffect],
-        protected_player_ids: set[str],
+        protectors_by_target: Mapping[str, set[str]],
         death_requests: dict[str, DeathRequest],
         attack_targets_by_actor: dict[str, set[str]],
     ) -> None:
@@ -261,25 +319,32 @@ class ActionResolver:
             for target_player_id in effect.target_player_ids:
                 attack_targets_by_actor.setdefault(effect.actor_player_id, set()).add(target_player_id)
                 self.request_attack(
-                    target_player_id, effect.priority, protected_player_ids, death_requests
+                    target_player_id, effect.priority, protectors_by_target, death_requests
                 )
         if not group_effects:
             return
-        if self.game.rules.wolf_attack.target_decision != "majority":
-            raise NotImplementedError(
-                "wolf attack target_decision requires the Q28 decision before it can resolve"
+        if self.game.rules.wolf_attack.target_decision == "random":
+            candidates = tuple(
+                sorted(
+                    {
+                        target_player_id
+                        for effect in group_effects
+                        for target_player_id in valid_target_ids(
+                            self.game,
+                            self.game.players[effect.actor_player_id],
+                            self.ability_for(
+                                self.game.players[effect.actor_player_id], effect.ability_id
+                            ).target,
+                        )
+                    }
+                )
             )
-        tallies: dict[str, int] = {}
-        for effect in group_effects:
-            target_player_id = effect.target_player_ids[0]
-            tallies[target_player_id] = tallies.get(target_player_id, 0) + 1
-        highest = max(tallies.values())
-        candidates = tuple(sorted(target for target, count in tallies.items() if count == highest))
-        target_player_id = candidates[0] if len(candidates) == 1 else self.game.rng.choice(candidates)
-        if len(candidates) > 1:
+            if not candidates:
+                return
+            target_player_id = self.game.rng.choice(candidates)
             self.game.event_bus.publish(
                 GameEvent(
-                    type="WOLF_ATTACK_TIE_RESOLVED_RANDOM",
+                    type="WOLF_ATTACK_TARGET_SELECTED_RANDOM",
                     visibility=EventVisibility.SERVER,
                     payload={
                         "candidate_player_ids": list(candidates),
@@ -287,6 +352,26 @@ class ActionResolver:
                     },
                 )
             )
+            tallies: dict[str, int] = {}
+        else:
+            tallies = {}
+            for effect in group_effects:
+                target_player_id = effect.target_player_ids[0]
+                tallies[target_player_id] = tallies.get(target_player_id, 0) + 1
+            highest = max(tallies.values())
+            candidates = tuple(sorted(target for target, count in tallies.items() if count == highest))
+            target_player_id = candidates[0] if len(candidates) == 1 else self.game.rng.choice(candidates)
+            if len(candidates) > 1:
+                self.game.event_bus.publish(
+                    GameEvent(
+                        type="WOLF_ATTACK_TIE_RESOLVED_RANDOM",
+                        visibility=EventVisibility.SERVER,
+                        payload={
+                            "candidate_player_ids": list(candidates),
+                            "selected_player_id": target_player_id,
+                        },
+                    )
+                )
         self.game.event_bus.publish(
             GameEvent(
                 type="WOLF_ATTACK_TARGET_RESOLVED",
@@ -295,7 +380,7 @@ class ActionResolver:
             )
         )
         self.request_attack(
-            target_player_id, group_effects[0].priority, protected_player_ids, death_requests
+            target_player_id, group_effects[0].priority, protectors_by_target, death_requests
         )
         for effect in group_effects:
             attack_targets_by_actor.setdefault(effect.actor_player_id, set()).add(target_player_id)
@@ -304,24 +389,20 @@ class ActionResolver:
         self,
         target_player_id: str,
         priority: int,
-        protected_player_ids: set[str],
+        protectors_by_target: Mapping[str, set[str]],
         death_requests: dict[str, DeathRequest],
     ) -> None:
         target = alive_player(self.game, target_player_id, "attack target")
-        if target.player_id in protected_player_ids:
-            for protector_player_id, reservation in self.game.pending_actions.items():
-                if target.player_id not in reservation.target_player_ids:
-                    continue
-                ability = self.ability_for(self.game.players[protector_player_id], reservation.ability_id)
-                if "protect" in {effect.id for effect in ability.effects}:
-                    self.game.event_bus.publish(
-                        GameEvent(
-                            type="GUARD_SUCCEEDED",
-                            visibility=EventVisibility.PRIVATE,
-                            recipient_player_id=protector_player_id,
-                            payload={"target_player_id": target.player_id},
-                        )
+        if target.player_id in protectors_by_target:
+            for protector_player_id in sorted(protectors_by_target[target.player_id]):
+                self.game.event_bus.publish(
+                    GameEvent(
+                        type="GUARD_SUCCEEDED",
+                        visibility=EventVisibility.PRIVATE,
+                        recipient_player_id=protector_player_id,
+                        payload={"target_player_id": target.player_id},
                     )
+                )
             return
         if effective_attributes(target).attack_result != "die":
             return
@@ -431,6 +512,10 @@ class ActionResolver:
             if restriction.type == "no_same_target_consecutive":
                 if self.game.last_resolved_targets.get((actor.player_id, ability.id)) == targets:
                     raise ValueError(f"ability '{ability.id}' cannot target the same player consecutively")
+                continue
+            if restriction.type == "no_self_target":
+                if actor.player_id in targets:
+                    raise ValueError(f"ability '{ability.id}' cannot target the actor")
                 continue
             raise RuntimeError(f"restriction '{restriction.type}' has no Phase 1.5 implementation")
 

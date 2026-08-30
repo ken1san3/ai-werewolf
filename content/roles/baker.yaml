@@ -13,5 +13,6 @@ passives:
       - when:
           event: dawn
           actor_alive: true
+        notify_id: baker_alive
     effects: [public_notify]
 options: {}

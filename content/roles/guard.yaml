@@ -11,14 +11,17 @@ abilities:
     available_from_night: 1
     priority: 30
     target:
-      selector: alive_other
+      selector: alive_all
       count: 1
     uses:
       per_night: 1
       per_game: null
+    no_selection: skip
     restrictions:
       - type: no_same_target_consecutive
         enabled_when: rules.guard.consecutive == false
+      - type: no_self_target
+        enabled_when: rules.guard.self_guard == false
     effects: [protect]
 passives: []
 options: {}

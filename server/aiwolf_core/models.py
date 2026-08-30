@@ -151,6 +151,7 @@ class Ability:
     priority: int
     target: TargetSpec
     uses: Uses
+    no_selection: str
     restrictions: tuple[Restriction, ...]
     effects: tuple[EffectReference, ...]
     description: str | None = None
@@ -318,6 +319,11 @@ class GuardRules:
 
 
 @dataclass(frozen=True)
+class NightActionRules:
+    no_selection: str | None
+
+
+@dataclass(frozen=True)
 class MediumRules:
     notify_timing: str
     targets: tuple[str, ...]
@@ -365,6 +371,7 @@ class RulesConfig:
     first_night_seer: str
     vote: VoteRules
     guard: GuardRules
+    night_action: NightActionRules
     medium: MediumRules
     wolf_attack: WolfAttackRules
     co: CoRules

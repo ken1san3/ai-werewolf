@@ -161,6 +161,20 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertEqual([(reference.id, reference.priority) for reference in fox.effects], [("kill", 40)])
         self.assertEqual([(reference.id, reference.priority) for reference in medium.effects], [("medium_inspect", 45)])
 
+    def test_abilities_declare_no_selection_and_guard_uses_a_reusable_self_restriction(self) -> None:
+        abilities = [
+            ability for role in self.content.roles.values() for ability in role.abilities
+        ]
+
+        self.assertTrue(abilities)
+        self.assertTrue(all(ability.no_selection in {"random", "skip"} for ability in abilities))
+        guard = self.content.roles["guard"].abilities[0]
+        self.assertEqual(guard.target.selector, "alive_all")
+        self.assertEqual(
+            {restriction.type for restriction in guard.restrictions},
+            {"no_same_target_consecutive", "no_self_target"},
+        )
+
     def test_enabled_when_boolean_paths_are_derived_from_dataclasses(self) -> None:
         self.assertIn("guard.consecutive", _boolean_rule_paths(RulesConfig))
         self.assertIn("shortening.enabled", _boolean_rule_paths(RulesConfig))
@@ -173,21 +187,21 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertFalse(preset.rules.guard.consecutive)
         self.assertFalse(preset.rules.role_missing.enabled)
         self.assertEqual(preset.rules.role_missing.replacement_role_id, "villager")
+        self.assertIsNone(preset.rules.night_action.no_selection)
         self.assertFalse(preset.rules.shortening.enabled)
         self.assertEqual(preset.rules.vote_seconds, 60)
         self.assertTrue(preset.rules.vote.abstain.enabled)
         self.assertIsNone(preset.rules.vote.abstain.max_per_player)
         self.assertEqual(preset.rules.vote.reveal, "hidden")
 
-    def test_preset_rejects_a_selected_role_with_unimplemented_runtime_features(self) -> None:
+    def test_preset_accepts_a_selected_role_with_public_notify_support(self) -> None:
         baker_preset = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))
         baker_preset["roles"] = {"baker": 1}
 
         with patch("server.aiwolf_core.content._load_yaml", return_value=baker_preset):
-            with self.assertRaisesRegex(
-                ContentValidationError, "unsupported passive 'public_notify_if_alive'"
-            ):
-                load_preset("baker_preset.yaml", self.content)
+            preset = load_preset("baker_preset.yaml", self.content)
+
+        self.assertEqual(preset.role_counts, {"baker": 1})
 
     def test_preset_rejects_a_passive_effect_without_a_passive_dispatch(self) -> None:
         invalid_passive = replace(
@@ -235,6 +249,7 @@ class ContentLoadingTests(unittest.TestCase):
             "priority": 50,
             "target": {"selector": "alive_other", "count": 1},
             "uses": {"per_night": 1, "per_game": None},
+            "no_selection": "skip",
             "restrictions": [],
             "effects": ["unknown_effect"],
         }
@@ -367,6 +382,17 @@ class ContentLoadingTests(unittest.TestCase):
         incomplete_order = deepcopy(base)
         incomplete_order["win_evaluation_order"] = ["village", "wolf"]
         for rules in (invalid_value, invalid_role_missing, unknown_key, incomplete_order):
+            with self.subTest(rules=rules):
+                with self.assertRaises(ContentValidationError):
+                    _parse_rules(rules, "test", self.content)
+
+    def test_night_action_and_wolf_attack_rule_vocabularies_are_strict(self) -> None:
+        base = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
+        invalid_no_selection = deepcopy(base)
+        invalid_no_selection["night_action"]["no_selection"] = "invalid"
+        removed_target_decision = deepcopy(base)
+        removed_target_decision["wolf_attack"]["target_decision"] = "designated"
+        for rules in (invalid_no_selection, removed_target_decision):
             with self.subTest(rules=rules):
                 with self.assertRaises(ContentValidationError):
                     _parse_rules(rules, "test", self.content)

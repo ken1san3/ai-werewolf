@@ -17,6 +17,7 @@ abilities:
     uses:
       per_night: 1
       per_game: null
+    no_selection: random
     restrictions: []
     effects: [attack]
   - id: double_attack
@@ -30,6 +31,7 @@ abilities:
     uses:
       per_night: 1
       per_game: 1
+    no_selection: skip
     restrictions: []
     effects: [attack]
 passives: []

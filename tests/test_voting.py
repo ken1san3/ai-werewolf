@@ -55,6 +55,7 @@ class VotingTests(unittest.TestCase):
                 night_seconds=1,
                 silence_after_dawn_seconds=1,
                 day_seconds=10,
+                night_action=replace(self.preset.rules.night_action, no_selection="skip"),
             ),
         )
         game = GameState.create_from_preset(
@@ -291,6 +292,7 @@ class VotingTests(unittest.TestCase):
             day_seconds=10,
             vote_seconds=10,
             vote=vote,
+            night_action=replace(self.preset.rules.night_action, no_selection="skip"),
         )
 
     @staticmethod

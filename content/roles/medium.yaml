@@ -17,6 +17,7 @@ abilities:
     uses:
       per_night: 1
       per_game: null
+    no_selection: skip
     restrictions: []
     effects: [medium_inspect]
 passives: []

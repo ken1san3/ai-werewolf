@@ -77,9 +77,9 @@ class DeathResolver:
 
         priorities: list[int] = []
         for passive in passives_for(player):
-            self._assert_passive_supported(passive.type, passive.effects)
             if passive.type != "on_inspected":
                 continue
+            self._assert_passive_supported(passive.type, passive.effects)
             priorities.extend(
                 effect.priority
                 for rule in passive.rules
@@ -96,9 +96,9 @@ class DeathResolver:
 
         scheduled: list[ScheduledEffect] = []
         for passive in passives_for(player):
-            self._assert_passive_supported(passive.type, passive.effects)
             if passive.type != "retaliate_on_death":
                 continue
+            self._assert_passive_supported(passive.type, passive.effects)
             for rule in passive.rules:
                 if rule.get("when", {}).get("death_cause") != internal_cause:
                     continue

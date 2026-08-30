@@ -1,3 +1,5 @@
 restriction_types:
   - id: no_same_target_consecutive
     name: 連続同一対象禁止
+  - id: no_self_target
+    name: 自己対象禁止
