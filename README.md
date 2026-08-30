@@ -111,7 +111,13 @@ print(content.roles["madman"].attributes)    # team=wolf, count_as=village, ...
 ## リポジトリ構成
 
 ```
-server/aiwolf_core/   データモデルと content ローダー
+server/aiwolf_core/   ゲームコア
+  models.py           データモデル（役職・陣営・能力・ルール）
+  content.py          YAML ローダーと厳格なバリデーション
+  game.py             権威状態の保持と公開 API
+  phase.py / voting.py / actions.py / death.py
+                      フェーズ遷移・投票・夜行動・死亡処理
+  events.py           可視性つきイベントバスとログ
 content/              役職・陣営・ルールプリセット（YAML）
 tests/
 scripts/ai_status.py  現在の状態を1画面で表示

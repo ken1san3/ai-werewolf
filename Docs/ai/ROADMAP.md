@@ -102,13 +102,14 @@
 - 生存者0人 → `draw`（全員敗北）
 - `GAME_ENDED` イベントと `GameResult`
 - 判定を走らせる位置（Execution 内・Night 内の各1回）
+- 評価は `GameState` へ追記せず、専用サービス（`WinEvaluator` 等）として置く（D025）
 
 含まない:
 - レーティング、戦績
 
 完了条件: TEST_POLICY §8 が通る
 
-参照: DESIGN.md §8 / TEST_POLICY §8
+参照: DESIGN.md §8 / TEST_POLICY §8 / D025
 
 ## 1.7 get_available_actions
 
@@ -118,13 +119,15 @@
   検証と列挙の両方を導く
 - プレイヤー視点で組み立てる（そのプレイヤーが知ってよい情報のみ）
 - 各フェーズの行動（チャット / CO / 投票 / 夜能力）
+- 列挙と検証も `GameState` へ追記せず、専用サービスとして置く（D025）。
+  `_phase_action_kinds` はここで公開 API へ置き換える
 
 含まない:
 - ネットワーク送信（Phase 2）
 
 完了条件: TEST_POLICY §10 が通る
 
-参照: DESIGN.md §9.3 §6.3 / TEST_POLICY §10
+参照: DESIGN.md §9.3 §6.3 / TEST_POLICY §10 / D025
 
 ## 1.8 13役職の動作確認と完走テスト
 

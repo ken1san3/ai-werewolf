@@ -53,7 +53,8 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 [ ] テスト実行（報告は成功数・失敗数・重要エラーのみ。全出力を貼らない）
 [ ] git diff 確認 → コミット
 [ ] CURRENT_STATE.md 更新（Current Phase / Completed / Next Task / Test Status）
-    Test Status には commit hash を入れる
+    Test Status には commit hash を入れる。
+    **Latest Review は書き換えない**（Reviewer の担当）
 [ ] 新しい判断があれば decisions/、再発しそうな失敗があれば failures/
 [ ] Phase 全体が完了したときのみ handoffs/PHASE<N>_HANDOFF.md を作成
 [ ] コミット後、人間へ `git push` を促す（エージェント環境に GitHub 認証情報は無い）
