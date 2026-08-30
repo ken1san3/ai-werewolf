@@ -60,7 +60,11 @@ class ActionAvailability(ActionConstraints):
 
     def phase_actions(self, player: Player, chat_actions: list[ActionSpec]) -> list[ActionSpec]:
         actions: list[ActionSpec] = []
-        if any(action.channel == "public" for action in chat_actions):
+        if any(
+            action.channel is not None
+            and self.game.content.chat_channels[action.channel].allows_co
+            for action in chat_actions
+        ):
             actions.extend((ActionSpec(type="co_declare"), ActionSpec(type="co_report")))
         if self.game.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
             return actions

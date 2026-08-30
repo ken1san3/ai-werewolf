@@ -207,6 +207,36 @@ class AvailableActionsTests(unittest.TestCase):
         )
         self.assertEqual(day_game.get_available_actions("villager"), [])
 
+    def test_co_actions_follow_renamed_content_channel(self) -> None:
+        town_square = replace(self.content.chat_channels["public"], id="town_square")
+        renamed_content = replace(
+            self.content,
+            chat_channels={
+                channel_id: channel
+                for channel_id, channel in self.content.chat_channels.items()
+                if channel_id != "public"
+            }
+            | {"town_square": town_square},
+            roles={
+                role_id: replace(
+                    role,
+                    chat_channels=tuple(
+                        "town_square" if channel_id == "public" else channel_id
+                        for channel_id in role.chat_channels
+                    ),
+                )
+                for role_id, role in self.content.roles.items()
+            },
+        )
+        game = self.make_game(
+            {"villager": "villager"}, content=renamed_content, phase=GamePhase.DAY
+        )
+
+        self.assertEqual(
+            [(action.type, action.channel) for action in game.get_available_actions("villager")],
+            [("chat", "town_square"), ("co_declare", None), ("co_report", None)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

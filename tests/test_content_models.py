@@ -34,6 +34,7 @@ from server.aiwolf_core.content import (
     _PHASE_IDS,
     _boolean_rule_paths,
     _parse_ability,
+    _parse_chat_channel,
     _parse_modifier,
     _parse_passive,
     _parse_role,
@@ -108,6 +109,23 @@ class ContentLoadingTests(unittest.TestCase):
             "lynched", "attacked", "retaliation", "cursed", "follow_death", "sudden_death", "ability"
         })
         self.assertEqual(set(self.content.death_causes), CORE_DEATH_CAUSE_IDS)
+
+    def test_chat_channel_co_permission_is_content_declared(self) -> None:
+        channel = _parse_chat_channel(
+            {"id": "test_square", "name": "テスト広場", "phases": ["day"], "allows_co": True},
+            "test_chat_channel",
+        )
+        self.assertTrue(channel.allows_co)
+        with self.assertRaisesRegex(ContentValidationError, "allows_co"):
+            _parse_chat_channel(
+                {"id": "missing_permission", "name": "権限なし", "phases": ["day"]},
+                "test_chat_channel",
+            )
+        with self.assertRaisesRegex(ContentValidationError, "must be a boolean"):
+            _parse_chat_channel(
+                {"id": "invalid_permission", "name": "無効権限", "phases": ["day"], "allows_co": 1},
+                "test_chat_channel",
+            )
 
     def test_phase_ids_are_derived_from_the_game_phase_enum(self) -> None:
         self.assertEqual(_PHASE_IDS, frozenset(phase.value for phase in GamePhase))
