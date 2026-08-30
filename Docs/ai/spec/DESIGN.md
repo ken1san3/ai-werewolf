@@ -279,9 +279,9 @@ rules:
     target_decision: majority      # majority | random（designated は未定義。§5 参照）
     tie: random
   co:
-    max_per_day: 3
-    allow_from_day2: true
-    allow_villager_claim: false
+    max_per_day: 3                 # 1人あたり1日のCO回数上限（null=制限なし）
+    allow_from_day2: true          # false のとき CO は1日目のみ。2日目以降は不可
+    allow_villager_claim: false    # 市民を騙れるか
   death:
     public_detail: phase           # phase | cause | none
   sudden_death:
@@ -739,6 +739,11 @@ CO は自由発言ではなくシステム操作。
 
 サーバは回数制限・2日目の可否・市民騙りの可否を管理する。
 **CO の内容が真実かどうかは検証しない。** 偽COは正当な操作である。
+
+`rules.co` は受付だけでなく `get_available_actions` の列挙にも効く。
+判定に必要な状態が揃っているものは、その時点で列挙に反映する
+（`allow_from_day2` は `day` だけで判定できる）。
+`max_per_day` と `allow_villager_claim` は Phase 2.4 の受付実装と同時に反映する。
 
 ---
 
