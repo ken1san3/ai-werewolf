@@ -129,7 +129,7 @@
 
 完了条件: TEST_POLICY §10 が通る
 
-参照: DESIGN.md §9.3 §6.3 / TEST_POLICY §10 / D025
+参照: DESIGN.md §9.4 §6.3 / TEST_POLICY §10 / D025
 
 ## 1.8 13役職の動作確認と完走テスト
 
@@ -154,30 +154,35 @@
 
 含む: 共通メッセージ形、`protocol_version`、`seq`、エラー（`action.rejected`）
 完了条件: 言語非依存のスキーマとして定義され、バージョン方針が決まっている
-参照: DESIGN.md §9.1 / OPEN_QUESTIONS Q6
+参照: DESIGN.md §9.2 / OPEN_QUESTIONS Q6
 
 ## 2.2 WebSocket サーバと Session
 
-含む: 接続、Join、Ready、切断
+含む: 接続、Join、Ready、切断、接続トークンの発行と照合（D028）、
+      1秒 tick による `advance_if_due` の駆動（D028）
 含まない: 再接続UI
 
 ## 2.3 公開と private の送信分離
 
-含む: ブロードキャストと個別送信の経路分離、チャットチャネルの権限管理
-完了条件: 権限の無いチャネルの内容が届かないことをテストで確認できる
-参照: DESIGN.md §4.6 / OPEN_QUESTIONS Q11
+含む: ブロードキャストと個別送信の経路分離、チャットチャネルの権限管理、
+      死亡者の情報範囲（`rules.graveyard`、D028）
+完了条件: 権限の無いチャネルの内容が届かないことをテストで確認できる。
+          死亡者が生存者以上の情報を受け取らない
+参照: DESIGN.md §4.6 / OPEN_QUESTIONS Q11 / D028
 
 ## 2.4 Chat / Vote / Ability / CO の受付
 
-含む: `co.declare` / `co.report`（D007）、行動の受理と拒否
-完了条件: 偽COをサーバが拒否しない。回数制限は拒否する
-参照: DESIGN.md §9.4 / TEST_POLICY §12
+含む: `co.declare` / `co.report`（D007）、行動の受理と拒否、
+      発言数の集計と突然死（`rules.sudden_death`、D028）
+完了条件: 偽COをサーバが拒否しない。回数制限は拒否する。
+          突然死の解決直後に勝敗判定が走る
+参照: DESIGN.md §9.5 §6.1 / TEST_POLICY §3 §12 / D028
 
 ## 2.5 状態配信
 
 含む: `player.list` / `player.deaths` / `player.action_state` / `game.state_sync`
 完了条件: 再接続したクライアントが `game.state_sync` だけで状態を復元できる
-参照: DESIGN.md §9.2 §9.3
+参照: DESIGN.md §9.3 §9.4
 
 ## 2.6 完走
 

@@ -11,7 +11,7 @@ Status: Accepted (2026-08-29) / ユーザー決定
 
 `co.declare` / `co.report` をプロトコルの一級イベントとして追加する。
 サーバは回数制限などを管理するが、**CO の内容が真実かどうかは検証しない。**
-詳細は `spec/DESIGN.md` §9.4。
+詳細は `spec/DESIGN.md` §9.5。
 
 ## Why
 

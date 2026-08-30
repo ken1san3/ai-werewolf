@@ -42,6 +42,9 @@
 - [ ] `first_night_seer: none` で Night0 に占いが行われない
 - [ ] Night0 で狩人が護衛した相手を Night1 で連続ガード制限なしに護衛できる
 - [ ] 投票同数かつ `runoff: true` で Runoff へ入り、`false` では入らない
+- [ ] `sudden_death.enabled: true` で、昼に一度も発言しなかった生存者が Day 終了時に死亡する
+- [ ] 突然死した者が続く Vote に参加できない
+- [ ] `sudden_death.enabled: false` で、昼に沈黙しても誰も死なない
 
 ## 4. 夜の解決
 
@@ -71,6 +74,9 @@
 - [ ] パン屋が2人生存していても `PUBLIC_NOTIFY` は Dawn ごとに1回だけ発行される
 - [ ] `PUBLIC_NOTIFY` の payload に `player_id` と人数が含まれない
 - [ ] パン屋が全員死亡した翌 Dawn から `PUBLIC_NOTIFY` が発行されない
+- [ ] `graveyard.reveal_roles: false` で、死亡者に他プレイヤーの役職が届かない
+- [ ] 死亡者が受け取るイベントが、生存者が受け取る public イベントを超えない
+- [ ] 再接続時、トークンが一致しない要求へ `game.state_sync` を返さない
 
 ## 6. 死因
 
@@ -104,6 +110,7 @@
 - [ ] 生存者0人が他のどの勝利条件よりも優先される
 - [ ] `win_evaluation_order` を入れ替えると勝者が変わる
 - [ ] 妖狐生存中に人狼が勝利条件を満たすと妖狐が勝つ
+- [ ] 突然死で最後の人狼が死んだ場合、Day 終了時に市民陣営が勝利する
 
 ## 9. 行動の予約と解決
 
