@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Mapping
 
-from .capabilities import IMPLEMENTED_EFFECT_IDS
 from .events import EventVisibility, GameEvent
 from .models import CoreDeathCause, GamePhase, TargetSpec
 from .state import DeathRecord, ScheduledEffect
@@ -17,6 +16,7 @@ if TYPE_CHECKING:
 
 
 PASSIVE_DISPATCH_IDS = frozenset({"on_inspected", "retaliate_on_death"})
+PASSIVE_EFFECT_DISPATCH_IDS = frozenset({"kill"})
 
 
 class DeathResolver:
@@ -170,7 +170,9 @@ class DeathResolver:
     def _assert_passive_supported(passive_type: str, effects: tuple) -> None:
         if passive_type not in PASSIVE_DISPATCH_IDS:
             raise RuntimeError(f"passive '{passive_type}' has no Phase 1.5 implementation")
-        unsupported_effects = [effect.id for effect in effects if effect.id not in IMPLEMENTED_EFFECT_IDS]
+        unsupported_effects = [
+            effect.id for effect in effects if effect.id not in PASSIVE_EFFECT_DISPATCH_IDS
+        ]
         if unsupported_effects:
             raise RuntimeError(
                 f"passive effect '{unsupported_effects[0]}' has no Phase 1.5 implementation"

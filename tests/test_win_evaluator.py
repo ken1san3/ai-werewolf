@@ -24,12 +24,20 @@ CONTENT_ROOT = PROJECT_ROOT / "content"
 PRESET_PATH = CONTENT_ROOT / "presets" / "standard_9.yaml"
 
 
+class FirstChoiceRandom:
+    def choice(self, sequence: list[str]) -> str:
+        return sequence[0]
+
+    def shuffle(self, sequence: list[str]) -> None:
+        return None
+
+
 class WinEvaluatorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.content = load_content(CONTENT_ROOT)
         self.preset = load_preset(PRESET_PATH, self.content)
 
-    def make_game(self, roles: dict[str, str], *, content=None, rules=None) -> GameState:
+    def make_game(self, roles: dict[str, str], *, content=None, rules=None, rng=None) -> GameState:
         sink = InMemoryEventSink()
         event_bus = EventBus()
         for visibility in EventVisibility:
@@ -42,7 +50,7 @@ class WinEvaluatorTests(unittest.TestCase):
                 player_id: Player(player_id, player_id, self.content.roles[role_id])
                 for player_id, role_id in roles.items()
             },
-            rng=Random(4),
+            rng=rng or Random(4),
             event_bus=event_bus,
             event_sink=sink,
             day=1,
@@ -93,6 +101,26 @@ class WinEvaluatorTests(unittest.TestCase):
         self.assertEqual(result.outcome, "draw")
         self.assertIsNone(result.winner_team)
         self.assertEqual(result.player_results, {"cat": "lost", "wolf": "lost"})
+
+    def test_vote_resolution_ends_with_village_victory_after_nekomata_kills_last_wolf(self) -> None:
+        game = self.make_game(
+            {"cat": "nekomata", "wolf": "werewolf", "villager": "villager"},
+            rng=FirstChoiceRandom(),
+        )
+        game._enter_phase(GamePhase.VOTE, 100)
+        game.submit_vote("cat", "wolf")
+        game.submit_vote("wolf", "cat")
+        game.submit_vote("villager", "cat")
+
+        game.resolve_votes(160)
+
+        self.assertEqual(game.phase, GamePhase.GAME_END)
+        self.assertEqual(game.game_result.winner_team, "village")
+        self.assertEqual(
+            game.game_result.player_results,
+            {"cat": "won", "wolf": "lost", "villager": "won"},
+        )
+        self.assertEqual(len([event for event in game.event_bus.events if event.type == "GAME_ENDED"]), 1)
 
     def test_draw_precedes_any_other_condition_when_everyone_is_dead(self) -> None:
         game = self.make_game({"wolf": "werewolf", "villager": "villager"})

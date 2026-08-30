@@ -16,6 +16,7 @@ IMPLEMENTED_EFFECT_IDS = frozenset(
     {"attack", "inspect", "medium_inspect", "protect", "kill", "inspect_role"}
 )
 IMPLEMENTED_PASSIVE_IDS = frozenset({"on_inspected", "retaliate_on_death"})
+IMPLEMENTED_PASSIVE_EFFECT_IDS = frozenset({"kill"})
 IMPLEMENTED_SELECTOR_IDS = frozenset(
     {
         "alive_all",
@@ -73,7 +74,7 @@ def _collect_passive_errors(source: str, passive: Passive, errors: list[str]) ->
     if passive.type not in IMPLEMENTED_PASSIVE_IDS:
         errors.append(f"{source} uses unsupported passive '{passive.type}'")
     for effect in passive.effects:
-        if effect.id not in IMPLEMENTED_EFFECT_IDS:
+        if effect.id not in IMPLEMENTED_PASSIVE_EFFECT_IDS:
             errors.append(f"{source} passive '{passive.type}' uses unsupported effect '{effect.id}'")
     for rule in passive.rules:
         target = rule.get("target")

@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from .game import GameState
 
 
+PRIMARY_WIN_CONDITION_DISPATCH_IDS = frozenset({"eliminate_role_tag", "count_parity"})
+
+
 class WinEvaluator:
     """Evaluate victory from content, effective attributes, and living players."""
 
@@ -131,14 +134,13 @@ class WinEvaluator:
         )
 
     def _condition_matches(self, condition: WinCondition) -> bool:
+        if condition.type not in PRIMARY_WIN_CONDITION_DISPATCH_IDS:
+            raise RuntimeError(f"unsupported primary win condition '{condition.type}'")
         evaluators: Mapping[str, Callable[[WinCondition], bool]] = {
             "eliminate_role_tag": self._eliminate_role_tag,
             "count_parity": self._count_parity,
         }
-        try:
-            return evaluators[condition.type](condition)
-        except KeyError as error:
-            raise RuntimeError(f"unsupported primary win condition '{condition.type}'") from error
+        return evaluators[condition.type](condition)
 
     def _eliminate_role_tag(self, condition: WinCondition) -> bool:
         tag = condition.data["tag"]

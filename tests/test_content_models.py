@@ -11,6 +11,7 @@ import yaml
 from server.aiwolf_core import (
     AppliedModifier,
     ContentValidationError,
+    EffectReference,
     PlayerRoleState,
     expire_modifiers_at_dawn,
     load_content,
@@ -187,6 +188,26 @@ class ContentLoadingTests(unittest.TestCase):
                 ContentValidationError, "unsupported passive 'public_notify_if_alive'"
             ):
                 load_preset("baker_preset.yaml", self.content)
+
+    def test_preset_rejects_a_passive_effect_without_a_passive_dispatch(self) -> None:
+        invalid_passive = replace(
+            self.content.roles["nekomata"].passives[0],
+            effects=(EffectReference("attack", 78),),
+        )
+        invalid_role = replace(self.content.roles["nekomata"], passives=(invalid_passive,))
+        invalid_content = replace(
+            self.content,
+            roles={**self.content.roles, invalid_role.id: invalid_role},
+        )
+        nekomata_preset = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))
+        nekomata_preset["roles"] = {"nekomata": 1}
+
+        with patch("server.aiwolf_core.content._load_yaml", return_value=nekomata_preset):
+            with self.assertRaisesRegex(
+                ContentValidationError,
+                "passive 'retaliate_on_death' uses unsupported effect 'attack'",
+            ):
+                load_preset("nekomata_preset.yaml", invalid_content)
 
     def test_role_missing_replacement_role_is_selected_from_yaml_rules(self) -> None:
         rules = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
