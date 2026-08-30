@@ -232,6 +232,7 @@ rules:
     skip_lynch_count: 0
     no_selection: invalid_vote     # invalid_vote | skip_lynch
     self_vote: false
+    reveal: hidden                 # hidden | live | after（投票先の公開範囲）
   guard:
     consecutive: false
     self_guard: false
@@ -251,6 +252,7 @@ rules:
     enabled: false
     replacement_role_id: villager   # 欠けた役職を何に置き換えるか
   day_seconds: 180
+  vote_seconds: 60
   night_seconds: 60
   silence_after_dawn_seconds: 15
   extension:
@@ -395,7 +397,10 @@ sudden_death   突然死
 ability        その他の能力による死亡
 ```
 
-`content/death_causes.yaml` から読む。content が新しい死因を追加できる。
+上記7つは**コアの語彙**であり、コアが名前で参照してよい唯一の死因である。
+`content/death_causes.yaml` はこの7つを必ず宣言し、追加の死因を宣言できる。
+起動時に7つが揃っていることを検証する。
+コアが参照する死因IDは1箇所（定数）に集約し、発生箇所へ文字列を散らさない。
 `PLAYER_DIED` は死因を必ず持つ。死因は Passive / Ability の条件として参照できる。
 
 死亡の連鎖は、発火条件を死因で絞ることで停止する
@@ -418,6 +423,18 @@ public_cause =
     died_in_day     if 死亡解決時のフェーズが昼
     died_in_night   if 死亡解決時のフェーズが夜
 ```
+
+昼夜の分類はフェーズIDから一意に決まる。
+
+| 分類 | フェーズ |
+|---|---|
+| 夜 | `night0` / `night` |
+| 昼 | `dawn` / `day` / `vote` / `runoff` / `execution` |
+
+**この導出は関数1つに閉じ込める。** 死亡が発生する箇所ごとに公開死因を書かない。
+すべての死亡は単一の入口（内部死因を受け取り、内部イベントと公開イベントの
+両方を発行する処理）を通す。書き分けが分散した時点で、
+新しい死因の追加が漏洩になる（D012 の対応表方式を避けた理由と同じ）。
 
 内部死因ごとの対応表は持たない。フェーズから導出することで、
 content が新しい死因を追加しても自動的にマスクされる。
