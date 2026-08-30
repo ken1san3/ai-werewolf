@@ -38,6 +38,7 @@
 | Q33 | 再接続時の本人確認 | `decisions/D028`（接続トークンで照合。自己申告を信用しない） |
 | Q34 | 時間を進める主体と時刻源 | `decisions/D028`（サーバ単調時計・1秒 tick・締切は絶対時刻） |
 | Q35 | 死亡プレイヤーの情報範囲 | `decisions/D028`（生存者以上の情報を渡さない） |
+| Q36 | TEST_POLICY 全項目の完了時期 | 案1を採用。TEST_POLICY の各節に担当 Phase を明記し、ROADMAP の「全項目」はその Phase が担当する節を指す。§12 CO は Phase 2.4 |
 | Q26 | 処刑見送りの選択と消費規則 | `decisions/D023`（明示的棄権と game-wide 上限） |
 | Q27 | 投票先の公開設定 | `decisions/D023`（`hidden` / `live` / `after`） |
 | Q25 | 役職欠けの置換先の指定方法 | DESIGN.md §5（`role_missing` をオブジェクト化）。実装は R-20260830-06 |
@@ -83,26 +84,5 @@ Reviewer 推奨: ハンドシェイクで `protocol_version`、全イベント�
 Phase 1.1 は曖昧な状態を許可せず、同じ属性を二重に上書きする付与をエラーにする。
 Phase 8 で具体的な Modifier を追加する前に、priority・付与順・相互排他のいずれで
 解決するかを決める必要がある。
-
----
-
-## Q36 [Phase 1.8] TEST_POLICY 全項目の完了時期
-
-ROADMAP §1.8 は「TEST_POLICY 全項目の通過確認」を完了条件に含める。一方で
-TEST_POLICY §12 の CO 受付4項目は、ROADMAP §2.4 が実装すると明記しており、
-現時点のゲームコアには `co.declare` / `co.report` の受付 API が存在しない。
-さらに同節の「2日目のCO禁止」は、日数制限を持たない DESIGN §9.5 と矛盾する。
-
-Phase 1.8 では標準9人村・13役職構成・妖狐・猫又・狂人系3種の Dummy 完走テストを追加し、
-全104ユニットテストは成功している。CO 受付を Phase 1.8 へ追加すると Phase 2.4 の
-スコープを前倒しすることになる。
-
-どちらを採用するか決定が必要:
-
-1. Phase 1.8 の「全項目」は Phase 1 の実装範囲に対応する TEST_POLICY 項目を指すとし、
-   CO 受付は Phase 2.4 の完了条件として残す。Reviewer が TEST_POLICY §12 の日数制限項目を
-   DESIGN §9.5 と整合する内容へ直した後、Phase 1 handoff を作成できる。
-2. TEST_POLICY §12 も Phase 1.8 で実装・検証する。この場合は Phase 2.4 のスコープと
-   DESIGN §9.5 の日数制限なしを明示的に変更する必要がある。
 
 ---
