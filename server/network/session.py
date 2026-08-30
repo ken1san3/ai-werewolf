@@ -11,7 +11,6 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from ..aiwolf_core.clock import timestamp
-from ..aiwolf_core.models import GamePhase
 
 from .protocol import ProtocolMessageValidator, ProtocolValidationError
 
@@ -103,16 +102,6 @@ class GameRegistry:
             return self._games[game_id]
         except KeyError as error:
             raise UnaddressableRequest("unknown_game") from error
-
-    def tickable_games(self) -> Mapping[str, SessionGame]:
-        """Return games that still have a deadline-driven phase to progress."""
-
-        return {
-            game_id: game
-            for game_id, game in self._games.items()
-            if getattr(game, "phase", None) is not GamePhase.GAME_END
-        }
-
 
 class _GameSession:
     """Per-game token store and per-player outbound event sequence counters."""
@@ -360,7 +349,7 @@ class TickDriver:
     def advance_once(self) -> Mapping[str, bool]:
         now = timestamp(self._clock())
         results = {game_id: False for game_id in self._registry.games}
-        for game_id, game in self._registry.tickable_games().items():
+        for game_id, game in self._registry.games.items():
             try:
                 results[game_id] = game.advance_if_due(now)
             except Exception:

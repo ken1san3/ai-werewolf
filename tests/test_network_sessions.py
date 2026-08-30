@@ -9,7 +9,6 @@ import unittest
 from websockets.asyncio.client import connect
 
 from server.aiwolf_core import (
-    GamePhase,
     GameState,
     InMemoryEventSink,
     PlayerConfig,
@@ -201,22 +200,24 @@ class SessionManagerTests(unittest.TestCase):
 class TickDriverTests(unittest.TestCase):
     def test_tick_uses_one_server_clock_value_for_every_registered_game(self) -> None:
         class RecordingGame:
-            def __init__(self, game_id: str, *, phase: GamePhase | None = None, broken: bool = False) -> None:
+            def __init__(self, game_id: str, *, deadline_free: bool = False, broken: bool = False) -> None:
                 self.game_id = game_id
                 self.players: dict[str, object] = {}
                 self.received_times: list[int] = []
-                self.phase = phase
+                self.deadline_free = deadline_free
                 self.broken = broken
 
             def advance_if_due(self, now: int) -> bool:
                 self.received_times.append(now)
                 if self.broken:
                     raise RuntimeError("broken game")
+                if self.deadline_free:
+                    return False
                 return self.game_id == "game-a"
 
         first = RecordingGame("game-a")
         second = RecordingGame("game-b")
-        finished = RecordingGame("finished", phase=GamePhase.GAME_END)
+        finished = RecordingGame("finished", deadline_free=True)
         broken = RecordingGame("broken", broken=True)
         ticker = TickDriver(
             GameRegistry({"game-a": first, "finished": finished, "broken": broken, "game-b": second}),
@@ -230,7 +231,7 @@ class TickDriverTests(unittest.TestCase):
             )
         self.assertEqual(first.received_times, [77])
         self.assertEqual(second.received_times, [77])
-        self.assertEqual(finished.received_times, [])
+        self.assertEqual(finished.received_times, [77])
         self.assertEqual(broken.received_times, [77])
 
 

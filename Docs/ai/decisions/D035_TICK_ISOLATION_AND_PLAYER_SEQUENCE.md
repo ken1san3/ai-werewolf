@@ -13,8 +13,9 @@ D033 は Session direct reply をゲーム単位で採番していた。宛先�
 
 ## Decision
 
-- tick は `GAME_END` のゲームを対象から除外し、各ゲームの `advance_if_due` 例外を
-  記録してそのゲームだけを `False` とする。ticker task 自身にも最終的な例外捕捉を置く。
+- tick は各ゲームの `advance_if_due` 例外を記録してそのゲームだけを `False` とする。
+  `GAME_END` をネットワーク層で除外する部分は D037 により置換され、締切なしフェーズの
+  no-op 判定はゲームコアが担う。ticker task 自身にも最終的な例外捕捉を置く。
 - server event の `seq` はゲーム単位ではなく**プレイヤー単位**で1から連続して発行し、
   再接続しても継続する。未認証接続にはプレイヤー宛ての stream が無いため、Join / Resume
   に失敗した接続は protocol rejection を送らず policy close する。

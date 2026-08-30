@@ -60,7 +60,7 @@ class PhaseManager:
 
         now = timestamp(now)
         if self.game.phase_ends_at is None:
-            raise ValueError("advance_if_due requires a phase with a deadline")
+            return False
         if now < self.game.phase_ends_at:
             return False
         self.advance(now, game_ended=game_ended)

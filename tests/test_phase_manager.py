@@ -67,6 +67,7 @@ class PhaseManagerTests(unittest.TestCase):
         self.assertEqual(game.advance_phase(137), GamePhase.NIGHT)
         self.assertEqual((game.day, game.phase_ends_at), (1, 147))
         self.assertEqual(game.advance_phase(147, game_ended=True), GamePhase.GAME_END)
+        self.assertFalse(game.advance_if_due(148))
 
         phase_events = [event for event in game.event_bus.events if event.type == "PHASE_STARTED"]
         self.assertEqual(
