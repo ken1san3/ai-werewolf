@@ -19,6 +19,8 @@ from server.aiwolf_core import (
 )
 from server.aiwolf_core.models import (
     AttributeOverrides,
+    CORE_DEATH_CAUSE_IDS,
+    GamePhase,
     Knowledge,
     Modifier,
     ModifierGrant,
@@ -27,6 +29,7 @@ from server.aiwolf_core.models import (
     WinCondition,
 )
 from server.aiwolf_core.content import (
+    _PHASE_IDS,
     _boolean_rule_paths,
     _parse_ability,
     _parse_modifier,
@@ -34,6 +37,7 @@ from server.aiwolf_core.content import (
     _parse_role,
     _parse_rules,
     _parse_win_condition,
+    _validate_core_death_causes,
 )
 
 
@@ -101,6 +105,16 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertEqual(set(self.content.death_causes), {
             "lynched", "attacked", "retaliation", "cursed", "follow_death", "sudden_death", "ability"
         })
+        self.assertEqual(set(self.content.death_causes), CORE_DEATH_CAUSE_IDS)
+
+    def test_phase_ids_are_derived_from_the_game_phase_enum(self) -> None:
+        self.assertEqual(_PHASE_IDS, frozenset(phase.value for phase in GamePhase))
+
+    def test_content_requires_each_core_death_cause_to_be_registered(self) -> None:
+        missing = dict(self.content.death_causes)
+        missing.pop("ability")
+        with self.assertRaisesRegex(ContentValidationError, "must register every core death cause"):
+            _validate_core_death_causes(missing)
 
     def test_omitted_attributes_are_derived_from_team_content(self) -> None:
         villager = self.content.roles["villager"]
@@ -158,6 +172,10 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertFalse(preset.rules.role_missing.enabled)
         self.assertEqual(preset.rules.role_missing.replacement_role_id, "villager")
         self.assertFalse(preset.rules.shortening.enabled)
+        self.assertEqual(preset.rules.vote_seconds, 60)
+        self.assertTrue(preset.rules.vote.abstain.enabled)
+        self.assertIsNone(preset.rules.vote.abstain.max_per_player)
+        self.assertEqual(preset.rules.vote.reveal, "hidden")
 
     def test_role_missing_replacement_role_is_selected_from_yaml_rules(self) -> None:
         rules = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
@@ -321,6 +339,19 @@ class ContentLoadingTests(unittest.TestCase):
                 with self.assertRaises(ContentValidationError):
                     _parse_rules(rules, "test", self.content)
 
+    def test_vote_rules_reject_removed_or_invalid_vote_options(self) -> None:
+        base = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
+        removed_option = deepcopy(base)
+        removed_option["vote"]["skip_lynch_count"] = 1
+        invalid_reveal = deepcopy(base)
+        invalid_reveal["vote"]["reveal"] = "invalid"
+        missing_vote_seconds = deepcopy(base)
+        missing_vote_seconds.pop("vote_seconds")
+        for rules in (removed_option, invalid_reveal, missing_vote_seconds):
+            with self.subTest(rules=rules):
+                with self.assertRaises(ContentValidationError):
+                    _parse_rules(rules, "test", self.content)
+
     def test_adding_a_role_yaml_requires_no_python_change(self) -> None:
         role = _parse_role(
             {
@@ -347,6 +378,33 @@ class ContentLoadingTests(unittest.TestCase):
         )
         self.assertEqual(role.id, "test_observer")
         self.assertEqual(role.attributes.inspect_result, "not_wolf")
+
+    def test_role_chat_channels_must_be_registered_content_channels(self) -> None:
+        role_data = {
+            "id": "invalid_private_channel",
+            "name": "無効チャンネル役職",
+            "team": "village",
+            "attack_result": "die",
+            "tags": [],
+            "knows_teammates": False,
+            "chat_channels": ["private:invalid"],
+            "abilities": [],
+            "passives": [],
+            "options": {},
+        }
+        with self.assertRaisesRegex(ContentValidationError, "unknown chat channel"):
+            _parse_role(
+                role_data,
+                "invalid_private_channel.yaml",
+                self.content.teams,
+                self.content.effects,
+                self.content.passives,
+                self.content.selectors,
+                self.content.restriction_types,
+                self.content.action_timings,
+                self.content.chat_channels,
+                self.content.death_causes,
+            )
 
     def test_modifier_schema_parses_without_a_role_specific_branch(self) -> None:
         modifier = _parse_modifier(

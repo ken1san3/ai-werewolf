@@ -4,9 +4,11 @@ rules:
     runoff: true
     tie_after_runoff: no_lynch
     tie_without_runoff: no_lynch
-    skip_lynch_count: 0
-    no_selection: invalid_vote
+    abstain:
+      enabled: true
+      max_per_player: null
     self_vote: false
+    reveal: hidden
   guard:
     consecutive: false
     self_guard: false
@@ -26,6 +28,7 @@ rules:
     enabled: false
     replacement_role_id: villager
   day_seconds: 180
+  vote_seconds: 60
   night_seconds: 60
   silence_after_dawn_seconds: 15
   extension:

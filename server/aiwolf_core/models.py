@@ -7,6 +7,7 @@ content contracts that later phases use to validate and resolve play.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Any, Mapping, Sequence
 
 
@@ -17,6 +18,35 @@ ATTRIBUTE_NAMES = (
     "inspect_result",
     "medium_result",
 )
+
+
+class GamePhase(str, Enum):
+    """The single source of truth for game-phase IDs used by code and content."""
+
+    SETUP = "setup"
+    NIGHT0 = "night0"
+    DAWN = "dawn"
+    DAY = "day"
+    VOTE = "vote"
+    RUNOFF = "runoff"
+    EXECUTION = "execution"
+    NIGHT = "night"
+    GAME_END = "game_end"
+
+
+class CoreDeathCause(str, Enum):
+    """The seven death-cause IDs the game core is allowed to reference by name."""
+
+    LYNCHED = "lynched"
+    ATTACKED = "attacked"
+    RETALIATION = "retaliation"
+    CURSED = "cursed"
+    FOLLOW_DEATH = "follow_death"
+    SUDDEN_DEATH = "sudden_death"
+    ABILITY = "ability"
+
+
+CORE_DEATH_CAUSE_IDS = frozenset(cause.value for cause in CoreDeathCause)
 
 
 @dataclass(frozen=True)
@@ -266,13 +296,19 @@ class PlayerRoleState:
 
 
 @dataclass(frozen=True)
+class AbstainRules:
+    enabled: bool
+    max_per_player: int | None
+
+
+@dataclass(frozen=True)
 class VoteRules:
     runoff: bool
     tie_after_runoff: str
     tie_without_runoff: str
-    skip_lynch_count: int
-    no_selection: str
+    abstain: AbstainRules
     self_vote: bool
+    reveal: str
 
 
 @dataclass(frozen=True)
@@ -335,6 +371,7 @@ class RulesConfig:
     death: DeathRules
     role_missing: RoleMissingRules
     day_seconds: int
+    vote_seconds: int
     night_seconds: int
     silence_after_dawn_seconds: int
     extension: ExtensionRules

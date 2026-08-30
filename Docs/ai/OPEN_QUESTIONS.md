@@ -28,8 +28,8 @@
 | Q22 | 能力結果の通知範囲 | `decisions/D016` |
 | Q7  | ログの公開・秘匿分離 | `decisions/D013`（public / private / ai の3系統） |
 | Q23 | available_actions の生成場所と送信 | `decisions/D017` |
-| Q26 | 処刑見送りの選択と消費規則 | DESIGN.md §5「投票の棄権」。実装は R-20260830-20 |
-| Q27 | 投票先の公開設定 | DESIGN.md §5 に `reveal` を追加。実装は R-20260830-18 |
+| Q26 | 処刑見送りの選択と消費規則 | `decisions/D023`（明示的棄権と game-wide 上限） |
+| Q27 | 投票先の公開設定 | `decisions/D023`（`hidden` / `live` / `after`） |
 | Q25 | 役職欠けの置換先の指定方法 | DESIGN.md §5（`role_missing` をオブジェクト化）。実装は R-20260830-06 |
 
 ---

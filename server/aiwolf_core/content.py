@@ -18,16 +18,19 @@ import yaml
 from .models import (
     ATTRIBUTE_NAMES,
     ActionTiming,
+    AbstainRules,
     Ability,
     AppliedModifier,
     AttributeOverrides,
     ChatChannel,
     CoRules,
+    CORE_DEATH_CAUSE_IDS,
     DeathCause,
     DeathRules,
     Effect,
     EffectReference,
     ExtensionRules,
+    GamePhase,
     GuardRules,
     Knowledge,
     MediumRules,
@@ -109,9 +112,7 @@ _WIN_CONDITION_TYPES = frozenset(
 _ENABLED_WHEN_PATTERN = re.compile(
     r"^rules\.(?P<path>[a-z_]+(?:\.[a-z_]+)*)\s*==\s*(?P<value>true|false)$"
 )
-_PHASE_IDS = frozenset(
-    {"setup", "night0", "dawn", "day", "vote", "runoff", "execution", "night", "game_end"}
-)
+_PHASE_IDS = frozenset(phase.value for phase in GamePhase)
 
 
 @cache
@@ -211,6 +212,7 @@ def load_content(content_root: str | Path) -> ContentPack:
     typed_causes = {
         identifier: DeathCause(**record) for identifier, record in death_causes.items()
     }
+    _validate_core_death_causes(typed_causes)
 
     roles: dict[str, Role] = {}
     role_dir = root / "roles"
@@ -270,6 +272,14 @@ def load_content(content_root: str | Path) -> ContentPack:
         death_causes=typed_causes,
         modifiers=modifiers,
     )
+
+
+def _validate_core_death_causes(death_causes: Mapping[str, DeathCause]) -> None:
+    missing = CORE_DEATH_CAUSE_IDS - set(death_causes)
+    if missing:
+        raise ContentValidationError(
+            "content must register every core death cause: " + ", ".join(sorted(missing))
+        )
 
 
 def load_preset(path: str | Path, content: ContentPack) -> Preset:
@@ -716,6 +726,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
             "death",
             "role_missing",
             "day_seconds",
+            "vote_seconds",
             "night_seconds",
             "silence_after_dawn_seconds",
             "extension",
@@ -767,6 +778,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         death=death,
         role_missing=role_missing,
         day_seconds=_integer(data["day_seconds"], f"{path}.rules.day_seconds", minimum=1),
+        vote_seconds=_integer(data["vote_seconds"], f"{path}.rules.vote_seconds", minimum=1),
         night_seconds=_integer(data["night_seconds"], f"{path}.rules.night_seconds", minimum=1),
         silence_after_dawn_seconds=_integer(
             data["silence_after_dawn_seconds"], f"{path}.rules.silence_after_dawn_seconds", minimum=0
@@ -794,17 +806,31 @@ def _parse_role_missing_rules(
 
 
 def _parse_vote_rules(data: Mapping[str, Any], path: str) -> VoteRules:
-    _keys(data, required={"runoff", "tie_after_runoff", "tie_without_runoff", "skip_lynch_count", "no_selection", "self_vote"}, optional=set(), path=path)
+    _keys(
+        data,
+        required={"runoff", "tie_after_runoff", "tie_without_runoff", "abstain", "self_vote", "reveal"},
+        optional=set(),
+        path=path,
+    )
     _one_of(data["tie_after_runoff"], {"no_lynch", "random"}, f"{path}.tie_after_runoff")
     _one_of(data["tie_without_runoff"], {"no_lynch", "random"}, f"{path}.tie_without_runoff")
-    _one_of(data["no_selection"], {"invalid_vote", "skip_lynch"}, f"{path}.no_selection")
+    abstain = _parse_abstain_rules(_mapping(data["abstain"], f"{path}.abstain"), f"{path}.abstain")
+    _one_of(data["reveal"], {"hidden", "live", "after"}, f"{path}.reveal")
     return VoteRules(
         runoff=_boolean(data["runoff"], f"{path}.runoff"),
         tie_after_runoff=data["tie_after_runoff"],
         tie_without_runoff=data["tie_without_runoff"],
-        skip_lynch_count=_integer(data["skip_lynch_count"], f"{path}.skip_lynch_count", minimum=0),
-        no_selection=data["no_selection"],
+        abstain=abstain,
         self_vote=_boolean(data["self_vote"], f"{path}.self_vote"),
+        reveal=data["reveal"],
+    )
+
+
+def _parse_abstain_rules(data: Mapping[str, Any], path: str) -> AbstainRules:
+    _keys(data, required={"enabled", "max_per_player"}, optional=set(), path=path)
+    return AbstainRules(
+        enabled=_boolean(data["enabled"], f"{path}.enabled"),
+        max_per_player=_optional_integer(data["max_per_player"], f"{path}.max_per_player", minimum=0),
     )
 
 
@@ -899,7 +925,7 @@ def _channel_ids(value: Any, path: str, channels: Mapping[str, ChatChannel]) -> 
         raise ContentValidationError(f"{path} contains duplicates")
     for identifier in ids:
         _identifier(identifier, path)
-        if identifier not in channels and not identifier.startswith("private:"):
+        if identifier not in channels:
             raise ContentValidationError(f"{path} references unknown chat channel '{identifier}'")
     return ids
 

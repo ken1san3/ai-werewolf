@@ -47,6 +47,7 @@ class PhaseManagerTests(unittest.TestCase):
             night_seconds=10,
             silence_after_dawn_seconds=3,
             day_seconds=20,
+            vote_seconds=4,
         )
         game = self.create_game(rules=rules)
 
@@ -60,12 +61,12 @@ class PhaseManagerTests(unittest.TestCase):
         self.assertEqual(game.advance_phase(113), GamePhase.DAY)
         self.assertEqual((game.day, game.phase_ends_at), (1, 133))
         self.assertEqual(game.advance_phase(133), GamePhase.VOTE)
-        self.assertIsNone(game.phase_ends_at)
-        self.assertEqual(game.resolve_votes(133).kind.value, "no_lynch")
+        self.assertEqual(game.phase_ends_at, 137)
+        self.assertEqual(game.resolve_votes(137).kind.value, "no_lynch")
         self.assertEqual(game.phase, GamePhase.EXECUTION)
-        self.assertEqual(game.advance_phase(133), GamePhase.NIGHT)
-        self.assertEqual((game.day, game.phase_ends_at), (1, 143))
-        self.assertEqual(game.advance_phase(143, game_ended=True), GamePhase.GAME_END)
+        self.assertEqual(game.advance_phase(137), GamePhase.NIGHT)
+        self.assertEqual((game.day, game.phase_ends_at), (1, 147))
+        self.assertEqual(game.advance_phase(147, game_ended=True), GamePhase.GAME_END)
 
         phase_events = [event for event in game.event_bus.events if event.type == "PHASE_STARTED"]
         self.assertEqual(
@@ -79,23 +80,25 @@ class PhaseManagerTests(unittest.TestCase):
             night_seconds=1,
             silence_after_dawn_seconds=1,
             day_seconds=1,
+            vote_seconds=1,
             vote=replace(self.preset.rules.vote, runoff=True),
         )
         runoff_game = self.create_game(rules=runoff_rules)
         self._advance_to_vote(runoff_game)
-        with self.assertRaisesRegex(ValueError, "requires a phase with a deadline"):
-            runoff_game.advance_if_due(103)
+        self.assertFalse(runoff_game.advance_if_due(103))
+        with self.assertRaisesRegex(ValueError, "before their deadline"):
+            runoff_game.resolve_votes(103)
         self._submit_tie(runoff_game)
-        self.assertEqual(runoff_game.resolve_votes(103).kind.value, "runoff")
+        self.assertEqual(runoff_game.resolve_votes(104).kind.value, "runoff")
         self.assertEqual(runoff_game.phase, GamePhase.RUNOFF)
-        self.assertEqual(runoff_game.resolve_votes(103).kind.value, "no_lynch")
+        self.assertEqual(runoff_game.resolve_votes(105).kind.value, "no_lynch")
         self.assertEqual(runoff_game.phase, GamePhase.EXECUTION)
 
         no_runoff_rules = replace(runoff_rules, vote=replace(runoff_rules.vote, runoff=False))
         no_runoff_game = self.create_game(rules=no_runoff_rules)
         self._advance_to_vote(no_runoff_game)
         self._submit_tie(no_runoff_game)
-        self.assertEqual(no_runoff_game.resolve_votes(103).kind.value, "no_lynch")
+        self.assertEqual(no_runoff_game.resolve_votes(104).kind.value, "no_lynch")
         self.assertEqual(no_runoff_game.phase, GamePhase.EXECUTION)
 
     def test_available_actions_follow_generic_night_number_and_chat_rules(self) -> None:
@@ -125,8 +128,8 @@ class PhaseManagerTests(unittest.TestCase):
         )
 
         self._advance_to_vote(game)
-        game.resolve_votes(103)
-        self.assertEqual(game.advance_phase(103), GamePhase.NIGHT)
+        game.resolve_votes(game.phase_ends_at)
+        self.assertEqual(game.advance_phase(game.phase_started_at), GamePhase.NIGHT)
         self.assertIn(
             ("ability", "attack", None),
             self._action_tuples(game._phase_action_kinds(wolf_player)),
@@ -190,8 +193,8 @@ class PhaseManagerTests(unittest.TestCase):
             self._action_tuples(game._phase_action_kinds(player_id)),
         )
         game.advance_phase(103)
-        game.resolve_votes(103)
-        game.advance_phase(103)
+        game.resolve_votes(game.phase_ends_at)
+        game.advance_phase(game.phase_started_at)
         wolf_player = self._player_with_role(game, "werewolf")
         self.assertIn(
             ("ability", "attack", None),

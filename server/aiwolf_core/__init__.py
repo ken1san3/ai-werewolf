@@ -3,16 +3,17 @@
 from .content import ContentPack, ContentValidationError, Preset, load_content, load_preset
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
 from .game import (
-    GamePhase,
     GameState,
     Player,
     PlayerConfig,
     RandomSource,
     VoteResult,
     VoteResultKind,
+    public_death_cause,
 )
 from .models import (
     AppliedModifier,
+    GamePhase,
     EffectiveAttributes,
     EffectReference,
     Knowledge,
@@ -49,4 +50,5 @@ __all__ = [
     "RandomSource",
     "VoteResult",
     "VoteResultKind",
+    "public_death_cause",
 ]
