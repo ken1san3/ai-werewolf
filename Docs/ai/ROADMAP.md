@@ -80,8 +80,10 @@
 - priority 順の解決（DESIGN.md §7.1 の表）
 - Effect の実装（Protect / Inspect / Attack / Kill / InspectRole / PublicNotify / MediumInspect）
 - Passive の実装（`retaliate_on_death` / `on_inspected` / `public_notify_if_alive`）
-- `DeathCause` と公開死因の導出、死亡連鎖と深さ上限
+- `DeathCause` と公開死因の導出、死亡連鎖（深さ上限は設けない。D027）
 - 能力結果の通知範囲（DESIGN.md §7.4）
+- 未選択フォールバック `no_selection`、`PUBLIC_NOTIFY`、`wolf_attack.random`、
+  `no_self_target` restriction（D027）
 
 含まない:
 - 勝敗判定（1.6）
@@ -92,7 +94,7 @@
 - 呪殺・護衛・襲撃・道連れの相互作用がすべてテストされている
 - 内部死因がクライアント向けイベントに出ない
 
-参照: DESIGN.md §7 §6.3 / TEST_POLICY §4 §5 §6 §7 §9
+参照: DESIGN.md §7 §6.3 §4.2 §5 / TEST_POLICY §4 §5 §6 §7 §9 §10 / D024 / D027
 
 ## 1.6 WinCondition 評価と勝敗
 

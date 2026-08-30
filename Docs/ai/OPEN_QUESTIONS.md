@@ -28,22 +28,14 @@
 | Q22 | 能力結果の通知範囲 | `decisions/D016` |
 | Q7  | ログの公開・秘匿分離 | `decisions/D013`（public / private / ai の3系統） |
 | Q23 | available_actions の生成場所と送信 | `decisions/D017` |
+| Q5  | 夜行動が未選択だった場合の既定挙動 | `decisions/D027`（能力ごとに `no_selection: random \| skip`） |
+| Q16 | パン屋の通知の形式 | `decisions/D027`（`PUBLIC_NOTIFY { notify_id }` のみ。人数と player_id を含めない） |
+| Q28 | 人狼襲撃の `designated` / `random` | `decisions/D027`（`random` は有効対象全員から。`designated` は語彙から除外） |
+| Q29 | 死亡連鎖の深さ上限 | `decisions/D027`（上限を設けない。連鎖は人数で上界が決まる） |
+| Q30 | `guard.self_guard` と target selector | `decisions/D027`（restriction `no_self_target` で表現） |
 | Q26 | 処刑見送りの選択と消費規則 | `decisions/D023`（明示的棄権と game-wide 上限） |
 | Q27 | 投票先の公開設定 | `decisions/D023`（`hidden` / `live` / `after`） |
 | Q25 | 役職欠けの置換先の指定方法 | DESIGN.md §5（`role_missing` をオブジェクト化）。実装は R-20260830-06 |
-
----
-
-## Q16 [Phase 1] パン屋の通知の形式
-
-「毎朝パンを焼く」は公開情報だが、参照実装では演出込みの表示になっている。
-
-- 通知の宛先: 全員（公開）
-- 内容: 「パンが焼かれた / 焼かれなかった」だけか、種類などのフレーバーを持つか
-- パン屋が複数人いる場合の扱い
-
-Reviewer 推奨: `PublicNotify` イベント1種類とし、
-フレーバーテキストは content 側に持たせる。コアは通知の有無だけを扱う。
 
 ---
 
@@ -56,57 +48,6 @@ Phase 2 でどこまで実装するか。
 
 Reviewer 推奨: `public` / `wolf` / `system` / `private:<player_id>` の4つ。
 `graveyard`（墓場）と `spectator` はチャネル定義だけ用意し、送信は Phase 7 で。
-
----
-
-## Q5 [Phase 1 中] 夜行動が未選択だった場合の既定挙動
-
-参照実装は投票については「処刑見送り / 無効票」の設定を持つが、
-夜行動（占い・護衛・襲撃）の未選択時の記述が見当たらない。
-
-LLMは必ず失敗するのでサーバ側フォールバックが必要。
-
-候補: ランダム選択 / 能力不発 / 前回対象を継続
-
-Reviewer 推奨: **AI/Dummyクライアントはランダム、人間プレイヤーは不発**。
-設定で切替可能にする。
-
----
-
-## Q28 [Phase 1.5] 人狼襲撃の `designated` / `random` の決定規則
-
-`rules.wolf_attack.target_decision` は `majority | designated | random` を持つが、
-`designated` の指定者をどこで宣言するか、`random` が「提出された候補」か
-「有効対象全員」から選ぶかが DESIGN.md にない。
-
-標準プリセットの `majority` は、提出された単一襲撃先を多数決し、同数は
-`rules.wolf_attack.tie` に従って `game.rng` で選ぶものとして実装する。
-`designated` と `random` はこの決定まで有効化しない。
-
----
-
-## Q29 [Phase 1.5] 死亡連鎖の深さ上限の content 設定
-
-DESIGN.md §7.2 は安全弁として死亡連鎖の深さ上限を要求するが、ルール設定のキー・
-既定値・上限到達時の公開／ログ形式を定義していない。コードに既定値を埋め込むことは
-D006 に反する。
-
-現行 content の猫又 passive は `attacked` / `lynched` のみで発火し、
-`retaliation` では発火しないため、標準役職だけの連鎖は構造的に停止する。
-設定が決まるまで上限に依存する拡張 passive は実装しない。
-
----
-
-## Q30 [Phase 1.5] `guard.self_guard` と target selector の対応
-
-標準の狩人 ability は `target.selector: alive_other` で自分を対象外にしている一方、
-`rules.guard.self_guard` は true / false を持つ。true のとき selector をどの content
-宣言へ変更するかが未定義で、コアが `protect` effect や role ID を特別扱いすると
-「同じ宣言から検証と列挙を導く」方針を壊す。
-
-選択肢: (A) `alive_other` にルール参照を持たせる、(B) self 可否を restriction として
-content へ明示する、(C) true 用に別 selector を登録する。DESIGN.md の決定待ち。
-現行の `self_guard: false` と `alive_other` は矛盾しないため、標準設定は実装可能である。
 
 ---
 

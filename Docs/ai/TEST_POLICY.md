@@ -50,6 +50,10 @@
 - [ ] 妖狐を襲撃しても誰も死なない
 - [ ] 妖狐を占うと妖狐が死ぬ
 - [ ] 強欲な人狼の2人襲撃で、片方だけ護衛された場合に対象ごと独立に評価される
+- [ ] `no_selection: random` の能力が未選択のとき、有効対象全員からランダムに発動する
+- [ ] `no_selection: skip` の能力が未選択のとき、発動せず使用回数も減らない
+- [ ] `rules.night_action.no_selection` が全能力の宣言を一括で上書きする
+- [ ] 全員が未選択でも夜が解決し、フェーズが進む
 
 ## 5. 通知と情報漏洩
 
@@ -64,6 +68,9 @@
 - [ ] **内部死因の文字列がクライアント向けイベントに一切出現しない**（CI常時）
 - [ ] `private.jsonl` の情報が `public.jsonl` に現れない
 - [ ] 権限の無いチャットチャネルの内容がクライアントへ届かない
+- [ ] パン屋が2人生存していても `PUBLIC_NOTIFY` は Dawn ごとに1回だけ発行される
+- [ ] `PUBLIC_NOTIFY` の payload に `player_id` と人数が含まれない
+- [ ] パン屋が全員死亡した翌 Dawn から `PUBLIC_NOTIFY` が発行されない
 
 ## 6. 死因
 
@@ -110,7 +117,9 @@
 ## 10. available_actions
 
 - [ ] Night0 の `player.action_state` に襲撃が含まれない
-- [ ] 狩人の `valid_targets` に自分が含まれない
+- [ ] `self_guard: false` で狩人の `valid_targets` に自分が含まれない
+- [ ] `self_guard: true` で狩人の `valid_targets` に自分が含まれ、自己護衛が成立する
+- [ ] `self_guard` の true / false で、列挙と検証が同一の宣言から導かれる
 - [ ] 連続ガード「なし」で前夜の護衛先が `valid_targets` から外れる
 - [ ] 連続ガード「あり」「なし」の両方で同一のゲームコアがテストを通る
 - [ ] 死亡プレイヤーの `player.action_state` が空になる

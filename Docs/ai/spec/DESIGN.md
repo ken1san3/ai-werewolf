@@ -89,19 +89,44 @@ abilities:
     available_from_night: 1
     priority: 30
     target:
-      selector: alive_other
+      selector: alive_all
       count: 1
     uses:
       per_night: 1
       per_game: null
+    no_selection: skip             # random | skip
     restrictions:
       - type: no_same_target_consecutive
         enabled_when: rules.guard.consecutive == false
+      - type: no_self_target
+        enabled_when: rules.guard.self_guard == false
     effects: [protect]
 ```
 
 `target` / `restrictions` / `uses` / `available_from_night` の宣言が、
 行動の**検証**と**選択肢の列挙**の両方の根拠になる。
+
+**対象範囲をルールで切り替える場合は restriction で表現する。**
+selector は「ルールを見ない素の母集合」に固定し、ルール依存の絞り込みは
+`restrictions[].enabled_when` に置く。狩人の自己護衛は `selector: alive_all` ＋
+`no_self_target` で表し、`rules.guard.self_guard: true` のとき制限が外れる。
+selector にルール参照を持たせない理由は、`alive_other` を占い師なども共有しており、
+1つの selector にルールを埋めると無関係な役職まで影響を受けるためである。
+`no_self_target` は `restriction_types.yaml` に登録する。
+
+#### 未選択時の既定挙動
+
+`no_selection` は、解決時刻までに行動が予約されなかった場合の挙動を宣言する。
+LLMクライアントは必ず未選択を出すため、宣言は必須とする。
+
+| 値 | 挙動 |
+|---|---|
+| `random` | **有効対象全員**から `count` 体をランダムに選び、発動させる |
+| `skip` | 発動させない。使用回数も消費しない |
+
+`random` の母集合は「提出された候補」ではなく、その時点の有効対象全員である。
+`rules.night_action.no_selection` に `random` / `skip` を置くと全能力を一括で上書きし、
+`null` のとき各 Ability の宣言に従う。
 
 `selector` / `restrictions[].type` / `effects[]` は、いずれも content の registry
 （`selectors.yaml` / `restriction_types.yaml` / `effects.yaml`）に登録された
@@ -236,12 +261,14 @@ rules:
     reveal: hidden                 # hidden | live | after（投票先の公開範囲）
   guard:
     consecutive: false
-    self_guard: false
+    self_guard: false              # true で no_self_target 制限が外れる（§4.2）
+  night_action:
+    no_selection: null             # null=能力ごとの宣言に従う / random | skip=全能力を一括上書き
   medium:
     notify_timing: night
     targets: [lynched, sudden_death]
   wolf_attack:
-    target_decision: majority      # majority | designated | random
+    target_decision: majority      # majority | random（designated は未定義。§5 参照）
     tie: random
   co:
     max_per_day: 3
@@ -273,6 +300,16 @@ roles:
   madman: 1
   medium: 1
 ```
+
+`wolf_attack.target_decision` の意味:
+
+| 値 | 決定規則 |
+|---|---|
+| `majority` | 提出された襲撃先を多数決。同数は `tie` に従い `game.rng` で選ぶ |
+| `random` | 提出内容を使わず、有効対象全員からランダムに選ぶ |
+
+`designated`（指定者が決める）は、指定者をどう宣言するかが未決のため
+**語彙から外し、指定された場合は起動時に拒否する。**
 
 役職固有オプションは役職定義側に持たせる。
 ただし**同じ挙動をグローバルと役職の両方に置かない。**
@@ -432,7 +469,12 @@ ability        その他の能力による死亡
 
 死亡の連鎖は、発火条件を死因で絞ることで停止する
 （道連れは `attacked` と `lynched` でのみ発動し、`retaliation` では発動しない）。
-安全弁として連鎖の深さ上限を持ち、上限到達時は警告ログを出して打ち切る。
+
+**連鎖の深さ上限は設けない。** 死亡は1人につき1回しか記録されず、
+死亡済みのプレイヤーは連鎖の対象にならないため、連鎖の長さはプレイヤー人数で
+上界が決まる。上限値をルールに置くと、打ち切りが勝敗を変えるうえ、
+どこで打ち切られたかが公開情報から推測できてしまう。
+新しい Passive を追加するときは、発火条件が死因で絞られていることを確認する。
 
 ### 7.3 公開死因
 
@@ -483,6 +525,25 @@ content が新しい死因を追加しても自動的にマスクされる。
 
 護衛成功・妖狐への襲撃・襲撃無効化は、村側からはすべて
 「夜に誰も死ななかった」と同一に見える。
+
+#### 公開通知（`public_notify`）
+
+パン屋のような「生存していることが公開情報になる」能力は、
+`PUBLIC_NOTIFY` イベント1種類で表す。
+
+```
+PUBLIC_NOTIFY { notify_id }
+```
+
+- **payload は `notify_id` のみ。** 発生源の `player_id` を含めない
+- **人数を含めない。** 生存しているパン屋が何人でも、1つの `notify_id` につき
+  1回だけ発行する。発行回数から生存人数が数えられてはならない
+- 表示文（「パンが届けられました」など）は content 側に持ち、コアは通知の有無だけを扱う
+- 該当する生存者が0人になった Dawn からは発行されない。
+  **止まったこと自体は公開情報**であり、それがこの能力の意味である
+
+複数人が同じ `notify_id` の passive を持つ場合、コアは Dawn ごとに
+`notify_id` で重複を排除してから発行する。
 
 ---
 
@@ -686,8 +747,8 @@ AI内部判断・LLM入出力・レイテンシ
 | 市民 | なし |
 | 占い師 | 毎夜1人を占い「人狼か否か」を判定。妖狐を占うと呪殺 |
 | 霊能者 | 毎夜、処刑・突然死した人を判定 |
-| 狩人 | 毎夜1人を人狼襲撃から護衛。自分は選べない |
-| パン屋 | 生存していれば毎朝、公開通知を出す |
+| 狩人 | 毎夜1人を人狼襲撃から護衛。自分を選べるかは `rules.guard.self_guard` |
+| パン屋 | 生存していれば毎朝、公開通知を出す。人数は分からない（§7.4） |
 | 猫又 | 襲撃されると人狼から1人、処刑されると生存者から1人をランダムに道連れ |
 | 人狼 | 毎夜1人を襲撃。仲間を認識。人狼チャット |
 | 強欲な人狼 | ゲーム中一度だけ、夜に2人を襲撃できる |
