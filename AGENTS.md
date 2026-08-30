@@ -107,8 +107,11 @@ Do not change roles or the protocol on your own judgement; raise it in OPEN_QUES
 Before ending the session, externalize all information required by the next
 agent into the repository.
 
-Never conclude "no problem" from a local LLM's output. Its use is limited to
-compressing logs and narrowing where to look. Take pass/fail counts from the exit
+Route bulk one-shot input through the local LLM before it enters the conversation:
+test output, long diffs, and the large reference documents. Using it is the default;
+skipping it needs a reason. Ask first whether a script would do the job for free.
+
+Never conclude "no problem" from its output. Take pass/fail counts from the exit
 code and the raw last line, never from a summary. Narrowing may reorder what you
 read, never reduce it. See D034.
 ```
