@@ -9,15 +9,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, MutableSequence, Protocol, Sequence
+from typing import Mapping, MutableSequence, Protocol, Sequence, TypeVar
 
 from .models import AppliedModifier, GamePhase, Role
+
+
+RandomChoice = TypeVar("RandomChoice")
 
 
 class RandomSource(Protocol):
     """The game-owned source for every random selection."""
 
-    def choice(self, sequence: Sequence[str]) -> str:
+    def choice(self, sequence: Sequence[RandomChoice]) -> RandomChoice:
         ...
 
     def shuffle(self, sequence: MutableSequence[str]) -> None:

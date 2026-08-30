@@ -192,8 +192,7 @@ class ActionResolver:
                 target_options = self.random_target_options(actor, ability)
                 if not target_options:
                     continue
-                option_ids = [str(index) for index in range(len(target_options))]
-                selected_targets = target_options[int(self.game.rng.choice(option_ids))]
+                selected_targets = self.game.rng.choice(target_options)
                 candidates = valid_target_ids(self.game, actor, ability.target)
                 self.game.event_bus.publish(
                     GameEvent(
@@ -208,6 +207,7 @@ class ActionResolver:
                     )
                 )
                 reservations.append(ActionReservation(actor.player_id, ability.id, selected_targets, now))
+                break
         return reservations
 
     def no_selection_behavior(self, ability: Ability) -> str:

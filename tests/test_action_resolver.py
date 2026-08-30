@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Sequence, TypeVar
 import unittest
 
 from server.aiwolf_core import (
@@ -20,11 +21,14 @@ CONTENT_ROOT = PROJECT_ROOT / "content"
 PRESET_PATH = CONTENT_ROOT / "presets" / "standard_9.yaml"
 
 
+RandomChoice = TypeVar("RandomChoice")
+
+
 class FirstChoiceRandom:
     def __init__(self) -> None:
-        self.choice_inputs: list[tuple[str, ...]] = []
+        self.choice_inputs: list[tuple[object, ...]] = []
 
-    def choice(self, sequence: tuple[str, ...] | list[str]) -> str:
+    def choice(self, sequence: Sequence[RandomChoice]) -> RandomChoice:
         choices = tuple(sequence)
         self.choice_inputs.append(choices)
         return choices[0]
@@ -187,8 +191,8 @@ class ActionResolverTests(unittest.TestCase):
         enabled_game.submit_action(101, "guard", "protect", ("guard",))
         self.assertEqual(enabled_game.pending_actions["guard"].target_player_ids, ("guard",))
 
-    def test_no_selection_random_uses_every_valid_target_and_records_the_result(self) -> None:
-        game = self.make_game({"seer": "seer", "first": "villager", "second": "villager"})
+    def test_no_selection_random_wolf_attack_uses_every_valid_target_and_records_the_result(self) -> None:
+        game = self.make_game({"wolf": "werewolf", "first": "villager", "second": "villager"})
 
         game.resolve_pending_actions(110)
 
@@ -200,15 +204,64 @@ class ActionResolverTests(unittest.TestCase):
         self.assertEqual(
             selected.payload,
             {
-                "actor_player_id": "seer",
-                "ability_id": "inspect",
+                "actor_player_id": "wolf",
+                "ability_id": "attack",
                 "candidate_player_ids": ["first", "second"],
                 "selected_player_ids": ["first"],
             },
         )
-        result = next(event for event in game.event_bus.events if event.type == "INSPECT_RESULT")
-        self.assertEqual(result.payload["target_player_id"], "first")
-        self.assertEqual(game.ability_uses_this_night[("seer", "inspect")], 1)
+        self.assertEqual(game.rng.choice_inputs, [(('first',), ('second',))])
+        self.assertFalse(game.players["first"].alive)
+        self.assertEqual(game.ability_uses_this_night[("wolf", "attack")], 1)
+
+    def test_standard_content_declares_random_no_selection_for_attacks_only(self) -> None:
+        random_abilities = {
+            (role_id, ability.id)
+            for role_id, role in self.content.roles.items()
+            for ability in role.abilities
+            if ability.no_selection == "random"
+        }
+
+        self.assertEqual(
+            random_abilities,
+            {
+                ("werewolf", "attack"),
+                ("wise_werewolf", "attack"),
+                ("greedy_werewolf", "attack"),
+            },
+        )
+
+    def test_no_selection_fallback_chooses_only_the_first_eligible_random_ability(self) -> None:
+        game = self.make_game(
+            {"greedy": "greedy_werewolf", "first": "villager", "second": "villager", "third": "villager"}
+        )
+        attack, double_attack = game.players["greedy"].role.abilities
+        game.players["greedy"] = replace(
+            game.players["greedy"],
+            role=replace(
+                game.players["greedy"].role,
+                abilities=(
+                    replace(attack, no_selection="random"),
+                    replace(double_attack, no_selection="random"),
+                ),
+            ),
+        )
+
+        game.resolve_pending_actions(110)
+
+        selected = [
+            event
+            for event in game.event_bus.events
+            if event.type == "ACTION_NO_SELECTION_RANDOM_TARGETS_SELECTED"
+            and event.payload["actor_player_id"] == "greedy"
+        ]
+        resolved = [
+            event
+            for event in game.event_bus.events
+            if event.type == "ACTION_RESOLVED" and event.payload["actor_player_id"] == "greedy"
+        ]
+        self.assertEqual([event.payload["ability_id"] for event in selected], ["attack"])
+        self.assertEqual([event.payload["ability_id"] for event in resolved], ["attack"])
 
     def test_no_selection_skip_does_not_resolve_or_consume_an_ability(self) -> None:
         game = self.make_game({"medium": "medium", "dead": "werewolf", "other": "villager"})
