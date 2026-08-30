@@ -502,8 +502,17 @@ GameResult
 ```
 1. 生存者0人 → draw
 2. rules.win_evaluation_order の順に評価し、最初に成立した陣営を勝者とする
-3. 便乗型（妖狐）を適用し、成立していれば勝者を差し替える
+3. 生存している便乗型（survive_when_others_win）を適用する
+   - replaces: true  → その陣営を勝者に差し替える（妖狐）
+   - replaces: false → winner_team は変えず、その生存者個人のみ won にする
 ```
+
+条件の参照先は型ごとに異なる。`eliminate_role_tag` は Role の `tags`、
+`count_parity` は Role + Modifier の実効属性 `count_as` を見る。
+`player_results` も実効属性の `team` で判定するため、勝利陣営の死亡者も `won` になる。
+
+終端結果は最初に成立した1回だけ記録し、`GAME_ENDED` を public に1回だけ発行して
+`GameEnd` へ遷移する。
 
 ---
 
