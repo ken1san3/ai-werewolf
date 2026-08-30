@@ -85,3 +85,24 @@ Phase 8 で具体的な Modifier を追加する前に、priority・付与順・
 解決するかを決める必要がある。
 
 ---
+
+## Q36 [Phase 1.8] TEST_POLICY 全項目の完了時期
+
+ROADMAP §1.8 は「TEST_POLICY 全項目の通過確認」を完了条件に含める。一方で
+TEST_POLICY §12 の CO 受付4項目は、ROADMAP §2.4 が実装すると明記しており、
+現時点のゲームコアには `co.declare` / `co.report` の受付 API が存在しない。
+さらに同節の「2日目のCO禁止」は、日数制限を持たない DESIGN §9.5 と矛盾する。
+
+Phase 1.8 では標準9人村・13役職構成・妖狐・猫又・狂人系3種の Dummy 完走テストを追加し、
+全104ユニットテストは成功している。CO 受付を Phase 1.8 へ追加すると Phase 2.4 の
+スコープを前倒しすることになる。
+
+どちらを採用するか決定が必要:
+
+1. Phase 1.8 の「全項目」は Phase 1 の実装範囲に対応する TEST_POLICY 項目を指すとし、
+   CO 受付は Phase 2.4 の完了条件として残す。Reviewer が TEST_POLICY §12 の日数制限項目を
+   DESIGN §9.5 と整合する内容へ直した後、Phase 1 handoff を作成できる。
+2. TEST_POLICY §12 も Phase 1.8 で実装・検証する。この場合は Phase 2.4 のスコープと
+   DESIGN §9.5 の日数制限なしを明示的に変更する必要がある。
+
+---
