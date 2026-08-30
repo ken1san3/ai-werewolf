@@ -60,6 +60,29 @@ class VoteResult:
 
 
 @dataclass(frozen=True)
+class GameResult:
+    """The terminal outcome, including every player's final result."""
+
+    winner_team: str | None
+    outcome: str
+    player_results: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if self.outcome not in {"team_victory", "draw"}:
+            raise ValueError(f"unsupported game outcome '{self.outcome}'")
+        if self.outcome == "draw":
+            if self.winner_team is not None:
+                raise ValueError("a draw cannot have a winner team")
+            if any(result != "lost" for result in self.player_results.values()):
+                raise ValueError("every player must lose in a draw")
+            return
+        if not self.winner_team:
+            raise ValueError("a team victory requires a winner team")
+        if any(result not in {"won", "lost"} for result in self.player_results.values()):
+            raise ValueError("player results must be won or lost")
+
+
+@dataclass(frozen=True)
 class PhaseActionKind:
     """Phase-only action information, before Phase 1.7 builds ActionSpec."""
 

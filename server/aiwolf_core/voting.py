@@ -11,6 +11,7 @@ from .models import CoreDeathCause, GamePhase
 from .phase import PhaseManager
 from .state import VoteResult, VoteResultKind
 from .targets import alive_player
+from .wins import WinEvaluator
 
 if TYPE_CHECKING:
     from .game import GameState
@@ -99,6 +100,8 @@ class VoteResolver:
         phase.enter(GamePhase.EXECUTION, now)
         if result.kind is VoteResultKind.LYNCH:
             DeathResolver(self.game).record(result.lynched_player_id, CoreDeathCause.LYNCHED.value)
+        if WinEvaluator(self.game).evaluate_and_record() is not None:
+            phase.enter(GamePhase.GAME_END, now)
         return result
 
     def resolve_tally(self, tallies: Mapping[str, int]) -> VoteResult:

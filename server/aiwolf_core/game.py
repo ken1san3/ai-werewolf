@@ -16,6 +16,7 @@ from .phase import PhaseManager
 from .state import (
     ActionReservation,
     DeathRecord,
+    GameResult,
     Player,
     PlayerConfig,
     RandomSource,
@@ -66,6 +67,7 @@ class GameState:
     abstentions_used: dict[str, int] = field(default_factory=dict)
     runoff_candidate_player_ids: tuple[str, ...] = ()
     last_vote_result: VoteResult | None = None
+    game_result: GameResult | None = None
 
     @classmethod
     def create_from_preset(

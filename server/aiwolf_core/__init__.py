@@ -5,6 +5,7 @@ from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEve
 from .death import public_death_cause
 from .game import GameState
 from .state import (
+    GameResult,
     Player,
     PlayerConfig,
     RandomSource,
@@ -34,6 +35,7 @@ __all__ = [
     "EffectReference",
     "GameEvent",
     "GamePhase",
+    "GameResult",
     "GameState",
     "JsonlEventLog",
     "InMemoryEventSink",

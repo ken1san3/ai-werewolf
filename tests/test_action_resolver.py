@@ -235,7 +235,10 @@ class ActionResolverTests(unittest.TestCase):
             night_seconds=10,
             medium=replace(self.preset.rules.medium, notify_timing="dawn"),
         )
-        game = self.make_game({"medium": "medium", "dead": "werewolf", "other": "villager"}, rules=rules)
+        game = self.make_game(
+            {"medium": "medium", "dead": "werewolf", "wolf": "werewolf", "other": "villager"},
+            rules=rules,
+        )
         game._record_player_death("dead", "lynched")
         game.submit_action(101, "medium", "medium_inspect", ("dead",))
         game.resolve_pending_actions(110)

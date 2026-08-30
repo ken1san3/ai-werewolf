@@ -8,6 +8,7 @@ from .actions import ActionResolver
 from .clock import timestamp
 from .events import EventVisibility, GameEvent
 from .models import GamePhase, RulesConfig
+from .wins import WinEvaluator
 
 if TYPE_CHECKING:
     from .game import GameState
@@ -43,6 +44,9 @@ class PhaseManager:
             raise ValueError("game_ended is only valid after death resolution")
         if self.game.phase in {GamePhase.NIGHT0, GamePhase.NIGHT}:
             ActionResolver(self.game).resolve(now)
+            game_ended = WinEvaluator(self.game).evaluate_and_record() is not None or game_ended
+        else:
+            game_ended = self.game.game_result is not None or game_ended
         self.enter(self.next_phase(game_ended=game_ended), now)
         return self.game.phase
 
