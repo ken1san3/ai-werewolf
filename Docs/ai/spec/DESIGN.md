@@ -781,9 +781,15 @@ logs/<game_id>/
 |---|---|
 | 役職配布 | `ROLE_ASSIGNED` |
 | 役職欠け | `ROLE_MISSING_APPLIED` |
-| 初日ランダム白 | `INITIAL_INSPECT_GRANTED` |
+| 初日ランダム白 | `FIRST_NIGHT_INSPECT_TARGET_SELECTED` |
 | 投票同数のランダム処刑 | `TIE_RESOLVED_RANDOM` |
-| 道連れ抽選 | `RETALIATION_TARGET_SELECTED` |
+| 道連れ抽選 | `PASSIVE_TARGET_SELECTED` |
+| 人狼襲撃の同数解決 | `WOLF_ATTACK_TIE_RESOLVED_RANDOM` |
+| `wolf_attack.random` の対象選択 | `WOLF_ATTACK_TARGET_SELECTED_RANDOM` |
+| 未選択能力の対象選択 | `ACTION_NO_SELECTION_RANDOM_TARGETS_SELECTED` |
+
+**乱数を引く箇所を増やしたら、この表に行を足す。**
+候補と選ばれた結果の両方を payload に残す。片方だけでは再生できない。
 
 乱数は `game.rng` 経由に統一し、テストでは注入可能にする。
 試合の完全再現は目標にしない。
