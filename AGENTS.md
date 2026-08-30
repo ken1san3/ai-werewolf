@@ -87,6 +87,7 @@ Do not scan the whole repository unless necessary.
 - モジュールレベルの `random` を直接呼んでいないか
 - ルールの既定値がコードへ埋め込まれていないか
 - 役職の追加に Python の変更が必要になっていないか
+- `python scripts/check_docs.py` が通るか（文書と実装の不整合の機械検査）
 
 ## Prohibitions
 

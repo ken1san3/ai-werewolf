@@ -3,7 +3,7 @@
 対象: Phase 1（ゲームコア）〜 Phase 2（ネットワーク）
 最終更新: 2026-08-29
 
-本書は D001〜D017 の決定を、実装者が上から読める形にまとめたもの。
+本書は `decisions/` の決定を、実装者が上から読める形にまとめたもの。
 **判断の理由は `Docs/ai/decisions/` にある。本書は結論だけを述べる。**
 恒久的な規約と禁止事項は `AGENTS.md`、検証項目は `Docs/ai/TEST_POLICY.md`。
 
@@ -297,9 +297,9 @@ rules:
     allow_villager_claim: false    # 市民を騙れるか
   death:
     public_detail: phase           # phase | cause | none
-  sudden_death:
+  sudden_death:                    # 未実装（Phase 2.4。発言数の集計が要る）
     enabled: false                 # 昼に一度も発言しなかった生存者を Day 終了時に死亡させる
-  graveyard:
+  graveyard:                       # 未実装（Phase 2.3。送信経路の分離と同時）
     view_public: true              # 死亡後も public を閲覧できる
     speak: false                   # 墓場での発言（Phase 7）
     reveal_roles: false            # 死亡者に全員の役職を見せる

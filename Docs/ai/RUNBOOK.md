@@ -51,6 +51,7 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 ```
 [ ] ROADMAP の完了条件を満たしたか確認
 [ ] テスト実行（報告は成功数・失敗数・重要エラーのみ。全出力を貼らない）
+[ ] `python scripts/check_docs.py` を実行し、不整合を0にする
 [ ] git diff 確認 → コミット
 [ ] CURRENT_STATE.md 更新（Current Phase / Completed / Next Task / Test Status）
     Test Status には commit hash を入れる。
@@ -91,8 +92,10 @@ Docs/ai/TEST_POLICY.md
 - 情報漏洩（private が broadcast に乗っていないか、内部死因が外へ出ていないか）
 - 競合状態、async の扱い
 - 拡張性を壊す実装
+- 指摘の原因が Reviewer 側の文書にある場合、**その文書を直したうえで**起票する
 
 テストは実際に走らせて結果を確認する。
+`scripts/check_docs.py` も走らせる。文書と実装のずれはここで機械的に落とす。
 
 ### 2.3 起票の形
 
@@ -109,6 +112,9 @@ Verification:
 - Reviewer 側の文書（DESIGN.md / TEST_POLICY.md）に原因がある指摘は、
   **その旨を明記し、修正は Reviewer が行うと書く**
 - 終了時に `CURRENT_STATE.md` の Latest Review と Test Status を更新する
+- `python scripts/check_docs.py` を実行する。**DESIGN / ROADMAP / TEST_POLICY を
+  書き換えたら必ず走らせる。** 実装より先に書いたルールは DESIGN §5 の該当行へ
+  「未実装（Phase X.Y）」と注記すれば検査を通る
 
 ---
 

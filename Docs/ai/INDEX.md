@@ -13,16 +13,17 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 ## 実装に入る前に読む
 
 - `spec/DESIGN.md` — 設計の結論。**まずこれを読む**
-- `TEST_POLICY.md` — 検証項目。Phase 1 の完了判定はこれで行う
+- `TEST_POLICY.md` — 検証項目。各節の見出しが担当 Phase を示す
 
 `decisions/` は「なぜそう決めたか」の記録。
 設計を変えたくなったとき、または DESIGN.md の意図が読み取れないときだけ開く。
 
 ## Current phase
 
-**Phase 1.1 着手可（設計判断は D001〜D007 で確定済み）**
+**ここには書かない。** 現在フェーズと次にやることは `CURRENT_STATE.md` にだけ置く。
+2箇所に書くと必ず片方が古くなる。
 
-Relevant:
+どのフェーズでも参照するもの:
 
 - `spec/DESIGN.md`
 - `TEST_POLICY.md`
@@ -33,11 +34,12 @@ Relevant:
 
 | 目的 | ファイル |
 |---|---|
-| 設計判断の理由 | `decisions/`（D001〜D017） |
+| 設計判断の理由 | `decisions/` |
 | 元仕様への指摘 | `SPEC_REVIEW.md` |
 | 元仕様の原文 | `spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
 | 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
 | ロードマップ全体 | `ROADMAP.md` |
+| 文書と実装の不整合検査 | `scripts/check_docs.py` |
 | Phase引継ぎ | `handoffs/` |
 | 過去の失敗 | `failures/` |
 
