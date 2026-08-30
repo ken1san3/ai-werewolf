@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Sequence, TypeVar
 import unittest
 
@@ -47,6 +49,93 @@ class PhaseOneCompletionTests(unittest.TestCase):
         )
         self.run_dummy_game(game)
         self.assertEqual(game.game_result.winner_team, "village")
+
+    def test_completed_game_public_log_reconstructs_the_public_history(self) -> None:
+        game_id = "standard-nine-public-log"
+        with TemporaryDirectory() as temporary_directory:
+            logs_root = Path(temporary_directory)
+            game = self.create_game(
+                game_id, self.standard_preset.role_counts, logs_root=logs_root
+            )
+            self.run_dummy_game(game)
+            public_entries = _read_jsonl(logs_root / game_id / "public.jsonl")
+
+        self.assertTrue(public_entries)
+        self.assertTrue(all(entry["visibility"] == "public" for entry in public_entries))
+        self.assertEqual(
+            [
+                (entry["payload"]["phase"], entry["payload"]["day"])
+                for entry in public_entries
+                if entry["type"] == "PHASE_STARTED"
+            ],
+            [
+                ("night0", 0),
+                ("dawn", 1),
+                ("day", 1),
+                ("vote", 1),
+                ("execution", 1),
+                ("night", 1),
+                ("dawn", 2),
+                ("day", 2),
+                ("vote", 2),
+                ("execution", 2),
+                ("game_end", 2),
+            ],
+        )
+        self.assertEqual(
+            [
+                (
+                    entry["payload"]["day"],
+                    entry["payload"]["player_id"],
+                    entry["payload"]["public_cause"],
+                )
+                for entry in public_entries
+                if entry["type"] == "PLAYER_DIED"
+            ],
+            [
+                (1, "player-4", "lynched"),
+                (1, "player-1", "died_in_night"),
+                (2, "player-5", "lynched"),
+            ],
+        )
+        self.assertEqual(
+            [
+                (
+                    entry["payload"]["day"],
+                    entry["payload"]["result"],
+                    entry["payload"]["lynched_player_id"],
+                )
+                for entry in public_entries
+                if entry["type"] == "VOTE_RESOLVED"
+            ],
+            [(1, "lynch", "player-4"), (2, "lynch", "player-5")],
+        )
+        self.assertEqual(
+            [
+                (entry["payload"]["winner_team"], entry["payload"]["outcome"])
+                for entry in public_entries
+                if entry["type"] == "GAME_ENDED"
+            ],
+            [("village", "team_victory")],
+        )
+
+        serialized_public_log = json.dumps(public_entries, ensure_ascii=False)
+        self.assertNotIn('"role_id"', serialized_public_log)
+        self.assertNotIn('"modifier_ids"', serialized_public_log)
+        self.assertNotIn('"cause"', serialized_public_log)
+        self.assertNotIn('"recipient_player_id"', serialized_public_log)
+        self.assertTrue(
+            {
+                "ACTION_RESOLVED",
+                "ACTION_SUBMITTED",
+                "GUARD_SUCCEEDED",
+                "INSPECT_DEAD_ROLE_RESULT",
+                "INSPECT_RESULT",
+                "MEDIUM_RESULT",
+                "ROLE_ASSIGNED",
+                "VOTE_SUBMITTED",
+            }.isdisjoint(entry["type"] for entry in public_entries)
+        )
 
     def test_every_role_can_complete_in_one_content_only_configuration(self) -> None:
         role_counts = {role_id: 1 for role_id in self.content.roles}
@@ -93,7 +182,9 @@ class PhaseOneCompletionTests(unittest.TestCase):
                 self.run_dummy_game(game)
                 self.assertEqual(game.game_result.winner_team, expected_winner)
 
-    def create_game(self, game_id: str, role_counts: dict[str, int]) -> GameState:
+    def create_game(
+        self, game_id: str, role_counts: dict[str, int], *, logs_root: Path | None = None
+    ) -> GameState:
         player_configs = tuple(
             PlayerConfig(f"player-{index}", f"Player {index}")
             for index in range(1, sum(role_counts.values()) + 1)
@@ -115,7 +206,8 @@ class PhaseOneCompletionTests(unittest.TestCase):
             player_configs,
             game_id=game_id,
             rng=FirstChoiceRandom(),
-            event_sink=InMemoryEventSink(),
+            logs_root=logs_root,
+            event_sink=InMemoryEventSink() if logs_root is None else None,
             started_at=100,
         )
 
@@ -211,6 +303,10 @@ class PhaseOneCompletionTests(unittest.TestCase):
         if not candidates:
             raise AssertionError("dummy voter has no legal target")
         return candidates[0]
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 if __name__ == "__main__":
