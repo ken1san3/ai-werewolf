@@ -57,6 +57,7 @@
 - [ ] `no_selection: skip` の能力が未選択のとき、発動せず使用回数も減らない
 - [ ] `rules.night_action.no_selection` が全能力の宣言を一括で上書きする
 - [ ] 全員が未選択でも夜が解決し、フェーズが進む
+- [ ] 標準 content で `no_selection: random` を宣言する Ability が襲撃能力だけである
 
 ## 5. 通知と情報漏洩
 
