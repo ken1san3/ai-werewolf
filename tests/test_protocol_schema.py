@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 import unittest
 
@@ -15,25 +16,8 @@ SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
 class ProtocolSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
         self.schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        registry = Registry().with_resource(
-            self.schema["$id"], Resource.from_contents(self.schema)
-        )
-        format_checker = FormatChecker()
-        self.client_validator = Draft202012Validator(
-            {"$ref": f"{self.schema['$id']}#/$defs/client_request"},
-            registry=registry,
-            format_checker=format_checker,
-        )
-        self.server_validator = Draft202012Validator(
-            {"$ref": f"{self.schema['$id']}#/$defs/server_event"},
-            registry=registry,
-            format_checker=format_checker,
-        )
-        self.envelope_validator = Draft202012Validator(
-            {"$ref": f"{self.schema['$id']}#/$defs/envelope"},
-            registry=registry,
-            format_checker=format_checker,
-        )
+        self.client_validator = self.make_validator("client_request")
+        self.server_validator = self.make_validator("server_event")
 
     def test_schema_declares_language_independent_protocol_version_policy(self) -> None:
         self.assertEqual(
@@ -76,9 +60,23 @@ class ProtocolSchemaTests(unittest.TestCase):
     def test_strict_envelope_rejects_unknown_header_fields(self) -> None:
         request = self.make_client_request()
         event = self.make_server_event()
-        self.assert_valid(self.envelope_validator, request)
         self.assert_invalid(self.client_validator, dict(request, evil=True))
         self.assert_invalid(self.server_validator, dict(event, admin=True))
+
+    def test_directional_schemas_inherit_headers_from_envelope(self) -> None:
+        schema = deepcopy(self.schema)
+        envelope = schema["$defs"]["envelope"]
+        envelope["properties"]["trace_id"] = {"type": "string", "minLength": 1}
+        envelope["required"].append("trace_id")
+
+        request = dict(self.make_client_request(), trace_id="request-trace")
+        event = dict(self.make_server_event(), trace_id="event-trace")
+        client_validator = self.make_validator("client_request", schema)
+        server_validator = self.make_validator("server_event", schema)
+        self.assert_valid(client_validator, request)
+        self.assert_valid(server_validator, event)
+        self.assert_invalid(client_validator, self.make_client_request())
+        self.assert_invalid(server_validator, self.make_server_event())
 
     def test_action_rejected_requires_machine_readable_action_and_reason(self) -> None:
         rejected = self.make_server_event(
@@ -143,6 +141,19 @@ class ProtocolSchemaTests(unittest.TestCase):
 
     def assert_invalid(self, validator: Draft202012Validator, message: object) -> None:
         self.assertTrue(list(validator.iter_errors(message)))
+
+    def make_validator(
+        self, definition: str, schema: dict[str, object] | None = None
+    ) -> Draft202012Validator:
+        resolved_schema = self.schema if schema is None else schema
+        registry = Registry().with_resource(
+            resolved_schema["$id"], Resource.from_contents(resolved_schema)
+        )
+        return Draft202012Validator(
+            {"$ref": f"{resolved_schema['$id']}#/$defs/{definition}"},
+            registry=registry,
+            format_checker=FormatChecker(),
+        )
 
 
 if __name__ == "__main__":

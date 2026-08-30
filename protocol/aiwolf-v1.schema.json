@@ -59,28 +59,23 @@
         "timestamp": { "$ref": "#/$defs/timestamp" },
         "payload": { "$ref": "#/$defs/payload" }
       },
-      "additionalProperties": false,
-      "description": "The strict common envelope. Directional variants add no unknown header fields."
+      "description": "Shared header declarations for strict directional variants."
     },
     "client_request": {
-      "type": "object",
-      "required": [
-        "type",
-        "protocol_version",
-        "event_id",
-        "game_id",
-        "timestamp",
-        "payload"
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "not": {
+            "required": ["seq"]
+          }
+        },
+        {
+          "properties": {
+            "timestamp": { "$ref": "#/$defs/client_timestamp" }
+          }
+        }
       ],
-      "properties": {
-        "type": { "$ref": "#/$defs/message_type" },
-        "protocol_version": { "$ref": "#/$defs/protocol_version" },
-        "event_id": { "$ref": "#/$defs/uuid" },
-        "game_id": { "$ref": "#/$defs/uuid" },
-        "timestamp": { "$ref": "#/$defs/client_timestamp" },
-        "payload": { "$ref": "#/$defs/payload" }
-      },
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "description": "A strict client-to-server request. Requests omit seq. The common envelope does not assign individual message types to a direction."
     },
     "action_rejected_payload": {
@@ -99,31 +94,19 @@
       "description": "A machine-readable rejection reason at a granularity a client can act on."
     },
     "server_event": {
-      "type": "object",
-      "required": [
-        "type",
-        "protocol_version",
-        "event_id",
-        "game_id",
-        "seq",
-        "timestamp",
-        "payload"
-      ],
-      "properties": {
-        "type": { "$ref": "#/$defs/message_type" },
-        "protocol_version": { "$ref": "#/$defs/protocol_version" },
-        "event_id": { "$ref": "#/$defs/uuid" },
-        "game_id": { "$ref": "#/$defs/uuid" },
-        "seq": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Game-wide server event sequence. It starts at 1 and has no gaps."
-        },
-        "timestamp": { "$ref": "#/$defs/server_timestamp" },
-        "payload": { "$ref": "#/$defs/payload" }
-      },
-      "additionalProperties": false,
       "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "required": ["seq"],
+          "properties": {
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Game-wide server event sequence. It starts at 1 and has no gaps."
+            },
+            "timestamp": { "$ref": "#/$defs/server_timestamp" }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -138,6 +121,7 @@
           }
         }
       ],
+      "unevaluatedProperties": false,
       "description": "A strict server-to-client event. seq is present only on this direction."
     }
   }
