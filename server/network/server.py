@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from contextlib import suppress
 from typing import Any
 
 from websockets.asyncio.server import Server, ServerConnection, serve
+from websockets.exceptions import ConnectionClosed
 
+from .protocol import ProtocolValidationError
 from .session import ConnectionContext, GameRegistry, SessionManager, TickDriver, UnaddressableRequest
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class WebSocketGameServer:
@@ -30,6 +36,7 @@ class WebSocketGameServer:
         self._tick_interval_seconds = tick_interval_seconds
         self._server: Server | None = None
         self._tick_task: asyncio.Task[None] | None = None
+        self._connections: dict[str, ServerConnection] = {}
 
     async def start(self, host: str, port: int) -> Server:
         if self._server is not None:
@@ -54,17 +61,38 @@ class WebSocketGameServer:
         try:
             async for raw_message in websocket:
                 try:
-                    reply, context = self.sessions.handle_json(raw_message, context)
+                    result = self.sessions.handle_json(raw_message, context)
                 except UnaddressableRequest:
                     await websocket.close(code=1008, reason="invalid request")
                     return
+                except ProtocolValidationError:
+                    LOGGER.exception("server generated an invalid protocol message")
+                    await websocket.close(code=1011, reason="server protocol error")
+                    return
+                context = result.context
+                if context is not None:
+                    self._connections[context.connection_id] = websocket
+                await self._close_replaced_connections(result.replaced_connection_ids)
                 await websocket.send(
-                    json.dumps(reply.as_message(), ensure_ascii=False, separators=(",", ":"))
+                    json.dumps(result.reply.as_message(), ensure_ascii=False, separators=(",", ":"))
                 )
+        except ConnectionClosed:
+            pass
         finally:
+            if context is not None:
+                self._connections.pop(context.connection_id, None)
             self.sessions.disconnect(context)
+
+    async def _close_replaced_connections(self, connection_ids: tuple[str, ...]) -> None:
+        for connection_id in connection_ids:
+            previous = self._connections.pop(connection_id, None)
+            if previous is not None:
+                await previous.close(code=4001, reason="session resumed elsewhere")
 
     async def _tick_forever(self) -> None:
         while True:
             await asyncio.sleep(self._tick_interval_seconds)
-            self.ticker.advance_once()
+            try:
+                self.ticker.advance_once()
+            except Exception:
+                LOGGER.exception("unexpected error in game tick")

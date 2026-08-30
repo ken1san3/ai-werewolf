@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from random import Random
 from pathlib import Path
 import unittest
 
 from websockets.asyncio.client import connect
 
-from server.aiwolf_core import GameState, InMemoryEventSink, PlayerConfig, load_content, load_preset
+from server.aiwolf_core import (
+    GamePhase,
+    GameState,
+    InMemoryEventSink,
+    PlayerConfig,
+    load_content,
+    load_preset,
+)
 from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGameServer
-from server.network.protocol import ProtocolMessageValidator
+from server.network.protocol import ProtocolMessageValidator, ProtocolValidationError
+from server.network.session import UnaddressableRequest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GAME_ID = "123e4567-e89b-12d3-a456-426614174100"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
 
 
-def make_game() -> GameState:
+def make_game(game_id: str = GAME_ID) -> GameState:
     content = load_content(PROJECT_ROOT / "content")
     preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
     players = [
@@ -27,7 +37,7 @@ def make_game() -> GameState:
         content,
         preset,
         players,
-        game_id=GAME_ID,
+        game_id=game_id,
         event_sink=InMemoryEventSink(),
         rng=Random(0),
         started_at=0,
@@ -65,9 +75,10 @@ class SessionManagerTests(unittest.TestCase):
         self.validator = ProtocolMessageValidator()
 
     def test_join_issues_token_only_to_the_joined_session_and_ready_marks_seat(self) -> None:
-        reply, context = self.manager.handle_message(
+        result = self.manager.handle_message(
             client_message("session.join", {"player_id": "player-0"})
         )
+        reply, context = result.reply, result.context
 
         self.assertIsNotNone(context)
         self.assertEqual(reply.type, "session.joined")
@@ -79,9 +90,10 @@ class SessionManagerTests(unittest.TestCase):
         self.assertEqual(session.connected_player_ids, {"player-0"})
         self.assertEqual(session.ready_player_ids, frozenset())
 
-        ready_reply, ready_context = self.manager.handle_message(
+        ready_result = self.manager.handle_message(
             client_message("session.ready", {}), context
         )
+        ready_reply, ready_context = ready_result.reply, ready_result.context
 
         self.assertIs(ready_context, context)
         self.assertEqual(ready_reply.type, "session.ready")
@@ -91,62 +103,58 @@ class SessionManagerTests(unittest.TestCase):
         self.validator.validate_server(ready_reply.as_message())
 
     def test_resume_verifies_token_without_accepting_player_id_claim(self) -> None:
-        joined_reply, joined_context = self.manager.handle_message(
+        joined_result = self.manager.handle_message(
             client_message("session.join", {"player_id": "player-0"})
         )
+        joined_reply, joined_context = joined_result.reply, joined_result.context
         self.manager.disconnect(joined_context)
 
-        resumed_reply, resumed_context = self.manager.handle_message(
+        resumed_result = self.manager.handle_message(
             client_message(
                 "session.resume",
                 {"connection_token": joined_reply.payload["connection_token"], "last_seq": 1},
             )
         )
+        resumed_reply, resumed_context = resumed_result.reply, resumed_result.context
 
         self.assertIsNotNone(resumed_context)
         self.assertEqual(resumed_context.player_id, "player-0")
         self.assertEqual(resumed_reply.type, "session.resumed")
         self.assertEqual(resumed_reply.payload, {"player_id": "player-0", "last_seq": 1})
 
-        invalid_claim_reply, invalid_claim_context = self.manager.handle_message(
-            client_message(
-                "session.resume",
-                {
-                    "connection_token": joined_reply.payload["connection_token"],
-                    "last_seq": 1,
-                    "player_id": "player-1",
-                },
+        with self.assertRaises(UnaddressableRequest):
+            self.manager.handle_message(
+                client_message(
+                    "session.resume",
+                    {
+                        "connection_token": joined_reply.payload["connection_token"],
+                        "last_seq": 1,
+                        "player_id": "player-1",
+                    },
+                )
             )
-        )
-        self.assertIsNone(invalid_claim_context)
-        self.assertEqual(invalid_claim_reply.type, "action.rejected")
-        self.assertEqual(invalid_claim_reply.payload["reason"], "invalid_message")
-
-        invalid_token_reply, invalid_token_context = self.manager.handle_message(
-            client_message("session.resume", {"connection_token": "wrong", "last_seq": 2})
-        )
-        self.assertIsNone(invalid_token_context)
-        self.assertEqual(invalid_token_reply.type, "action.rejected")
-        self.assertEqual(invalid_token_reply.payload["reason"], "invalid_connection_token")
+        with self.assertRaises(UnaddressableRequest):
+            self.manager.handle_message(
+                client_message("session.resume", {"connection_token": "wrong", "last_seq": 2})
+            )
 
     def test_major_protocol_mismatch_and_unknown_player_are_rejected_without_token(self) -> None:
-        mismatch_reply, mismatch_context = self.manager.handle_message(
-            client_message("session.join", {"player_id": "player-0"}, protocol_version="2.0")
-        )
-        self.assertIsNone(mismatch_context)
-        self.assertEqual(mismatch_reply.payload["reason"], "unsupported_protocol_version")
+        with self.assertRaises(UnaddressableRequest):
+            self.manager.handle_message(
+                client_message("session.join", {"player_id": "player-0"}, protocol_version="2.0")
+            )
         self.assertFalse(self.manager.session_for(GAME_ID).has_joined("player-0"))
 
-        unknown_reply, unknown_context = self.manager.handle_message(
-            client_message("session.join", {"player_id": "not-a-player"})
-        )
-        self.assertIsNone(unknown_context)
-        self.assertEqual(unknown_reply.payload["reason"], "unknown_player")
+        with self.assertRaises(UnaddressableRequest):
+            self.manager.handle_message(
+                client_message("session.join", {"player_id": "not-a-player"})
+            )
 
     def test_disconnect_keeps_the_game_and_seat_intact(self) -> None:
-        _, context = self.manager.handle_message(
+        result = self.manager.handle_message(
             client_message("session.join", {"player_id": "player-0"})
         )
+        context = result.context
         phase_before = self.game.phase
 
         self.manager.disconnect(context)
@@ -155,26 +163,101 @@ class SessionManagerTests(unittest.TestCase):
         self.assertEqual(self.game.phase, phase_before)
         self.assertEqual(self.manager.session_for(GAME_ID).connected_player_ids, frozenset())
 
+    def test_sequences_are_contiguous_per_player_and_continue_across_reconnection(self) -> None:
+        first = self.manager.handle_message(client_message("session.join", {"player_id": "player-0"}))
+        first_ready = self.manager.handle_message(client_message("session.ready", {}), first.context)
+        second = self.manager.handle_message(client_message("session.join", {"player_id": "player-1"}))
+        second_ready = self.manager.handle_message(client_message("session.ready", {}), second.context)
+
+        self.assertEqual([first.reply.seq, first_ready.reply.seq], [1, 2])
+        self.assertEqual([second.reply.seq, second_ready.reply.seq], [1, 2])
+
+        replacement = self.manager.handle_message(
+            client_message(
+                "session.resume",
+                {"connection_token": first.reply.payload["connection_token"], "last_seq": 2},
+            )
+        )
+        self.assertEqual(replacement.reply.seq, 3)
+        self.assertEqual(replacement.replaced_connection_ids, (first.context.connection_id,))
+        self.assertEqual(self.manager.session_for(GAME_ID).connection_count("player-0"), 1)
+
+    def test_non_uuid_game_id_is_valid_for_core_and_protocol_messages(self) -> None:
+        game = make_game("standard-nine")
+        manager = SessionManager(
+            GameRegistry({game.game_id: game}),
+            clock=lambda: 12,
+            token_factory=lambda: "non-uuid-game-token",
+        )
+
+        result = manager.handle_message(
+            client_message("session.join", {"player_id": "player-0"}, game_id=game.game_id)
+        )
+
+        self.assertEqual(result.reply.game_id, "standard-nine")
+        ProtocolMessageValidator().validate_server(result.reply.as_message())
+
 
 class TickDriverTests(unittest.TestCase):
     def test_tick_uses_one_server_clock_value_for_every_registered_game(self) -> None:
         class RecordingGame:
-            def __init__(self, game_id: str) -> None:
+            def __init__(self, game_id: str, *, phase: GamePhase | None = None, broken: bool = False) -> None:
                 self.game_id = game_id
                 self.players: dict[str, object] = {}
                 self.received_times: list[int] = []
+                self.phase = phase
+                self.broken = broken
 
             def advance_if_due(self, now: int) -> bool:
                 self.received_times.append(now)
+                if self.broken:
+                    raise RuntimeError("broken game")
                 return self.game_id == "game-a"
 
         first = RecordingGame("game-a")
         second = RecordingGame("game-b")
-        ticker = TickDriver(GameRegistry({"game-a": first, "game-b": second}), clock=lambda: 77)
+        finished = RecordingGame("finished", phase=GamePhase.GAME_END)
+        broken = RecordingGame("broken", broken=True)
+        ticker = TickDriver(
+            GameRegistry({"game-a": first, "finished": finished, "broken": broken, "game-b": second}),
+            clock=lambda: 77,
+        )
 
-        self.assertEqual(ticker.advance_once(), {"game-a": True, "game-b": False})
+        with self.assertLogs("server.network.session", level="ERROR"):
+            self.assertEqual(
+                ticker.advance_once(),
+                {"game-a": True, "finished": False, "broken": False, "game-b": False},
+            )
         self.assertEqual(first.received_times, [77])
         self.assertEqual(second.received_times, [77])
+        self.assertEqual(finished.received_times, [])
+        self.assertEqual(broken.received_times, [77])
+
+
+class ProtocolMessageValidatorTests(unittest.TestCase):
+    def test_type_specific_validators_are_derived_from_schema_definitions(self) -> None:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        schema = deepcopy(schema)
+        schema["$defs"]["test_request"] = {
+            "allOf": [
+                {"$ref": "#/$defs/client_request"},
+                {
+                    "properties": {
+                        "type": {"const": "session.test"},
+                        "payload": {
+                            "type": "object",
+                            "required": ["value"],
+                            "properties": {"value": {"type": "string", "minLength": 1}},
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+            ]
+        }
+        validator = ProtocolMessageValidator(schema=schema)
+        with self.assertRaises(ProtocolValidationError):
+            validator.validate_client(client_message("session.test", {}))
+        validator.validate_client(client_message("session.test", {"value": "ok"}))
 
 
 class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
@@ -195,9 +278,57 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("connection_token", joined["payload"])
 
                 await other_socket.send(json.dumps(client_message("session.ready", {})))
-                unauthenticated = json.loads(await other_socket.recv())
-                self.assertEqual(unauthenticated["type"], "action.rejected")
-                self.assertNotIn("connection_token", unauthenticated["payload"])
+                await other_socket.wait_closed()
+                self.assertEqual(other_socket.close_code, 1008)
+
+                async with connect(uri) as resuming_socket:
+                    await resuming_socket.send(
+                        json.dumps(
+                            client_message(
+                                "session.resume",
+                                {
+                                    "connection_token": joined["payload"]["connection_token"],
+                                    "last_seq": 1,
+                                },
+                            )
+                        )
+                    )
+                    resumed = json.loads(await resuming_socket.recv())
+                    self.assertEqual(resumed["type"], "session.resumed")
+                    self.assertEqual(resumed["seq"], 2)
+                    await joined_socket.wait_closed()
+                    self.assertEqual(joined_socket.close_code, 4001)
+                    self.assertEqual(server.sessions.session_for(GAME_ID).connection_count("player-0"), 1)
+        finally:
+            await server.close()
+
+    async def test_outbound_schema_failure_is_logged_and_closes_only_that_connection(self) -> None:
+        class OutboundFailingValidator:
+            def validate_client(self, message: object) -> None:
+                return None
+
+            def validate_server(self, message: object) -> None:
+                raise ProtocolValidationError("forced outbound validation failure")
+
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        sessions = SessionManager(
+            registry,
+            token_factory=lambda: "token-for-player-0",
+            validator=OutboundFailingValidator(),
+        )
+        server = WebSocketGameServer(registry, sessions=sessions, tick_interval_seconds=3600)
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as socket:
+                with self.assertLogs("server.network.server", level="ERROR"):
+                    await socket.send(
+                        json.dumps(client_message("session.join", {"player_id": "player-0"}))
+                    )
+                    await socket.wait_closed()
+                self.assertEqual(socket.close_code, 1011)
+                self.assertEqual(sessions.session_for(GAME_ID).connection_count("player-0"), 0)
         finally:
             await server.close()
 

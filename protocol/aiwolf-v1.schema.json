@@ -16,6 +16,11 @@
       "type": "string",
       "format": "uuid"
     },
+    "game_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "An opaque non-empty identifier chosen by the authoritative game creator."
+    },
     "protocol_version": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+$",
@@ -55,7 +60,7 @@
         "type": { "$ref": "#/$defs/message_type" },
         "protocol_version": { "$ref": "#/$defs/protocol_version" },
         "event_id": { "$ref": "#/$defs/uuid" },
-        "game_id": { "$ref": "#/$defs/uuid" },
+        "game_id": { "$ref": "#/$defs/game_id" },
         "timestamp": { "$ref": "#/$defs/timestamp" },
         "payload": { "$ref": "#/$defs/payload" }
       },

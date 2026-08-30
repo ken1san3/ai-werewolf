@@ -6,6 +6,7 @@ from .session import (
     ConnectionContext,
     GameRegistry,
     SessionManager,
+    SessionResult,
     TickDriver,
     monotonic_seconds,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "ProtocolMessageValidator",
     "ProtocolValidationError",
     "SessionManager",
+    "SessionResult",
     "TickDriver",
     "WebSocketGameServer",
     "monotonic_seconds",

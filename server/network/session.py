@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import time
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from ..aiwolf_core.clock import timestamp
+from ..aiwolf_core.models import GamePhase
 
 from .protocol import ProtocolMessageValidator, ProtocolValidationError
 
@@ -18,6 +20,7 @@ PROTOCOL_VERSION = "1.0"
 Clock = Callable[[], int]
 TokenFactory = Callable[[], str]
 EventIdFactory = Callable[[], str]
+LOGGER = logging.getLogger(__name__)
 
 
 class SessionGame(Protocol):
@@ -67,6 +70,15 @@ class ServerReply:
         }
 
 
+@dataclass(frozen=True)
+class SessionResult:
+    """A direct reply plus the authenticated connection it belongs to."""
+
+    reply: ServerReply
+    context: ConnectionContext | None
+    replaced_connection_ids: tuple[str, ...] = ()
+
+
 def monotonic_seconds() -> int:
     """Return the server's integer monotonic clock for core deadlines and events."""
 
@@ -92,12 +104,18 @@ class GameRegistry:
         except KeyError as error:
             raise UnaddressableRequest("unknown_game") from error
 
-    def advance_if_due(self, now: int) -> Mapping[str, bool]:
-        return {game_id: game.advance_if_due(now) for game_id, game in self._games.items()}
+    def tickable_games(self) -> Mapping[str, SessionGame]:
+        """Return games that still have a deadline-driven phase to progress."""
+
+        return {
+            game_id: game
+            for game_id, game in self._games.items()
+            if getattr(game, "phase", None) is not GamePhase.GAME_END
+        }
 
 
 class _GameSession:
-    """Per-game token store and outbound event sequence counter."""
+    """Per-game token store and per-player outbound event sequence counters."""
 
     def __init__(
         self,
@@ -115,7 +133,7 @@ class _GameSession:
         self._players_by_token: dict[str, str] = {}
         self._connections: dict[str, set[str]] = {}
         self._ready_player_ids: set[str] = set()
-        self._next_seq = 1
+        self._next_seq_by_player: dict[str, int] = {}
 
     @property
     def ready_player_ids(self) -> frozenset[str]:
@@ -125,34 +143,41 @@ class _GameSession:
     def connected_player_ids(self) -> frozenset[str]:
         return frozenset(player_id for player_id, connections in self._connections.items() if connections)
 
+    def connection_count(self, player_id: str) -> int:
+        return len(self._connections.get(player_id, ()))
+
     def join(self, player_id: str) -> tuple[ConnectionContext, ServerReply]:
         token = self._new_token()
         self._tokens_by_player[player_id] = token
         self._players_by_token[token] = player_id
         context = self._connect(player_id, token)
         return context, self._reply(
+            player_id,
             "session.joined",
             {"player_id": player_id, "connection_token": token},
         )
 
     def resume(
         self, connection_token: str, last_seq: int
-    ) -> tuple[ConnectionContext | None, ServerReply]:
+    ) -> tuple[ConnectionContext, ServerReply, tuple[str, ...]]:
         player_id = self._players_by_token.get(connection_token)
         if player_id is None:
-            return None, self._reply(
-                "action.rejected",
-                {"action": "session.resume", "reason": "invalid_connection_token"},
-            )
+            raise UnaddressableRequest("invalid_connection_token")
+        replaced_connection_ids = tuple(self._connections.pop(player_id, ()))
         context = self._connect(player_id, connection_token)
         return context, self._reply(
+            player_id,
             "session.resumed",
             {"player_id": player_id, "last_seq": last_seq},
-        )
+        ), replaced_connection_ids
 
     def ready(self, context: ConnectionContext) -> ServerReply:
         self._ready_player_ids.add(context.player_id)
-        return self._reply("session.ready", {"player_id": context.player_id, "ready": True})
+        return self._reply(
+            context.player_id,
+            "session.ready",
+            {"player_id": context.player_id, "ready": True},
+        )
 
     def has_joined(self, player_id: str) -> bool:
         return player_id in self._tokens_by_player
@@ -165,8 +190,12 @@ class _GameSession:
         if not connections:
             del self._connections[context.player_id]
 
-    def rejected(self, action: str, reason: str) -> ServerReply:
-        return self._reply("action.rejected", {"action": action, "reason": reason})
+    def rejected(self, context: ConnectionContext, action: str, reason: str) -> ServerReply:
+        return self._reply(
+            context.player_id,
+            "action.rejected",
+            {"action": action, "reason": reason},
+        )
 
     def _connect(self, player_id: str, connection_token: str) -> ConnectionContext:
         context = ConnectionContext(
@@ -186,16 +215,19 @@ class _GameSession:
             raise ValueError("connection token factory returned a duplicate token")
         return token
 
-    def _reply(self, message_type: str, payload: Mapping[str, Any]) -> ServerReply:
+    def _reply(
+        self, player_id: str, message_type: str, payload: Mapping[str, Any]
+    ) -> ServerReply:
+        next_seq = self._next_seq_by_player.get(player_id, 1)
         reply = ServerReply(
             type=message_type,
             game_id=self.game.game_id,
-            seq=self._next_seq,
+            seq=next_seq,
             timestamp=timestamp(self._clock()),
             payload=payload,
             event_id=self._event_id_factory(),
         )
-        self._next_seq += 1
+        self._next_seq_by_player[player_id] = next_seq + 1
         return reply
 
 class SessionManager:
@@ -232,7 +264,7 @@ class SessionManager:
 
     def handle_json(
         self, raw_message: str, context: ConnectionContext | None = None
-    ) -> tuple[ServerReply, ConnectionContext | None]:
+    ) -> SessionResult:
         if not isinstance(raw_message, str):
             raise UnaddressableRequest("binary_messages_not_supported")
         try:
@@ -245,72 +277,95 @@ class SessionManager:
 
     def handle_message(
         self, message: Mapping[str, Any], context: ConnectionContext | None = None
-    ) -> tuple[ServerReply, ConnectionContext | None]:
-        game_id = message.get("game_id")
-        if not isinstance(game_id, str):
-            raise UnaddressableRequest("missing_game_id")
-        session = self.session_for(game_id)
+    ) -> SessionResult:
         action = message.get("type") if isinstance(message.get("type"), str) else "request"
+        if context is None:
+            game_id = message.get("game_id")
+            if not isinstance(game_id, str):
+                raise UnaddressableRequest("missing_game_id")
+            session = self.session_for(game_id)
+            try:
+                self._validator.validate_client(message)
+            except ProtocolValidationError as error:
+                raise UnaddressableRequest("invalid_message") from error
+            if not _same_major_version(message["protocol_version"], PROTOCOL_VERSION):
+                raise UnaddressableRequest("unsupported_protocol_version")
+            message_type = message["type"]
+            if message_type == "session.join":
+                player_id = message["payload"]["player_id"]
+                if player_id not in session.game.players:
+                    raise UnaddressableRequest("unknown_player")
+                if session.has_joined(player_id):
+                    raise UnaddressableRequest("already_joined")
+                new_context, reply = session.join(player_id)
+                return self._result(reply, new_context)
+            if message_type == "session.resume":
+                new_context, reply, replaced_connection_ids = session.resume(
+                    message["payload"]["connection_token"], message["payload"]["last_seq"]
+                )
+                return self._result(reply, new_context, replaced_connection_ids)
+            raise UnaddressableRequest("not_authenticated")
+
+        session = self.session_for(context.game_id)
         try:
             self._validator.validate_client(message)
         except ProtocolValidationError:
-            return self._validated_reply(session.rejected(action, "invalid_message")), context
+            return self._result(session.rejected(context, action, "invalid_message"), context)
 
+        if message["game_id"] != context.game_id:
+            return self._result(session.rejected(context, action, "game_mismatch"), context)
         if not _same_major_version(message["protocol_version"], PROTOCOL_VERSION):
-            return self._validated_reply(
-                session.rejected(action, "unsupported_protocol_version")
-            ), context
+            return self._result(
+                session.rejected(context, action, "unsupported_protocol_version"), context
+            )
 
         message_type = message["type"]
-        if message_type == "session.join":
-            if context is not None:
-                return self._validated_reply(session.rejected(message_type, "already_authenticated")), context
-            player_id = message["payload"]["player_id"]
-            if player_id not in session.game.players:
-                return self._validated_reply(session.rejected(message_type, "unknown_player")), context
-            if session.has_joined(player_id):
-                return self._validated_reply(session.rejected(message_type, "already_joined")), context
-            new_context, reply = session.join(player_id)
-            return self._validated_reply(reply), new_context
-
-        if message_type == "session.resume":
-            if context is not None:
-                return self._validated_reply(session.rejected(message_type, "already_authenticated")), context
-            new_context, reply = session.resume(
-                message["payload"]["connection_token"], message["payload"]["last_seq"]
-            )
-            return self._validated_reply(reply), new_context
-
         if message_type == "session.ready":
-            if context is None:
-                return self._validated_reply(session.rejected(message_type, "not_authenticated")), context
-            if context.game_id != game_id:
-                own_session = self.session_for(context.game_id)
-                return self._validated_reply(
-                    own_session.rejected(message_type, "game_mismatch")
-                ), context
-            return self._validated_reply(session.ready(context)), context
+            return self._result(session.ready(context), context)
 
-        return self._validated_reply(session.rejected(message_type, "unsupported_action")), context
+        return self._result(session.rejected(context, message_type, "unsupported_action"), context)
 
     def disconnect(self, context: ConnectionContext | None) -> None:
         if context is not None:
             self.session_for(context.game_id).disconnect(context)
 
-    def _validated_reply(self, reply: ServerReply) -> ServerReply:
-        self._validator.validate_server(reply.as_message())
-        return reply
+    def _result(
+        self,
+        reply: ServerReply,
+        context: ConnectionContext | None,
+        replaced_connection_ids: tuple[str, ...] = (),
+    ) -> SessionResult:
+        try:
+            self._validator.validate_server(reply.as_message())
+        except ProtocolValidationError:
+            self.disconnect(context)
+            raise
+        return SessionResult(reply, context, replaced_connection_ids)
 
 
 class TickDriver:
     """Drive every authoritative game from one injected monotonic server clock."""
 
-    def __init__(self, registry: GameRegistry, *, clock: Clock = monotonic_seconds) -> None:
+    def __init__(
+        self,
+        registry: GameRegistry,
+        *,
+        clock: Clock = monotonic_seconds,
+        logger: logging.Logger = LOGGER,
+    ) -> None:
         self._registry = registry
         self._clock = clock
+        self._logger = logger
 
     def advance_once(self) -> Mapping[str, bool]:
-        return self._registry.advance_if_due(timestamp(self._clock()))
+        now = timestamp(self._clock())
+        results = {game_id: False for game_id in self._registry.games}
+        for game_id, game in self._registry.tickable_games().items():
+            try:
+                results[game_id] = game.advance_if_due(now)
+            except Exception:
+                self._logger.exception("tick failed for game '%s'", game_id)
+        return results
 
 
 def _same_major_version(client_version: str, server_version: str) -> bool:
