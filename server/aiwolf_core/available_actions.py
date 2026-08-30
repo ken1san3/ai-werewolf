@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from .action_constraints import ActionConstraints
 from .models import GamePhase
 from .state import ActionSpec, Player
+from .targets import chat_channels_for
 from .voting import can_abstain, valid_vote_target_ids
 
 if TYPE_CHECKING:
@@ -25,8 +26,9 @@ class ActionAvailability(ActionConstraints):
             return []
 
         actions = self.ability_actions(player)
-        actions.extend(self.chat_actions(player))
-        actions.extend(self.phase_actions(player))
+        chat_actions = self.chat_actions(player)
+        actions.extend(chat_actions)
+        actions.extend(self.phase_actions(player, chat_actions))
         return actions
 
     def ability_actions(self, player: Player) -> list[ActionSpec]:
@@ -52,20 +54,22 @@ class ActionAvailability(ActionConstraints):
         phase_id = self.game.phase.value
         return [
             ActionSpec(type="chat", channel=channel_id)
-            for channel_id in player.role.chat_channels
+            for channel_id in chat_channels_for(player)
             if phase_id in self.game.content.chat_channels[channel_id].phases
         ]
 
-    def phase_actions(self, player: Player) -> list[ActionSpec]:
-        if self.game.phase is GamePhase.DAY:
-            return [ActionSpec(type="co_declare"), ActionSpec(type="co_report")]
+    def phase_actions(self, player: Player, chat_actions: list[ActionSpec]) -> list[ActionSpec]:
+        actions: list[ActionSpec] = []
+        if any(action.channel == "public" for action in chat_actions):
+            actions.extend((ActionSpec(type="co_declare"), ActionSpec(type="co_report")))
         if self.game.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
-            return []
-        return [
+            return actions
+        actions.append(
             ActionSpec(
                 type="vote",
                 valid_targets=valid_vote_target_ids(self.game, player),
                 target_count=1,
                 allows_abstain=can_abstain(self.game, player.player_id),
             )
-        ]
+        )
+        return actions

@@ -22,7 +22,6 @@ rules:
     tie: random
   co:
     max_per_day: 3
-    allow_from_day2: true
     allow_villager_claim: false
   death:
     public_detail: phase

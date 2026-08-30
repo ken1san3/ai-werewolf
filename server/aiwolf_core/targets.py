@@ -50,6 +50,23 @@ def passives_for(player: Player) -> tuple[Passive, ...]:
     )
 
 
+def chat_channels_for(player: Player) -> tuple[str, ...]:
+    """Return role and modifier chat channels in declaration order without duplicates."""
+
+    channels: list[str] = []
+    seen: set[str] = set()
+    declared_channels = player.role.chat_channels + tuple(
+        channel_id
+        for modifier in player.modifiers
+        for channel_id in modifier.definition.chat_channels
+    )
+    for channel_id in declared_channels:
+        if channel_id not in seen:
+            seen.add(channel_id)
+            channels.append(channel_id)
+    return tuple(channels)
+
+
 def valid_target_ids(game: GameState, actor: Player, target: TargetSpec) -> tuple[str, ...]:
     """Resolve a content-declared target selector against authoritative state."""
 

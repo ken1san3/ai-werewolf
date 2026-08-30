@@ -25,7 +25,7 @@ Phase 1.3 の `_phase_action_kinds` は phase と content timing だけを見た
 - 使用回数が0の Ability は、次の選択肢更新で残回数を伝えるため `uses_remaining: 0` として
   ActionSpec に残す。送信時は使用不能として拒否する。
 - CO の受付・回数管理・真偽を問わない内容検証は Phase 2.4 の責務のままとする。
-  Phase 1.7 は Day 中に利用する操作種別の列挙だけを行う。
+  Phase 1.7 は公開チャネルへの発言が列挙されたときだけ、CO 操作種別を列挙する。
 
 ## Why
 
@@ -39,7 +39,9 @@ Phase 1.3 の `_phase_action_kinds` は phase と content timing だけを見た
 - `_phase_action_kinds` と `PhaseActionKind` は削除する。
 - Phase 2 の `player.action_state` は ActionSpec をシリアライズするだけでよく、ネットワーク層に
   行動可否の判断を複製しない。
-- CO の具体的な入力フィールドと `rules.co` の受付制約は Phase 2.4 まで実行しない。
+- CO の具体的な入力フィールドと `rules.co.max_per_day` /
+  `rules.co.allow_villager_claim` の受付制約は Phase 2.4 まで実行しない。
+  日数制限は設けないため、そのルール設定は持たない。
 
 ## Verification
 

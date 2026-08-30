@@ -6,6 +6,7 @@ from random import Random
 import unittest
 
 from server.aiwolf_core import (
+    AppliedModifier,
     EventBus,
     EventVisibility,
     GamePhase,
@@ -14,6 +15,13 @@ from server.aiwolf_core import (
     Player,
     load_content,
     load_preset,
+)
+from server.aiwolf_core.models import (
+    AttributeOverrides,
+    Knowledge,
+    Modifier,
+    ModifierGrant,
+    ModifierWinCondition,
 )
 
 
@@ -27,17 +35,18 @@ class AvailableActionsTests(unittest.TestCase):
         self.content = load_content(CONTENT_ROOT)
         self.preset = load_preset(PRESET_PATH, self.content)
 
-    def make_game(self, roles: dict[str, str], *, rules=None, phase=GamePhase.NIGHT) -> GameState:
+    def make_game(self, roles: dict[str, str], *, rules=None, phase=GamePhase.NIGHT, content=None) -> GameState:
+        content = self.content if content is None else content
         sink = InMemoryEventSink()
         event_bus = EventBus()
         for visibility in EventVisibility:
             event_bus.subscribe(visibility, sink.record)
         game = GameState(
             game_id="available-actions-test",
-            content=self.content,
+            content=content,
             rules=rules or replace(self.preset.rules, night_seconds=10),
             players={
-                player_id: Player(player_id, player_id, self.content.roles[role_id])
+                player_id: Player(player_id, player_id, content.roles[role_id])
                 for player_id, role_id in roles.items()
             },
             rng=Random(7),
@@ -147,6 +156,56 @@ class AvailableActionsTests(unittest.TestCase):
 
         game._record_player_death("villager", "lynched")
         self.assertEqual(game.get_available_actions("villager"), [])
+
+    def test_modifier_chat_channels_are_enumerated_without_duplicates(self) -> None:
+        modifier = Modifier(
+            id="test_lover_channel",
+            name="test_lover_channel",
+            grant=ModifierGrant("in_game", "permanent"),
+            win_condition=ModifierWinCondition("none", None, None),
+            passives=(),
+            knowledge=Knowledge({}),
+            chat_channels=("public", "lover"),
+            overrides=AttributeOverrides(),
+            exclusions=frozenset(),
+        )
+        game = self.make_game({"villager": "villager"})
+        game.players["villager"] = replace(
+            game.players["villager"], modifiers=(AppliedModifier.grant(modifier),)
+        )
+
+        self.assertEqual(
+            [(action.type, action.channel) for action in game.get_available_actions("villager")],
+            [("chat", "lover")],
+        )
+
+        game._enter_phase(GamePhase.DAY, 110)
+        self.assertEqual(
+            [(action.type, action.channel) for action in game.get_available_actions("villager")],
+            [("chat", "public"), ("co_declare", None), ("co_report", None)],
+        )
+
+    def test_co_actions_follow_public_chat_action_availability(self) -> None:
+        night_public_content = replace(
+            self.content,
+            chat_channels={
+                **self.content.chat_channels,
+                "public": replace(self.content.chat_channels["public"], phases=("night",)),
+            },
+        )
+
+        night_game = self.make_game(
+            {"villager": "villager"}, content=night_public_content, phase=GamePhase.NIGHT
+        )
+        self.assertEqual(
+            [(action.type, action.channel) for action in night_game.get_available_actions("villager")],
+            [("chat", "public"), ("co_declare", None), ("co_report", None)],
+        )
+
+        day_game = self.make_game(
+            {"villager": "villager"}, content=night_public_content, phase=GamePhase.DAY
+        )
+        self.assertEqual(day_game.get_available_actions("villager"), [])
 
 
 if __name__ == "__main__":

@@ -338,7 +338,6 @@ class WolfAttackRules:
 @dataclass(frozen=True)
 class CoRules:
     max_per_day: int | None
-    allow_from_day2: bool
     allow_villager_claim: bool
 
 

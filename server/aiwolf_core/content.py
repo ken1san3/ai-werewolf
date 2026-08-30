@@ -932,10 +932,9 @@ def _parse_wolf_attack_rules(data: Mapping[str, Any], path: str) -> WolfAttackRu
 
 
 def _parse_co_rules(data: Mapping[str, Any], path: str) -> CoRules:
-    _keys(data, required={"max_per_day", "allow_from_day2", "allow_villager_claim"}, optional=set(), path=path)
+    _keys(data, required={"max_per_day", "allow_villager_claim"}, optional=set(), path=path)
     return CoRules(
         max_per_day=_optional_integer(data["max_per_day"], f"{path}.max_per_day", minimum=1),
-        allow_from_day2=_boolean(data["allow_from_day2"], f"{path}.allow_from_day2"),
         allow_villager_claim=_boolean(data["allow_villager_claim"], f"{path}.allow_villager_claim"),
     )
 
