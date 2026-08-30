@@ -15,6 +15,33 @@ from .wins import WinEvaluator
 
 if TYPE_CHECKING:
     from .game import GameState
+    from .state import Player
+
+
+def valid_vote_target_ids(game: GameState, voter: Player) -> tuple[str, ...]:
+    """Return vote targets accepted for this voter in the current round."""
+
+    candidates = (
+        game.runoff_candidate_player_ids
+        if game.phase is GamePhase.RUNOFF
+        else tuple(game.players)
+    )
+    return tuple(
+        player_id
+        for player_id in candidates
+        if game.players[player_id].alive
+        and (game.rules.vote.self_vote or player_id != voter.player_id)
+    )
+
+
+def can_abstain(game: GameState, voter_player_id: str) -> bool:
+    """Return whether the vote's explicit abstention choice is still legal."""
+
+    abstain = game.rules.vote.abstain
+    return abstain.enabled and (
+        abstain.max_per_player is None
+        or game.abstentions_used.get(voter_player_id, 0) < abstain.max_per_player
+    )
 
 
 class VoteResolver:
@@ -33,12 +60,9 @@ class VoteResolver:
             self.validate_abstention(voter.player_id)
         else:
             target = alive_player(self.game, target_player_id, "vote target")
-            if not self.game.rules.vote.self_vote and voter.player_id == target.player_id:
-                raise ValueError("self-voting is disabled by the current rules")
-            if (
-                self.game.phase is GamePhase.RUNOFF
-                and target.player_id not in self.game.runoff_candidate_player_ids
-            ):
+            if target.player_id not in valid_vote_target_ids(self.game, voter):
+                if not self.game.rules.vote.self_vote and voter.player_id == target.player_id:
+                    raise ValueError("self-voting is disabled by the current rules")
                 raise ValueError("runoff votes must target a runoff candidate")
         self.game.pending_votes[voter.player_id] = target_player_id
         self.game.event_bus.publish(
@@ -204,10 +228,7 @@ class VoteResolver:
         abstain = self.game.rules.vote.abstain
         if not abstain.enabled:
             raise ValueError("abstaining is disabled by the current rules")
-        if (
-            abstain.max_per_player is not None
-            and self.game.abstentions_used.get(voter_player_id, 0) >= abstain.max_per_player
-        ):
+        if not can_abstain(self.game, voter_player_id):
             raise ValueError("the abstention limit has been reached")
 
     def consume_abstentions(self, final_votes: Mapping[str, str | None]) -> None:

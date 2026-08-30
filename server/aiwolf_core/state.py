@@ -86,19 +86,61 @@ class GameResult:
 
 
 @dataclass(frozen=True)
-class PhaseActionKind:
-    """Phase-only action information, before Phase 1.7 builds ActionSpec."""
+class ActionSpec:
+    """One player-visible action with only the information needed to select it."""
 
     type: str
     ability_id: str | None = None
     channel: str | None = None
+    description: str | None = None
+    valid_targets: tuple[str, ...] = ()
+    target_count: int | None = None
+    uses_remaining: int | None = None
+    allows_abstain: bool = False
 
     def __post_init__(self) -> None:
-        if self.type == "ability" and self.ability_id and self.channel is None:
+        if len(self.valid_targets) != len(set(self.valid_targets)) or any(
+            not player_id for player_id in self.valid_targets
+        ):
+            raise ValueError("valid targets must be unique non-empty player ids")
+        if self.type == "ability":
+            if (
+                not self.ability_id
+                or self.channel is not None
+                or self.target_count is None
+                or self.target_count < 1
+                or self.uses_remaining is not None
+                and self.uses_remaining < 0
+                or self.allows_abstain
+            ):
+                raise ValueError("an ability action requires valid ability fields")
             return
-        if self.type == "chat" and self.channel and self.ability_id is None:
-            return
-        raise ValueError("an action must be either an ability or a chat action")
+        if self.type == "chat":
+            if self.channel and not self.ability_id and not self.valid_targets and self.target_count is None:
+                return
+            raise ValueError("a chat action requires only a channel")
+        if self.type == "vote":
+            if (
+                self.ability_id is None
+                and self.channel is None
+                and self.description is None
+                and self.target_count == 1
+                and self.uses_remaining is None
+            ):
+                return
+            raise ValueError("a vote action requires vote target fields")
+        if self.type in {"co_declare", "co_report"}:
+            if (
+                self.ability_id is None
+                and self.channel is None
+                and self.description is None
+                and not self.valid_targets
+                and self.target_count is None
+                and self.uses_remaining is None
+                and not self.allows_abstain
+            ):
+                return
+        raise ValueError(f"unsupported action type '{self.type}'")
 
 
 @dataclass(frozen=True)

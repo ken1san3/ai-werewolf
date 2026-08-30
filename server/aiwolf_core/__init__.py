@@ -5,6 +5,7 @@ from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEve
 from .death import public_death_cause
 from .game import GameState
 from .state import (
+    ActionSpec,
     GameResult,
     Player,
     PlayerConfig,
@@ -26,6 +27,7 @@ from .models import (
 
 __all__ = [
     "AppliedModifier",
+    "ActionSpec",
     "ContentPack",
     "ContentValidationError",
     "EffectiveAttributes",

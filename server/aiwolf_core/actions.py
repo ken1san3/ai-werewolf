@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from itertools import combinations
 from typing import TYPE_CHECKING, Mapping, Sequence
 
+from .action_constraints import ACTION_RESTRICTION_DISPATCH_IDS, ActionConstraints
 from .clock import timestamp
 from .death import DeathResolver
 from .events import EventVisibility, GameEvent
-from .models import Ability, CoreDeathCause, GamePhase, TargetSpec
-from .state import ActionReservation, DeathRequest, PhaseActionKind, ScheduledEffect
-from .targets import alive_player, effective_attributes, night_number, valid_target_ids
+from .models import Ability, CoreDeathCause, GamePhase
+from .state import ActionReservation, DeathRequest, ScheduledEffect
+from .targets import alive_player, effective_attributes, valid_target_ids
 
 if TYPE_CHECKING:
     from .game import GameState
@@ -20,16 +20,11 @@ if TYPE_CHECKING:
 ACTION_EFFECT_DISPATCH_IDS = frozenset(
     {"protect", "inspect", "medium_inspect", "attack", "inspect_role", "kill"}
 )
-ACTION_RESTRICTION_DISPATCH_IDS = frozenset(
-    {"no_same_target_consecutive", "no_self_target"}
-)
-
-
-class ActionResolver:
+class ActionResolver(ActionConstraints):
     """Own all mutation caused by submitted night abilities."""
 
     def __init__(self, game: GameState) -> None:
-        self.game = game
+        super().__init__(game)
         self.deaths = DeathResolver(game)
 
     def submit(
@@ -216,14 +211,7 @@ class ActionResolver:
     def random_target_options(self, actor: Player, ability: Ability) -> tuple[tuple[str, ...], ...]:
         """Return target combinations satisfying the same restrictions as submission."""
 
-        options: list[tuple[str, ...]] = []
-        for targets in combinations(valid_target_ids(self.game, actor, ability.target), ability.target.count):
-            try:
-                self.validate_restrictions(actor, ability, targets)
-            except ValueError:
-                continue
-            options.append(targets)
-        return tuple(options)
+        return self.valid_target_sets(actor, ability)
 
     def first_night_reservations(self, now: int) -> list[ActionReservation]:
         if self.game.phase is not GamePhase.NIGHT0 or self.game.rules.first_night_seer != "random_white":
@@ -450,84 +438,6 @@ class ActionResolver:
                 )
         return scheduled
 
-    def ability_for(self, player: Player, ability_id: str) -> Ability:
-        for ability in player.role.abilities:
-            if ability.id == ability_id:
-                return ability
-        raise ValueError(f"player '{player.player_id}' does not have ability '{ability_id}'")
-
-    def validate_ability_available(self, actor: Player, ability: Ability) -> None:
-        timing = self.game.content.action_timings[ability.timing]
-        if self.game.phase.value not in timing.phases:
-            raise ValueError(
-                f"ability '{ability.id}' is unavailable during phase '{self.game.phase.value}'"
-            )
-        current_night = night_number(self.game)
-        if current_night is None or ability.available_from_night > current_night:
-            raise ValueError(f"ability '{ability.id}' is unavailable on this night")
-        if self.game.phase is GamePhase.NIGHT0 and "inspect" in {effect.id for effect in ability.effects}:
-            if self.game.rules.first_night_seer != "free":
-                raise ValueError("the first-night inspection is not player-selected by the current rules")
-        key = (actor.player_id, ability.id)
-        if (
-            ability.uses.per_game is not None
-            and self.game.ability_uses_per_game.get(key, 0) >= ability.uses.per_game
-        ):
-            raise ValueError(f"ability '{ability.id}' has no remaining game uses")
-        if (
-            ability.uses.per_night is not None
-            and self.game.ability_uses_this_night.get(key, 0) >= ability.uses.per_night
-        ):
-            raise ValueError(f"ability '{ability.id}' has no remaining uses this night")
-
-    def validate_targets(
-        self, actor: Player, ability: Ability, target_player_ids: Sequence[str]
-    ) -> tuple[str, ...]:
-        if isinstance(target_player_ids, str):
-            raise TypeError("action targets must be a sequence of player ids")
-        targets = tuple(target_player_ids)
-        if any(not isinstance(player_id, str) for player_id in targets):
-            raise TypeError("action target ids must be strings")
-        if len(targets) != ability.target.count:
-            raise ValueError(f"ability '{ability.id}' requires exactly {ability.target.count} target(s)")
-        if len(targets) != len(set(targets)):
-            raise ValueError("action targets must be unique")
-        invalid = set(targets) - set(valid_target_ids(self.game, actor, ability.target))
-        if invalid:
-            raise ValueError(
-                f"ability '{ability.id}' has invalid target(s): {', '.join(sorted(invalid))}"
-            )
-        return targets
-
-    def validate_restrictions(
-        self, actor: Player, ability: Ability, targets: tuple[str, ...]
-    ) -> None:
-        for restriction in ability.restrictions:
-            if restriction.type not in ACTION_RESTRICTION_DISPATCH_IDS:
-                raise RuntimeError(
-                    f"restriction '{restriction.type}' has no Phase 1.5 implementation"
-                )
-            if not self.enabled_when(restriction.enabled_when):
-                continue
-            if restriction.type == "no_same_target_consecutive":
-                if self.game.last_resolved_targets.get((actor.player_id, ability.id)) == targets:
-                    raise ValueError(f"ability '{ability.id}' cannot target the same player consecutively")
-                continue
-            if restriction.type == "no_self_target":
-                if actor.player_id in targets:
-                    raise ValueError(f"ability '{ability.id}' cannot target the actor")
-                continue
-            raise RuntimeError(f"restriction '{restriction.type}' has no Phase 1.5 implementation")
-
-    def enabled_when(self, expression: str | None) -> bool:
-        if expression is None:
-            return True
-        path, expected = expression.removeprefix("rules.").split(" == ", maxsplit=1)
-        value: object = self.game.rules
-        for attribute in path.split("."):
-            value = getattr(value, attribute)
-        return value is (expected == "true")
-
     def consume_resolved_ability(self, reservation: ActionReservation) -> None:
         player = self.game.players[reservation.actor_player_id]
         ability = self.ability_for(player, reservation.ability_id)
@@ -536,28 +446,3 @@ class ActionResolver:
         if ability.uses.per_game is not None:
             self.game.ability_uses_per_game[key] = self.game.ability_uses_per_game.get(key, 0) + 1
         self.game.last_resolved_targets[key] = reservation.target_player_ids
-
-    def phase_action_kinds(self, player_id: str) -> tuple[PhaseActionKind, ...]:
-        """Return Phase 1.3 action kinds allowed by content declarations."""
-
-        try:
-            player = self.game.players[player_id]
-        except KeyError as error:
-            raise ValueError(f"unknown player '{player_id}'") from error
-        if not player.alive:
-            return ()
-        phase_id = self.game.phase.value
-        current_night = night_number(self.game)
-        actions: list[PhaseActionKind] = []
-        for ability in player.role.abilities:
-            timing = self.game.content.action_timings[ability.timing]
-            if phase_id not in timing.phases:
-                continue
-            if current_night is not None and ability.available_from_night > current_night:
-                continue
-            actions.append(PhaseActionKind(type="ability", ability_id=ability.id))
-        for channel_id in player.role.chat_channels:
-            channel = self.game.content.chat_channels[channel_id]
-            if phase_id in channel.phases:
-                actions.append(PhaseActionKind(type="chat", channel=channel_id))
-        return tuple(actions)

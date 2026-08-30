@@ -8,12 +8,14 @@ from random import Random
 from typing import Iterable, Sequence
 
 from .actions import ActionResolver
+from .available_actions import ActionAvailability
 from .content import ContentPack, Preset
 from .death import DeathResolver, public_death_cause
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
 from .models import GamePhase, RulesConfig
 from .phase import PhaseManager
 from .state import (
+    ActionSpec,
     ActionReservation,
     DeathRecord,
     GameResult,
@@ -156,6 +158,11 @@ class GameState:
     def resolve_pending_actions(self, now: int) -> None:
         ActionResolver(self).resolve(now)
 
+    def get_available_actions(self, player_id: str) -> list[ActionSpec]:
+        """Return only the action choices the named player may currently know about."""
+
+        return ActionAvailability(self).get(player_id)
+
     def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
         VoteResolver(self).submit(voter_player_id, target_player_id)
 
@@ -163,7 +170,6 @@ class GameState:
         return VoteResolver(self).resolve(now)
 
     # Temporary private compatibility helpers used by the Phase 1 test surface.
-    # Phase 1.7 replaces ``_phase_action_kinds`` with the public ActionSpec API.
     def _enter_phase(self, phase: GamePhase, now: int) -> None:
         PhaseManager(self).enter(phase, now)
 
@@ -177,9 +183,6 @@ class GameState:
         return DeathResolver(self).record(
             player_id, internal_cause, collect_passive_effects=collect_passive_effects
         )
-
-    def _phase_action_kinds(self, player_id: str):
-        return ActionResolver(self).phase_action_kinds(player_id)
 
     def _record_game_created(self, player_configs: Sequence[PlayerConfig]) -> None:
         self.event_bus.publish(

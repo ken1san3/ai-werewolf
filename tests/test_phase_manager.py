@@ -115,16 +115,16 @@ class PhaseManagerTests(unittest.TestCase):
         guard_player = self._player_with_role(game, "guard")
 
         self.assertEqual(
-            self._action_tuples(game._phase_action_kinds(wolf_player)),
+            self._action_tuples(game.get_available_actions(wolf_player)),
             (("chat", None, "wolf"),),
         )
         self.assertIn(
             ("ability", "inspect", None),
-            self._action_tuples(game._phase_action_kinds(seer_player)),
+            self._action_tuples(game.get_available_actions(seer_player)),
         )
         self.assertNotIn(
             ("ability", "protect", None),
-            self._action_tuples(game._phase_action_kinds(guard_player)),
+            self._action_tuples(game.get_available_actions(guard_player)),
         )
 
         self._advance_to_vote(game)
@@ -132,13 +132,13 @@ class PhaseManagerTests(unittest.TestCase):
         self.assertEqual(game.advance_phase(game.phase_started_at), GamePhase.NIGHT)
         self.assertIn(
             ("ability", "attack", None),
-            self._action_tuples(game._phase_action_kinds(wolf_player)),
+            self._action_tuples(game.get_available_actions(wolf_player)),
         )
         self.assertIn(
             ("ability", "protect", None),
-            self._action_tuples(game._phase_action_kinds(guard_player)),
+            self._action_tuples(game.get_available_actions(guard_player)),
         )
-        self.assertFalse(hasattr(game, "get_available_actions"))
+        self.assertFalse(hasattr(game, "_phase_action_kinds"))
 
     def test_chat_channel_phase_declarations_allow_content_only_channel_renames(self) -> None:
         renamed_timings = {
@@ -190,7 +190,7 @@ class PhaseManagerTests(unittest.TestCase):
         player_id = next(iter(game.players))
         self.assertIn(
             ("chat", None, "day_chat"),
-            self._action_tuples(game._phase_action_kinds(player_id)),
+            self._action_tuples(game.get_available_actions(player_id)),
         )
         game.advance_phase(103)
         game.resolve_votes(game.phase_ends_at)
@@ -198,7 +198,7 @@ class PhaseManagerTests(unittest.TestCase):
         wolf_player = self._player_with_role(game, "werewolf")
         self.assertIn(
             ("ability", "attack", None),
-            self._action_tuples(game._phase_action_kinds(wolf_player)),
+            self._action_tuples(game.get_available_actions(wolf_player)),
         )
 
     def test_day_extension_uses_the_configured_quorum_limit_and_duration(self) -> None:
