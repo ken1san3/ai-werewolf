@@ -12,6 +12,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows の既定コンソールは CP932 で、状態ファイル中の em dash などを
+# エンコードできずに落ちる。呼び出し側へ PYTHONIOENCODING を要求せずに済むよう、
+# このスクリプト自身が出力を UTF-8 へ切り替える。
+for _stream in (sys.stdout, sys.stderr):
+    reconfigure = getattr(_stream, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 ROOT = Path(__file__).resolve().parent.parent
 AI = ROOT / "Docs" / "ai"
 
