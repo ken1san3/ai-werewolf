@@ -2,7 +2,15 @@
 
 from .content import ContentPack, ContentValidationError, Preset, load_content, load_preset
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
-from .game import GamePhase, GameState, Player, PlayerConfig, RandomSource
+from .game import (
+    GamePhase,
+    GameState,
+    Player,
+    PlayerConfig,
+    RandomSource,
+    VoteResult,
+    VoteResultKind,
+)
 from .models import (
     AppliedModifier,
     EffectiveAttributes,
@@ -39,4 +47,6 @@ __all__ = [
     "resolve_effective_attributes",
     "resolve_effective_win_conditions",
     "RandomSource",
+    "VoteResult",
+    "VoteResultKind",
 ]

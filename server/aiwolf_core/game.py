@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from random import Random
-from typing import Iterable, MutableSequence, Protocol, Sequence
+from typing import Iterable, Mapping, MutableSequence, Protocol, Sequence
 
 from .content import ContentPack, Preset
 from .events import (
@@ -40,6 +40,41 @@ class GamePhase(str, Enum):
     EXECUTION = "execution"
     NIGHT = "night"
     GAME_END = "game_end"
+
+
+class VoteResultKind(str, Enum):
+    """The three possible outcomes of a completed vote round."""
+
+    LYNCH = "lynch"
+    NO_LYNCH = "no_lynch"
+    RUNOFF = "runoff"
+
+
+@dataclass(frozen=True)
+class VoteResult:
+    """Resolved votes, without exposing a voter-to-target mapping publicly."""
+
+    kind: VoteResultKind
+    tallies: Mapping[str, int]
+    lynched_player_id: str | None = None
+    runoff_candidate_player_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, VoteResultKind):
+            raise TypeError("vote result kind must be a VoteResultKind")
+        if self.kind is VoteResultKind.LYNCH:
+            if not self.lynched_player_id or self.runoff_candidate_player_ids:
+                raise ValueError("a lynch result requires exactly one lynched player")
+            return
+        if self.kind is VoteResultKind.NO_LYNCH:
+            if self.lynched_player_id is not None or self.runoff_candidate_player_ids:
+                raise ValueError("a no-lynch result cannot have candidates")
+            return
+        if self.kind is VoteResultKind.RUNOFF:
+            if self.lynched_player_id is not None or len(self.runoff_candidate_player_ids) < 2:
+                raise ValueError("a runoff result requires at least two candidates")
+            return
+        raise ValueError(f"unsupported vote result kind '{self.kind}'")
 
 
 @dataclass(frozen=True)
@@ -97,6 +132,9 @@ class GameState:
     phase_ends_at: int | None = None
     extensions_used: int = 0
     pending_actions: dict[str, object] = field(default_factory=dict)
+    pending_votes: dict[str, str] = field(default_factory=dict)
+    runoff_candidate_player_ids: tuple[str, ...] = ()
+    last_vote_result: VoteResult | None = None
 
     @classmethod
     def create_from_preset(
@@ -167,14 +205,12 @@ class GameState:
         self._enter_phase(GamePhase.NIGHT0, now)
         return self.phase
 
-    def advance_phase(
-        self, now: int, *, vote_tied: bool = False, game_ended: bool = False
-    ) -> GamePhase:
+    def advance_phase(self, now: int, *, game_ended: bool = False) -> GamePhase:
         """Advance one legal phase transition after its deadline or manual result.
 
         Vote aggregation and winner evaluation are deliberately outside this phase.
-        Their future resolvers provide ``vote_tied`` and ``game_ended`` when they
-        hand control back to the state machine.
+        Vote / Runoff transitions belong to ``resolve_votes``; Phase 1.6 will
+        provide ``game_ended`` when it hands control back after death resolution.
         """
 
         now = _timestamp(now)
@@ -184,18 +220,16 @@ class GameState:
             raise ValueError("phase cannot advance before it starts")
         if self.phase_ends_at is not None and now < self.phase_ends_at:
             raise ValueError("phase cannot advance before its deadline")
-        if vote_tied and self.phase is not GamePhase.VOTE:
-            raise ValueError("vote_tied is only valid when leaving the vote phase")
+        if self.phase in {GamePhase.VOTE, GamePhase.RUNOFF}:
+            raise ValueError("vote phases must advance through resolve_votes")
         if game_ended and self.phase not in {GamePhase.EXECUTION, GamePhase.NIGHT}:
             raise ValueError("game_ended is only valid after death resolution")
 
-        next_phase = self._next_phase(vote_tied=vote_tied, game_ended=game_ended)
+        next_phase = self._next_phase(game_ended=game_ended)
         self._enter_phase(next_phase, now)
         return self.phase
 
-    def advance_if_due(
-        self, now: int, *, vote_tied: bool = False, game_ended: bool = False
-    ) -> bool:
+    def advance_if_due(self, now: int, *, game_ended: bool = False) -> bool:
         """Advance only a deadline-driven phase once its authoritative time has passed."""
 
         now = _timestamp(now)
@@ -203,7 +237,7 @@ class GameState:
             raise ValueError("advance_if_due requires a phase with a deadline")
         if now < self.phase_ends_at:
             return False
-        self.advance_phase(now, vote_tied=vote_tied, game_ended=game_ended)
+        self.advance_phase(now, game_ended=game_ended)
         return True
 
     def approve_day_extension(self, now: int, approver_player_ids: Iterable[str]) -> bool:
@@ -267,6 +301,181 @@ class GameState:
         )
         return True
 
+    def submit_vote(self, voter_player_id: str, target_player_id: str) -> None:
+        """Reserve or replace one alive player's vote for the current vote round.
+
+        Reservations stay server-private until ``resolve_votes`` is called at the
+        authoritative vote deadline.  Every submission remains in the server
+        event log even though only the last target participates in the tally.
+        """
+
+        if self.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
+            raise ValueError("votes can only be submitted during vote or runoff phases")
+        voter = self._alive_player(voter_player_id, "voter")
+        target = self._alive_player(target_player_id, "vote target")
+        if not self.rules.vote.self_vote and voter.player_id == target.player_id:
+            raise ValueError("self-voting is disabled by the current rules")
+        if (
+            self.phase is GamePhase.RUNOFF
+            and target.player_id not in self.runoff_candidate_player_ids
+        ):
+            raise ValueError("runoff votes must target a runoff candidate")
+
+        self.pending_votes[voter.player_id] = target.player_id
+        self.event_bus.publish(
+            GameEvent(
+                type="VOTE_SUBMITTED",
+                visibility=EventVisibility.SERVER,
+                payload={
+                    "day": self.day,
+                    "phase": self.phase.value,
+                    "voter_player_id": voter.player_id,
+                    "target_player_id": target.player_id,
+                },
+            )
+        )
+
+    def resolve_votes(self, now: int) -> VoteResult:
+        """Confirm the current vote round and enter Runoff or Execution.
+
+        ``now`` is the authoritative deadline time supplied by the caller.  Vote
+        and Runoff have no independent duration in the Phase 1.3 timing model,
+        so the scheduler invokes this method rather than ``advance_if_due``.
+        """
+
+        now = _timestamp(now)
+        if self.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
+            raise ValueError("votes can only be resolved during vote or runoff phases")
+        if self.phase_started_at is None or now < self.phase_started_at:
+            raise ValueError("votes cannot be resolved before the phase starts")
+
+        alive_player_ids = tuple(
+            player_id for player_id, player in self.players.items() if player.alive
+        )
+        missing_voter_ids = tuple(
+            player_id for player_id in alive_player_ids if player_id not in self.pending_votes
+        )
+        tallies = _vote_tallies(self.pending_votes, alive_player_ids)
+        if missing_voter_ids and self.rules.vote.no_selection == "skip_lynch":
+            result = VoteResult(kind=VoteResultKind.NO_LYNCH, tallies=tallies)
+        elif not tallies:
+            result = VoteResult(kind=VoteResultKind.NO_LYNCH, tallies=tallies)
+        else:
+            result = self._resolve_vote_tally(tallies)
+
+        self.last_vote_result = result
+        self.pending_votes.clear()
+        self._record_vote_result(result)
+        if result.kind is VoteResultKind.RUNOFF:
+            self.runoff_candidate_player_ids = result.runoff_candidate_player_ids
+            self._enter_phase(GamePhase.RUNOFF, now)
+            return result
+
+        self.runoff_candidate_player_ids = ()
+        self._enter_phase(GamePhase.EXECUTION, now)
+        if result.kind is VoteResultKind.LYNCH:
+            self._record_lynch(result.lynched_player_id)
+        return result
+
+    def _resolve_vote_tally(self, tallies: Mapping[str, int]) -> VoteResult:
+        highest_vote_count = max(tallies.values())
+        tied_player_ids = tuple(
+            player_id for player_id, count in tallies.items() if count == highest_vote_count
+        )
+        if len(tied_player_ids) == 1:
+            return VoteResult(
+                kind=VoteResultKind.LYNCH,
+                tallies=dict(tallies),
+                lynched_player_id=tied_player_ids[0],
+            )
+        if self.phase is GamePhase.VOTE and self.rules.vote.runoff:
+            return VoteResult(
+                kind=VoteResultKind.RUNOFF,
+                tallies=dict(tallies),
+                runoff_candidate_player_ids=tied_player_ids,
+            )
+
+        tie_rule = (
+            self.rules.vote.tie_after_runoff
+            if self.phase is GamePhase.RUNOFF
+            else self.rules.vote.tie_without_runoff
+        )
+        if tie_rule == "no_lynch":
+            return VoteResult(kind=VoteResultKind.NO_LYNCH, tallies=dict(tallies))
+        selected_player_id = self.rng.choice(tied_player_ids)
+        self.event_bus.publish(
+            GameEvent(
+                type="TIE_RESOLVED_RANDOM",
+                visibility=EventVisibility.PUBLIC,
+                payload={
+                    "day": self.day,
+                    "phase": self.phase.value,
+                    "candidate_player_ids": list(tied_player_ids),
+                    "selected_player_id": selected_player_id,
+                },
+            )
+        )
+        return VoteResult(
+            kind=VoteResultKind.LYNCH,
+            tallies=dict(tallies),
+            lynched_player_id=selected_player_id,
+        )
+
+    def _record_vote_result(self, result: VoteResult) -> None:
+        self.event_bus.publish(
+            GameEvent(
+                type="VOTE_RESOLVED",
+                visibility=EventVisibility.PUBLIC,
+                payload={
+                    "day": self.day,
+                    "phase": self.phase.value,
+                    "result": result.kind.value,
+                    "tallies": dict(result.tallies),
+                    "lynched_player_id": result.lynched_player_id,
+                    "runoff_candidate_player_ids": list(result.runoff_candidate_player_ids),
+                },
+            )
+        )
+
+    def _record_lynch(self, player_id: str | None) -> None:
+        if player_id is None:
+            raise RuntimeError("a lynch result must identify a player")
+        player = self._alive_player(player_id, "lynched player")
+        if "lynched" not in self.content.death_causes:
+            raise RuntimeError("content must register the 'lynched' death cause")
+        self.players[player.player_id] = replace(player, alive=False)
+        self.event_bus.publish(
+            GameEvent(
+                type="PLAYER_DIED",
+                visibility=EventVisibility.SERVER,
+                payload={
+                    "player_id": player.player_id,
+                    "cause": "lynched",
+                    "day": self.day,
+                    "phase": self.phase.value,
+                },
+            )
+        )
+        payload: dict[str, str | int] = {"player_id": player.player_id, "day": self.day}
+        if self.rules.death.public_detail != "none":
+            payload["public_cause"] = "lynched"
+        self.event_bus.publish(
+            GameEvent(
+                type="PLAYER_DIED",
+                visibility=EventVisibility.PUBLIC,
+                payload=payload,
+            )
+        )
+
+    def _alive_player(self, player_id: str, description: str) -> Player:
+        try:
+            player = self.players[player_id]
+        except KeyError as error:
+            raise ValueError(f"unknown {description} '{player_id}'") from error
+        if not player.alive:
+            raise ValueError(f"{description} '{player_id}' must be alive")
+        return player
+
     def _phase_action_kinds(self, player_id: str) -> tuple[_PhaseActionKind, ...]:
         """Return only the Phase 1.3 action kinds allowed by content declarations."""
 
@@ -304,7 +513,7 @@ class GameState:
         required = _extension_approval_count(approval, len(alive_player_ids))
         return len(approvers) >= required
 
-    def _next_phase(self, *, vote_tied: bool, game_ended: bool) -> GamePhase:
+    def _next_phase(self, *, game_ended: bool) -> GamePhase:
         if self.phase is GamePhase.SETUP:
             return GamePhase.NIGHT0
         if self.phase is GamePhase.NIGHT0:
@@ -313,12 +522,8 @@ class GameState:
             return GamePhase.DAY
         if self.phase is GamePhase.DAY:
             return GamePhase.VOTE
-        if self.phase is GamePhase.VOTE:
-            if vote_tied and self.rules.vote.runoff:
-                return GamePhase.RUNOFF
-            return GamePhase.EXECUTION
-        if self.phase is GamePhase.RUNOFF:
-            return GamePhase.EXECUTION
+        if self.phase in {GamePhase.VOTE, GamePhase.RUNOFF}:
+            raise RuntimeError("vote phases must transition through resolve_votes")
         if self.phase is GamePhase.EXECUTION:
             return GamePhase.GAME_END if game_ended else GamePhase.NIGHT
         if self.phase is GamePhase.NIGHT:
@@ -329,6 +534,11 @@ class GameState:
         now = _timestamp(now)
         if phase is GamePhase.DAWN:
             self.day += 1
+        if phase is GamePhase.VOTE:
+            self.pending_votes.clear()
+            self.runoff_candidate_player_ids = ()
+        elif phase is GamePhase.RUNOFF:
+            self.pending_votes.clear()
         self.phase = phase
         self.phase_started_at = now
         duration = _phase_duration(phase, self.rules)
@@ -417,6 +627,21 @@ def _role_missing_candidates(rules: RulesConfig, role_ids: Sequence[str]) -> lis
     if not candidates:
         raise ValueError("role_missing requires at least one non-replacement role card")
     return candidates
+
+
+def _vote_tallies(
+    pending_votes: Mapping[str, str], alive_player_ids: Sequence[str]
+) -> dict[str, int]:
+    """Count only valid final reservations, ordered independently of submission order."""
+
+    alive_player_id_set = set(alive_player_ids)
+    tallies: dict[str, int] = {}
+    for voter_player_id in alive_player_ids:
+        target_player_id = pending_votes.get(voter_player_id)
+        if target_player_id not in alive_player_id_set:
+            continue
+        tallies[target_player_id] = tallies.get(target_player_id, 0) + 1
+    return {player_id: tallies[player_id] for player_id in sorted(tallies)}
 
 
 def _timestamp(value: int) -> int:

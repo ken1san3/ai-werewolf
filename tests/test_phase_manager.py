@@ -61,7 +61,8 @@ class PhaseManagerTests(unittest.TestCase):
         self.assertEqual((game.day, game.phase_ends_at), (1, 133))
         self.assertEqual(game.advance_phase(133), GamePhase.VOTE)
         self.assertIsNone(game.phase_ends_at)
-        self.assertEqual(game.advance_phase(133), GamePhase.EXECUTION)
+        self.assertEqual(game.resolve_votes(133).kind.value, "no_lynch")
+        self.assertEqual(game.phase, GamePhase.EXECUTION)
         self.assertEqual(game.advance_phase(133), GamePhase.NIGHT)
         self.assertEqual((game.day, game.phase_ends_at), (1, 143))
         self.assertEqual(game.advance_phase(143, game_ended=True), GamePhase.GAME_END)
@@ -84,13 +85,18 @@ class PhaseManagerTests(unittest.TestCase):
         self._advance_to_vote(runoff_game)
         with self.assertRaisesRegex(ValueError, "requires a phase with a deadline"):
             runoff_game.advance_if_due(103)
-        self.assertEqual(runoff_game.advance_phase(103, vote_tied=True), GamePhase.RUNOFF)
-        self.assertEqual(runoff_game.advance_phase(103), GamePhase.EXECUTION)
+        self._submit_tie(runoff_game)
+        self.assertEqual(runoff_game.resolve_votes(103).kind.value, "runoff")
+        self.assertEqual(runoff_game.phase, GamePhase.RUNOFF)
+        self.assertEqual(runoff_game.resolve_votes(103).kind.value, "no_lynch")
+        self.assertEqual(runoff_game.phase, GamePhase.EXECUTION)
 
         no_runoff_rules = replace(runoff_rules, vote=replace(runoff_rules.vote, runoff=False))
         no_runoff_game = self.create_game(rules=no_runoff_rules)
         self._advance_to_vote(no_runoff_game)
-        self.assertEqual(no_runoff_game.advance_phase(103, vote_tied=True), GamePhase.EXECUTION)
+        self._submit_tie(no_runoff_game)
+        self.assertEqual(no_runoff_game.resolve_votes(103).kind.value, "no_lynch")
+        self.assertEqual(no_runoff_game.phase, GamePhase.EXECUTION)
 
     def test_available_actions_follow_generic_night_number_and_chat_rules(self) -> None:
         rules = replace(
@@ -119,7 +125,7 @@ class PhaseManagerTests(unittest.TestCase):
         )
 
         self._advance_to_vote(game)
-        game.advance_phase(103)
+        game.resolve_votes(103)
         self.assertEqual(game.advance_phase(103), GamePhase.NIGHT)
         self.assertIn(
             ("ability", "attack", None),
@@ -184,7 +190,7 @@ class PhaseManagerTests(unittest.TestCase):
             self._action_tuples(game._phase_action_kinds(player_id)),
         )
         game.advance_phase(103)
-        game.advance_phase(103)
+        game.resolve_votes(103)
         game.advance_phase(103)
         wolf_player = self._player_with_role(game, "werewolf")
         self.assertIn(
@@ -264,6 +270,16 @@ class PhaseManagerTests(unittest.TestCase):
     def _advance_to_vote(cls, game: GameState) -> None:
         cls._advance_to_day(game)
         game.advance_phase(game.phase_ends_at)
+
+    @staticmethod
+    def _submit_tie(game: GameState) -> None:
+        for voter_player_id, target_player_id in (
+            ("player-1", "player-3"),
+            ("player-2", "player-3"),
+            ("player-5", "player-4"),
+            ("player-6", "player-4"),
+        ):
+            game.submit_vote(voter_player_id, target_player_id)
 
 
 if __name__ == "__main__":
