@@ -1662,6 +1662,9 @@ Dirty Files
 
 これによりCodexが複数ファイルを個別に読む必要を減らせる。
 
+なお、機械的に判定できるものはスクリプトで書く。LLMへ投げるのはその後である。
+ローカルLLMを補助に使う場合の範囲と禁止事項は `decisions/D034_LOCAL_LLM_DEV_ASSIST.md`。
+
 ---
 
 # 57. 将来的なSESSION_START.md生成
