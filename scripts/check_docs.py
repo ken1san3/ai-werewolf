@@ -35,7 +35,11 @@ def fail(check: str, detail: str) -> None:
 
 
 def docs_files() -> list[Path]:
-    return sorted(p for p in DOCS.rglob("*.md") if "_to_delete" not in p.parts)
+    """検査対象。AGENTS.md はリポジトリ直下だが運用の規範なので含める。"""
+
+    files = [p for p in DOCS.rglob("*.md") if "_to_delete" not in p.parts]
+    files.append(ROOT / "AGENTS.md")
+    return sorted(files)
 
 
 def read(path: Path) -> str:
@@ -61,10 +65,10 @@ def check_decision_refs() -> None:
     failures = {p.name.split("_")[0] for p in (DOCS / "failures").glob("F*.md")}
     for path in docs_files():
         text = read(path)
-        for ref in set(re.findall(r"\bD(\d{3})\b", text)):
+        for ref in set(re.findall(r"\bD(\d{3})(?:_[A-Z0-9_]+)?\b", text)):
             if f"D{ref}" not in decisions:
                 fail("decision-ref", f"{path.relative_to(ROOT)} が D{ref} を参照するが存在しない")
-        for ref in set(re.findall(r"\bF(\d{3})\b", text)):
+        for ref in set(re.findall(r"\bF(\d{3})(?:_[A-Z0-9_]+)?\b", text)):
             if f"F{ref}" not in failures:
                 fail("failure-ref", f"{path.relative_to(ROOT)} が F{ref} を参照するが存在しない")
 
