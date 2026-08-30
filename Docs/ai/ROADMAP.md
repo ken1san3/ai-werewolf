@@ -173,9 +173,11 @@
 ## 2.4 Chat / Vote / Ability / CO の受付
 
 含む: `co.declare` / `co.report`（D007）、行動の受理と拒否、
-      発言数の集計と突然死（`rules.sudden_death`、D028）
+      発言数の集計と突然死（`rules.sudden_death`、D028）、
+      **締切到達時の進行駆動**（投票解決と Execution の完了。ticker から呼ぶ）
 完了条件: 偽COをサーバが拒否しない。回数制限は拒否する。
-          突然死の解決直後に勝敗判定が走る
+          突然死の解決直後に勝敗判定が走る。
+          ticker だけで Vote と Execution を越えられる
 参照: DESIGN.md §9.5 §6.1 / TEST_POLICY §3 §12 / D028
 
 ## 2.5 状態配信
@@ -186,7 +188,10 @@
 
 ## 2.6 完走
 
-完了条件: 複数 Dummy Client が別プロセスから接続し1ゲーム完走。Phase 2 handoff 作成
+完了条件: 複数 Dummy Client が別プロセスから接続し1ゲーム完走。
+          **手動の `advance_phase` / `resolve_votes` を呼ばずに完走すること。**
+          テストドライバがサーバの代わりに進行を駆動していないことを確認する。
+          Phase 2 handoff 作成
 
 ---
 
