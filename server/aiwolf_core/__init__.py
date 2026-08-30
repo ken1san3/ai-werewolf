@@ -2,14 +2,14 @@
 
 from .content import ContentPack, ContentValidationError, Preset, load_content, load_preset
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
-from .game import (
-    GameState,
+from .death import public_death_cause
+from .game import GameState
+from .state import (
     Player,
     PlayerConfig,
     RandomSource,
     VoteResult,
     VoteResultKind,
-    public_death_cause,
 )
 from .models import (
     AppliedModifier,

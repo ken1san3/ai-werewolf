@@ -15,6 +15,7 @@ import re
 
 import yaml
 
+from .capabilities import unsupported_runtime_references
 from .models import (
     ATTRIBUTE_NAMES,
     ActionTiming,
@@ -298,11 +299,42 @@ def load_preset(path: str | Path, content: ContentPack) -> Preset:
                 f"{preset_path}.roles references unknown role '{role_id}'"
             )
         role_counts[role_id] = count
+    rules = _parse_rules(
+        _mapping(data["rules"], f"{preset_path}.rules"), str(preset_path), content
+    )
+    _validate_preset_runtime_capabilities(preset_path, content, role_counts, rules)
     return Preset(
         name=preset_path.stem,
-        rules=_parse_rules(_mapping(data["rules"], f"{preset_path}.rules"), str(preset_path), content),
+        rules=rules,
         role_counts=role_counts,
     )
+
+
+def _validate_preset_runtime_capabilities(
+    preset_path: Path,
+    content: ContentPack,
+    role_counts: Mapping[str, int],
+    rules: RulesConfig,
+) -> None:
+    """Reject a startable preset whose selected roles lack core semantics.
+
+    Content packs may contain roles reserved for a later phase (for example the
+    baker), so the capability check is performed when a concrete preset selects
+    roles to start.  This keeps unselected expansion content loadable while
+    ensuring an actual game never silently ignores a declaration.
+    """
+
+    selected_role_ids = set(role_counts)
+    if rules.role_missing.enabled:
+        selected_role_ids.add(rules.role_missing.replacement_role_id)
+    errors = unsupported_runtime_references(
+        content.roles[role_id] for role_id in sorted(selected_role_ids)
+    )
+    if errors:
+        raise ContentValidationError(
+            f"{preset_path} references runtime features not implemented by this core: "
+            + "; ".join(errors)
+        )
 
 
 def _parse_team(data: Any, path: str) -> Team:

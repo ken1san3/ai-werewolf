@@ -129,6 +129,27 @@ class ActionResolverTests(unittest.TestCase):
         self.assertEqual([event.recipient_player_id for event in guard_events], ["guard"])
         self.assertEqual(game.ability_uses_per_game[("greedy", "double_attack")], 1)
 
+    def test_guarded_and_fox_attack_have_identical_public_event_sequences(self) -> None:
+        guarded = self.make_game(
+            {"guard": "guard", "target": "villager", "wolf": "werewolf"}
+        )
+        guarded.submit_action(101, "guard", "protect", ("target",))
+        guarded.submit_action(101, "wolf", "attack", ("target",))
+        guarded.resolve_pending_actions(110)
+
+        fox_immune = self.make_game({"target": "fox", "wolf": "werewolf"})
+        fox_immune.submit_action(101, "wolf", "attack", ("target",))
+        fox_immune.resolve_pending_actions(110)
+
+        def public_events(game: GameState) -> list[tuple[str, dict]]:
+            return [
+                (event.type, dict(event.payload))
+                for event in game.event_bus.events
+                if event.visibility is EventVisibility.PUBLIC
+            ]
+
+        self.assertEqual(public_events(guarded), public_events(fox_immune))
+
     def test_guard_consecutive_rule_is_derived_from_the_content_restriction(self) -> None:
         disabled_game = self.make_game({"guard": "guard", "target": "villager"})
         disabled_game.submit_action(101, "guard", "protect", ("target",))

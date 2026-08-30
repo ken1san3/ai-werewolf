@@ -4,6 +4,7 @@ import unittest
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -176,6 +177,16 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertTrue(preset.rules.vote.abstain.enabled)
         self.assertIsNone(preset.rules.vote.abstain.max_per_player)
         self.assertEqual(preset.rules.vote.reveal, "hidden")
+
+    def test_preset_rejects_a_selected_role_with_unimplemented_runtime_features(self) -> None:
+        baker_preset = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))
+        baker_preset["roles"] = {"baker": 1}
+
+        with patch("server.aiwolf_core.content._load_yaml", return_value=baker_preset):
+            with self.assertRaisesRegex(
+                ContentValidationError, "unsupported passive 'public_notify_if_alive'"
+            ):
+                load_preset("baker_preset.yaml", self.content)
 
     def test_role_missing_replacement_role_is_selected_from_yaml_rules(self) -> None:
         rules = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
