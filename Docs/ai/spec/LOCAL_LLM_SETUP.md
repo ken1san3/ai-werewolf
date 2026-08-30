@@ -40,6 +40,15 @@ serve.bat game           :: game プロファイル
 serve.bat --list         :: プロファイル一覧
 ```
 
+**PowerShell では `.\serve.bat` と書く。** PowerShell はカレントディレクトリを
+実行パスに含めないため、`serve.bat` だけでは `CommandNotFoundException` になる。
+cmd.exe ではどちらでも動く。
+
+起動コマンドを手打ちしない。`config.toml` と二重管理になり、
+モデルやフラグを変えたときに古い設定で起動しても失敗として現れない。
+`serve.bat` は exe とモデルの存在確認をし、起動時に profile / モデル名 / URL を表示する。
+dev と game は同時起動できないので、どちらを立てたかが表示されるのは実用上重要である。
+
 **常駐させない。** 使うときだけ起動して `Ctrl+C` で落とす。
 dev は RAM 約18GB と VRAM 約5GB を握るため、起動したままだと他の作業を圧迫する。
 
