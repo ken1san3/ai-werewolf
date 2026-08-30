@@ -234,14 +234,18 @@ Modifier とは別に Phase 8 で設計する。
 ### 4.6 ChatChannel
 
 ```
-public              全員
-wolf                人狼陣営のうち権限を持つ役職
-fox                 妖狐
-system              サーバからの通知
-private:<player_id> 本人のみ
-graveyard           死亡者（Phase 7）
-spectator           観戦者（Phase 7）
+public       全員                      Phase 2
+wolf         人狼陣営のうち権限を持つ役職   Phase 2
+fox          妖狐                      Phase 2
+system       サーバからの通知             Phase 2
+lover        恋人                      Phase 8（Modifier と同時）
+graveyard    死亡者                    Phase 7
+spectator    観戦者                    Phase 7
 ```
+
+本人だけへの送信はチャネルではなく、イベントの可視性
+（`PRIVATE` ＋ `recipient_player_id`、§7.4）で行う。
+`private:` のようなチャネルIDは registry に存在しない。
 
 チャネルの宣言は `content/chat_channels.yaml` が持つ。
 
@@ -657,6 +661,18 @@ AIクライアントはLLMが応答しない場合に代替発言を送らない
   "payload": {}
 }
 ```
+
+**`protocol_version`。** 接続時のハンドシェイクで交換し、
+メジャーバージョンが一致しなければ接続を拒否する。
+そのうえで全メッセージにも保持する。イベントログがそのまま再生の入力になるため
+（D013）、記録された1行だけを見て解釈できる必要がある。
+
+**`seq`。** サーバ→クライアントのイベントにのみ付ける。
+ゲーム単位で1から単調増加し、欠番を作らない。
+クライアント→サーバの要求には付けない。
+再接続時はクライアントが受信済みの最終 `seq` を送り、サーバはそれより後を送る。
+`seq` はクライアントの取りこぼし検出のためであり、**順序保証の根拠にはしない。**
+権威はサーバの状態であって、クライアントが並べ替えた結果ではない。
 
 ### 9.3 送信タイミング
 

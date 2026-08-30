@@ -154,7 +154,7 @@
 
 含む: 共通メッセージ形、`protocol_version`、`seq`、エラー（`action.rejected`）
 完了条件: 言語非依存のスキーマとして定義され、バージョン方針が決まっている
-参照: DESIGN.md §9.2 / OPEN_QUESTIONS Q6
+参照: DESIGN.md §9.2 / D031
 
 ## 2.2 WebSocket サーバと Session
 
@@ -168,7 +168,7 @@
       死亡者の情報範囲（`rules.graveyard`、D028）
 完了条件: 権限の無いチャネルの内容が届かないことをテストで確認できる。
           死亡者が生存者以上の情報を受け取らない
-参照: DESIGN.md §4.6 / OPEN_QUESTIONS Q11 / D028
+参照: DESIGN.md §4.6 / D028 / D031
 
 ## 2.4 Chat / Vote / Ability / CO の受付
 

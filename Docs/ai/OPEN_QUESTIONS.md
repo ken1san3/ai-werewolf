@@ -39,32 +39,12 @@
 | Q34 | 時間を進める主体と時刻源 | `decisions/D028`（サーバ単調時計・1秒 tick・締切は絶対時刻） |
 | Q35 | 死亡プレイヤーの情報範囲 | `decisions/D028`（生存者以上の情報を渡さない） |
 | Q36 | TEST_POLICY 全項目の完了時期 | 案1を採用。TEST_POLICY の各節に担当 Phase を明記し、ROADMAP の「全項目」はその Phase が担当する節を指す。§12 CO は Phase 2.4 |
+| Q6  | プロトコルのバージョニングと順序保証 | `decisions/D031`（ハンドシェイクで検証し全メッセージにも保持。`seq` はサーバ→クライアントのみ） |
+| Q11 | チャットチャネルの初期スコープ | `decisions/D031`（Phase 2 は public / wolf / fox / system。lover は Phase 8、graveyard / spectator は Phase 7） |
+| Q24 | 複数 Modifier による同一属性の上書き優先順位 | `decisions/D031`（Modifier は1人1つまで。衝突が構造的に起きない） |
 | Q26 | 処刑見送りの選択と消費規則 | `decisions/D023`（明示的棄権と game-wide 上限） |
 | Q27 | 投票先の公開設定 | `decisions/D023`（`hidden` / `live` / `after`） |
 | Q25 | 役職欠けの置換先の指定方法 | DESIGN.md §5（`role_missing` をオブジェクト化）。実装は R-20260830-06 |
-
----
-
-## Q11 [Phase 2] チャットチャネルの初期スコープ
-
-参照実装には「墓場の発言」「観戦者の発言」の設定がある。
-マスター仕様 §22 のチャネル案は `public / wolf / lover / spectator / system / private`。
-
-Phase 2 でどこまで実装するか。
-
-Reviewer 推奨: `public` / `wolf` / `system` / `private:<player_id>` の4つ。
-`graveyard`（墓場）と `spectator` はチャネル定義だけ用意し、送信は Phase 7 で。
-
----
-
-## Q6 [Phase 2 前] プロトコルのバージョニングと順序保証
-
-- 全メッセージに `protocol_version` を入れるか、ハンドシェイクのみか
-- 再接続時の欠落検出用に `seq`（連番）を入れるか
-
-後から足すのは高コストなので Phase 2 の最初に決める。
-
-Reviewer 推奨: ハンドシェイクで `protocol_version`、全イベントに `seq`。
 
 ---
 
@@ -73,16 +53,5 @@ Reviewer 推奨: ハンドシェイクで `protocol_version`、全イベント�
 参照実装の昼は1〜6分、さらに時短・延長で伸縮する。
 8GB VRAM 共有LLMで9エージェントが1回の昼に何発言できるかを実測し、
 議論時間・発言レート上限・サーバ側の発話制限を決める。
-
----
-
-## Q24 [Phase 8] 複数 Modifier による同一属性の上書き優先順位
-
-複数の Modifier が同じ実効属性（`team` / `count_as` / `attack_result` /
-`inspect_result` / `medium_result`）を異なる値で上書きするときの優先順位が未定義。
-
-Phase 1.1 は曖昧な状態を許可せず、同じ属性を二重に上書きする付与をエラーにする。
-Phase 8 で具体的な Modifier を追加する前に、priority・付与順・相互排他のいずれで
-解決するかを決める必要がある。
 
 ---
