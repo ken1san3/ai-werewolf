@@ -40,3 +40,39 @@ Codex の新しいチャットで、AGENTS.md を自動で読まない場合の�
 仕様に疑問が出たら Docs/ai/OPEN_QUESTIONS.md へ起票し、
 避けて進められるなら続行、進められないなら止めて報告する。
 ```
+
+---
+
+## Codex の新しいチャットへ移るとき
+
+会話が長くなって新しいチャットに移る際、最初に貼る文面。
+**現在地や残課題は書かない。** それらは `CURRENT_STATE.md` と
+`REVIEW_INBOX.md` にあり、ここへ複製すると必ず片方が古くなる。
+ここに書くのは、リポジトリを読んでも分からない環境の話だけ。
+
+```
+このリポジトリの作業手順は AGENTS.md と Docs/ai/RUNBOOK.md にある。
+まずこの2つを読み、続けて Docs/ai/CURRENT_STATE.md と
+Docs/ai/REVIEW_INBOX.md を読むこと。リポジトリ全体は読まない。
+
+あなたは Implementer（Codex）。私が打つ指示は次の2つだけ。
+
+- 「Phase X.Y を実装して」「次のフェーズを実装して」 → RUNBOOK §1
+- 「レビュー内容を確認して修正して」            → RUNBOOK §3
+
+「レビューして」は別のエージェント（Claude）が担当する。あなたは実行しない。
+指示を受けたら追加の質問をせず、RUNBOOK の手順どおり進めること。
+仕様に疑問が出たら Docs/ai/OPEN_QUESTIONS.md へ起票し、
+避けて進められるなら続行、進められないなら止めて報告する。
+
+リポジトリを読んでも分からない環境の話:
+
+- 開発補助のローカルLLMは C:\AIagent にある別リポジトリ。使う前に
+  C:\AIagent\agent\serve.bat を起動する（PowerShell では .\serve.bat）。
+  使い方・入力長の上限・失敗時の切り分けは D034 / D043 / F004 / F005。
+  C:\AIagent 側の変更も、そちらのリポジトリでコミットする
+- git の index.lock が残って操作が止まることがある。対処は F003
+- push は私が行う。あなたはコミットまで
+
+まず Docs/ai/CURRENT_STATE.md の Next Task を確認して。
+```
