@@ -103,6 +103,28 @@ diff の外側に対してだけである。
 **スクリプトで書けばトークンを消費しない。** LLM へ投げる前に、
 まずスクリプトで足りないかを問うこと。
 
+## 使い方
+
+エージェントは自前で HTTP を組まず、次のコマンドを使う。
+先に `C:\AIagent\agent\serve.bat` でサーバを起動しておくこと（常駐させない）。
+
+```bat
+:: 長い出力の圧縮
+python C:\AIagent\agent\tools\summarize.py --kind test -f test.log
+git diff | python C:\AIagent\agent\tools\summarize.py --kind diff
+
+:: 単発の問い合わせ
+python C:\AIagent\agent\tools\ask.py "変更の要点を5行で" -f <path>
+python C:\AIagent\agent\tools\ask.py "残課題を挙げて" -p aiwolf -d current -d review_inbox
+
+:: 動かないときの切り分け
+python C:\AIagent\agent\tools\doctor.py
+python C:\AIagent\agent\tools\probe.py
+```
+
+**応答本文が空で返ったら異常として扱い、その結果を使わない。** 原因の切り分けは
+`probe.py`。実際に発生した事例は F004。
+
 ## Consequences
 
 - 実測 (2026-08-30 / RTX 3070 Ti 8GB + i7-12700K + RAM 32GB):
