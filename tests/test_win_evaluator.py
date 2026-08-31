@@ -53,6 +53,7 @@ class WinEvaluatorTests(unittest.TestCase):
             rng=rng or Random(4),
             event_bus=event_bus,
             event_sink=sink,
+            preset_role_ids=frozenset(roles.values()),
             day=1,
         )
 

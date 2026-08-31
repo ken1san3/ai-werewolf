@@ -54,7 +54,7 @@ class GameState:
     rng: RandomSource
     event_bus: EventBus
     event_sink: EventSink
-    preset_role_ids: frozenset[str] = field(default_factory=frozenset)
+    preset_role_ids: frozenset[str]
     day: int = 0
     phase: GamePhase = GamePhase.SETUP
     phase_started_at: int | None = None

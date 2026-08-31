@@ -61,6 +61,7 @@ class ActionResolverTests(unittest.TestCase):
             rng=FirstChoiceRandom(),
             event_bus=self._event_bus(sink),
             event_sink=sink,
+            preset_role_ids=frozenset(roles.values()),
         )
         game.day = 1
         game._enter_phase(GamePhase.NIGHT, 100)
@@ -528,6 +529,7 @@ class ActionResolverTests(unittest.TestCase):
             rng=FirstChoiceRandom(),
             event_bus=self._event_bus(sink),
             event_sink=sink,
+            preset_role_ids=frozenset({"seer", "villager", "werewolf"}),
         )
         game.start(100)
         with self.assertRaisesRegex(ValueError, "not player-selected"):
@@ -560,6 +562,7 @@ class ActionResolverTests(unittest.TestCase):
             rng=FirstChoiceRandom(),
             event_bus=self._event_bus(sink),
             event_sink=sink,
+            preset_role_ids=frozenset({"seer", "villager"}),
         )
         game.start(100)
         game.resolve_pending_actions(110)

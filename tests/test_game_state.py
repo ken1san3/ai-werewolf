@@ -88,6 +88,19 @@ class GameStateTests(unittest.TestCase):
         game = self.create_game(rng=Random(19), logs_root=None)
         self.assertIsInstance(game.event_sink, InMemoryEventSink)
 
+    def test_direct_game_state_construction_requires_preset_role_ids(self) -> None:
+        sink = InMemoryEventSink()
+        with self.assertRaisesRegex(TypeError, "preset_role_ids"):
+            GameState(
+                game_id="missing-preset-roles",
+                content=self.content,
+                rules=self.preset.rules,
+                players={},
+                rng=Random(29),
+                event_bus=EventBus(),
+                event_sink=sink,
+            )
+
     def test_public_log_omits_role_assignment_and_private_log_records_it(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
