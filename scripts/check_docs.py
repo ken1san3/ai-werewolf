@@ -121,17 +121,19 @@ def check_rule_keys() -> None:
         fail("rule-keys", "DESIGN §5 の rules ブロックを見つけられない")
         return
     design_lines = block.group(1).splitlines()
-    design_keys = {
-        m.group(1)
-        for line in design_lines
-        if (m := re.match(r"^  (\w+):", line)) and "未実装" not in line
+    design_all = {
+        m.group(1) for line in design_lines if (m := re.match(r"^  (\w+):", line))
     }
+    # 「未実装」注記のあるキーは preset に有っても無くてよい。実装が追いついた時点で
+    # 注記が古くなるだけであり、その除去は Reviewer の仕事（Codex に DESIGN を
+    # 書き換えさせない）。
+    future = future_rule_keys()
     preset = read(ROOT / "content" / "presets" / "standard_9.yaml")
     preset_block = re.search(r"(?ms)^rules:\n(.*?)^roles:", preset)
     preset_keys = set(re.findall(r"(?m)^  (\w+):", preset_block.group(1)))
-    for key in sorted(design_keys - preset_keys):
+    for key in sorted((design_all - future) - preset_keys):
         fail("rule-keys", f"DESIGN §5 に `{key}` があるが standard_9.yaml に無い")
-    for key in sorted(preset_keys - design_keys):
+    for key in sorted(preset_keys - design_all):
         fail("rule-keys", f"standard_9.yaml に `{key}` があるが DESIGN §5 に無い")
 
 
