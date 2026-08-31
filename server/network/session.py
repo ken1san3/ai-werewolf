@@ -6,6 +6,7 @@ import json
 import logging
 import secrets
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
@@ -30,6 +31,12 @@ class SessionGame(Protocol):
     players: Mapping[str, object]
 
     def advance_if_due(self, now: int) -> bool:
+        ...
+
+    def get_state_sync(self, player_id: str) -> Mapping[str, Any]:
+        ...
+
+    def record_channel_message(self, channel_id: str, message: Mapping[str, Any]) -> None:
         ...
 
     def submit_chat(self, player_id: str, channel_id: str, message: str) -> Any:
@@ -97,6 +104,7 @@ class SessionResult:
     context: ConnectionContext | None
     replaced_connection_ids: tuple[str, ...] = ()
     channel_messages: tuple[tuple[str, Mapping[str, Any]], ...] = ()
+    replay: tuple[ServerReply, ...] = ()
 
 
 def monotonic_seconds() -> int:
@@ -144,6 +152,7 @@ class _GameSession:
         self._connections: dict[str, set[str]] = {}
         self._ready_player_ids: set[str] = set()
         self._next_seq_by_player: dict[str, int] = {}
+        self._history_by_player: dict[str, list[ServerReply]] = {}
 
     @property
     def ready_player_ids(self) -> frozenset[str]:
@@ -169,17 +178,23 @@ class _GameSession:
 
     def resume(
         self, connection_token: str, last_seq: int
-    ) -> tuple[ConnectionContext, ServerReply, tuple[str, ...]]:
+    ) -> tuple[ConnectionContext, ServerReply, tuple[str, ...], tuple[ServerReply, ...]]:
         player_id = self._players_by_token.get(connection_token)
         if player_id is None:
             raise UnaddressableRequest("invalid_connection_token")
+        if last_seq >= self._next_seq_by_player.get(player_id, 1):
+            raise UnaddressableRequest("invalid_last_seq")
+        replay = tuple(
+            deepcopy(reply) for reply in self._history_by_player.get(player_id, ())
+            if reply.seq > last_seq
+        )
         replaced_connection_ids = tuple(self._connections.pop(player_id, ()))
         context = self._connect(player_id, connection_token)
         return context, self._reply(
             player_id,
             "session.resumed",
             {"player_id": player_id, "last_seq": last_seq},
-        ), replaced_connection_ids
+        ), replaced_connection_ids, replay
 
     def ready(self, context: ConnectionContext) -> ServerReply:
         self._ready_player_ids.add(context.player_id)
@@ -234,7 +249,7 @@ class _GameSession:
             game_id=self.game.game_id,
             seq=next_seq,
             timestamp=timestamp(self._clock()),
-            payload=payload,
+            payload=deepcopy(dict(payload)),
             event_id=self._event_id_factory(),
         )
         self._next_seq_by_player[player_id] = next_seq + 1
@@ -311,10 +326,10 @@ class SessionManager:
                 new_context, reply = session.join(player_id)
                 return self._result(reply, new_context)
             if message_type == "session.resume":
-                new_context, reply, replaced_connection_ids = session.resume(
+                new_context, reply, replaced_connection_ids, replay = session.resume(
                     message["payload"]["connection_token"], message["payload"]["last_seq"]
                 )
-                return self._result(reply, new_context, replaced_connection_ids)
+                return self._result(reply, new_context, replaced_connection_ids, replay=replay)
             raise UnaddressableRequest("not_authenticated")
 
         session = self.session_for(context.game_id)
@@ -357,15 +372,20 @@ class SessionManager:
         session = self.session_for(context.game_id)
         return self._validated_reply(session._reply(context.player_id, message_type, payload), context)
 
+    def state_sync(self, context: ConnectionContext) -> ServerReply:
+        game = self.registry.get(context.game_id)
+        return self.server_event(context, "game.state_sync", game.get_state_sync(context.player_id))
+
     def _result(
         self,
         reply: ServerReply | None,
         context: ConnectionContext | None,
         replaced_connection_ids: tuple[str, ...] = (),
         channel_messages: tuple[tuple[str, Mapping[str, Any]], ...] = (),
+        replay: tuple[ServerReply, ...] = (),
     ) -> SessionResult:
         validated_reply = self._validated_reply(reply, context) if reply is not None else None
-        return SessionResult(validated_reply, context, replaced_connection_ids, channel_messages)
+        return SessionResult(validated_reply, context, replaced_connection_ids, channel_messages, replay)
 
     def _dispatch_game_action(
         self,
@@ -413,6 +433,9 @@ class SessionManager:
         except ProtocolValidationError:
             self.disconnect(context)
             raise
+        if context is not None:
+            session = self.session_for(context.game_id)
+            session._history_by_player.setdefault(context.player_id, []).append(deepcopy(reply))
         return reply
 
 

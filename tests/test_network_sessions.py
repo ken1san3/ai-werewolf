@@ -428,7 +428,12 @@ class ChatChannelRecipientTests(unittest.TestCase):
 class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
     async def _join(self, socket, player_id: str) -> dict[str, object]:
         await socket.send(json.dumps(client_message("session.join", {"player_id": player_id})))
-        return json.loads(await socket.recv())
+        joined = json.loads(await socket.recv())
+        sync = json.loads(await socket.recv())
+        self.assertEqual(sync["type"], "game.state_sync")
+        self.assertEqual(sync["seq"], joined["seq"] + 1)
+        ProtocolMessageValidator().validate_server(sync)
+        return joined
 
     async def test_event_delivery_separates_public_private_and_server_visibility(self) -> None:
         game = make_game()
@@ -462,8 +467,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                 first_public = json.loads(await first.recv())
                 first_private = json.loads(await first.recv())
                 second_public = json.loads(await second.recv())
-                self.assertEqual([first_public["seq"], first_private["seq"]], [2, 3])
-                self.assertEqual(second_public["seq"], 2)
+                self.assertEqual([first_public["seq"], first_private["seq"]], [3, 4])
+                self.assertEqual(second_public["seq"], 3)
                 self.assertEqual(first_public["payload"], {"event_type": "TEST_PUBLIC", "event_payload": {"safe": "yes"}})
                 self.assertEqual(first_private["payload"], {"event_type": "TEST_PRIVATE", "event_payload": {"secret": "player-0-only"}})
                 self.assertNotIn("visibility", first_private["payload"])
@@ -647,6 +652,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                 joined = json.loads(await joined_socket.recv())
                 self.assertEqual(joined["type"], "session.joined")
                 self.assertIn("connection_token", joined["payload"])
+                sync = json.loads(await joined_socket.recv())
+                self.assertEqual(sync["type"], "game.state_sync")
 
                 await other_socket.send(json.dumps(client_message("session.ready", {})))
                 await other_socket.wait_closed()
@@ -659,14 +666,15 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                                 "session.resume",
                                 {
                                     "connection_token": joined["payload"]["connection_token"],
-                                    "last_seq": 1,
+                                    "last_seq": sync["seq"],
                                 },
                             )
                         )
                     )
                     resumed = json.loads(await resuming_socket.recv())
                     self.assertEqual(resumed["type"], "session.resumed")
-                    self.assertEqual(resumed["seq"], 2)
+                    self.assertEqual(resumed["seq"], 3)
+                    self.assertEqual(json.loads(await resuming_socket.recv())["type"], "game.state_sync")
                     await joined_socket.wait_closed()
                     self.assertEqual(joined_socket.close_code, 4001)
                     self.assertEqual(server.sessions.session_for(GAME_ID).connection_count("player-0"), 1)

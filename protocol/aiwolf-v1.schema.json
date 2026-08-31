@@ -275,6 +275,422 @@
       "additionalProperties": false,
       "description": "A chat payload sent only to the channel recipients authorized by content."
     },
+    "player_list_payload": {
+      "type": "object",
+      "required": [
+        "players"
+      ],
+      "properties": {
+        "players": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "player_id",
+              "display_name"
+            ],
+            "properties": {
+              "player_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "display_name": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "player_deaths_payload": {
+      "type": "object",
+      "required": [
+        "deaths"
+      ],
+      "properties": {
+        "deaths": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "player_id",
+              "day"
+            ],
+            "properties": {
+              "player_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "day": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "public_cause": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "action_spec": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "ability_id",
+            "description",
+            "valid_targets",
+            "target_count",
+            "uses_remaining"
+          ],
+          "properties": {
+            "type": {
+              "const": "ability"
+            },
+            "ability_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "valid_targets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "target_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "uses_remaining": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "channel"
+          ],
+          "properties": {
+            "type": {
+              "const": "chat"
+            },
+            "channel": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "valid_targets",
+            "target_count",
+            "allows_abstain"
+          ],
+          "properties": {
+            "type": {
+              "const": "vote"
+            },
+            "valid_targets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "target_count": {
+              "const": 1
+            },
+            "allows_abstain": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "claimed_role_ids"
+          ],
+          "properties": {
+            "type": {
+              "const": "co_declare"
+            },
+            "claimed_role_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "co_report"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "player_action_state_payload": {
+      "type": "object",
+      "required": [
+        "phase",
+        "day",
+        "phase_ends_at",
+        "actions"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "setup",
+            "night0",
+            "dawn",
+            "day",
+            "vote",
+            "runoff",
+            "execution",
+            "night",
+            "game_end"
+          ]
+        },
+        "day": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phase_ends_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action_spec"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "visible_history_entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "payload"
+          ],
+          "properties": {
+            "type": {
+              "const": "game.event"
+            },
+            "payload": {
+              "$ref": "#/$defs/game_event_payload"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "payload"
+          ],
+          "properties": {
+            "type": {
+              "const": "chat.message"
+            },
+            "payload": {
+              "$ref": "#/$defs/chat_message_payload"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "game_state_sync_payload": {
+      "type": "object",
+      "required": [
+        "players",
+        "deaths",
+        "action_state",
+        "self",
+        "revealed_roles",
+        "history"
+      ],
+      "properties": {
+        "players": {
+          "$ref": "#/$defs/player_list_payload/properties/players"
+        },
+        "deaths": {
+          "$ref": "#/$defs/player_deaths_payload/properties/deaths"
+        },
+        "action_state": {
+          "$ref": "#/$defs/player_action_state_payload"
+        },
+        "self": {
+          "type": "object",
+          "required": [
+            "player_id",
+            "role_id",
+            "modifier_ids"
+          ],
+          "properties": {
+            "player_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "role_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "modifier_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "revealed_roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "player_id",
+              "role_id"
+            ],
+            "properties": {
+              "player_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/visible_history_entry"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "player_list_event": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/server_event"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "player.list"
+            },
+            "payload": {
+              "$ref": "#/$defs/player_list_payload"
+            }
+          }
+        }
+      ]
+    },
+    "player_deaths_event": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/server_event"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "player.deaths"
+            },
+            "payload": {
+              "$ref": "#/$defs/player_deaths_payload"
+            }
+          }
+        }
+      ]
+    },
+    "player_action_state_event": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/server_event"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "player.action_state"
+            },
+            "payload": {
+              "$ref": "#/$defs/player_action_state_payload"
+            }
+          }
+        }
+      ]
+    },
+    "game_state_sync_event": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/server_event"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "game.state_sync"
+            },
+            "payload": {
+              "$ref": "#/$defs/game_state_sync_payload"
+            }
+          }
+        }
+      ]
+    },
     "server_event": {
       "allOf": [
         { "$ref": "#/$defs/envelope" },
@@ -284,7 +700,7 @@
             "seq": {
               "type": "integer",
               "minimum": 1,
-              "description": "Game-wide server event sequence. It starts at 1 and has no gaps."
+              "description": "Per-player server event sequence, continued on resume. It starts at 1 and has no gaps."
             },
             "timestamp": { "$ref": "#/$defs/server_timestamp" }
           }
@@ -344,7 +760,7 @@
           }
         }
       ],
-      "description": "Authenticated reconnect acknowledgement; state replay follows in Phase 2.5."
+      "description": "Authenticated reconnect acknowledgement, following missed events and preceding a full state sync."
     },
     "session_ready_event": {
       "allOf": [

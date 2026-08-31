@@ -34,6 +34,15 @@ class DeliveryGame(Protocol):
     def chat_channel_recipient_ids(self, channel_id: str) -> tuple[str, ...]:
         ...
 
+    def get_player_list(self) -> Mapping[str, Any]:
+        ...
+
+    def get_player_deaths(self, player_id: str) -> Mapping[str, Any]:
+        ...
+
+    def get_action_state(self, player_id: str) -> Mapping[str, Any]:
+        ...
+
 
 @dataclass(frozen=True)
 class OutboundDelivery:
@@ -135,6 +144,19 @@ class EventDeliveryRouter:
                 },
             )
         )
+        if event.visibility is EventVisibility.PUBLIC and event.type == "PHASE_STARTED":
+            self._pending.append(OutboundDelivery(
+                game_id, recipients, "player.list", deepcopy(dict(game.get_player_list()))
+            ))
+            for player_id in recipients:
+                self._pending.append(OutboundDelivery(
+                    game_id, (player_id,), "player.deaths",
+                    deepcopy(dict(game.get_player_deaths(player_id))),
+                ))
+                self._pending.append(OutboundDelivery(
+                    game_id, (player_id,), "player.action_state",
+                    deepcopy(dict(game.get_action_state(player_id))),
+                ))
 
     def _game(self, game_id: str) -> DeliveryGame:
         try:

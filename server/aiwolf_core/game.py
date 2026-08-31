@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from random import Random
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .actions import ActionResolver
 from .available_actions import ActionAvailability
@@ -28,6 +28,7 @@ from .state import (
 )
 from .targets import chat_channels_for
 from .voting import VoteResolver
+from .views import PlayerViews
 
 
 class _UnspecifiedLogsRoot:
@@ -75,6 +76,25 @@ class GameState:
     runoff_candidate_player_ids: tuple[str, ...] = ()
     last_vote_result: VoteResult | None = None
     game_result: GameResult | None = None
+    _views: PlayerViews = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._views = PlayerViews(self)
+
+    def get_player_list(self) -> dict[str, Any]:
+        return self._views.player_list()
+
+    def get_player_deaths(self, player_id: str) -> dict[str, Any]:
+        return self._views.deaths(player_id)
+
+    def get_action_state(self, player_id: str) -> dict[str, Any]:
+        return self._views.action_state(player_id)
+
+    def get_state_sync(self, player_id: str) -> dict[str, Any]:
+        return self._views.state_sync(player_id)
+
+    def record_channel_message(self, channel_id: str, message: Mapping[str, Any]) -> None:
+        self._views.record_chat(channel_id, message)
 
     @classmethod
     def create_from_preset(
@@ -208,7 +228,9 @@ class GameState:
     def submit_chat(self, player_id: str, channel_id: str, message: str) -> ChatSubmission:
         """Accept chat through the core's player-view authorization service."""
 
-        return PlayerInteractions(self).submit_chat(player_id, channel_id, message)
+        submission = PlayerInteractions(self).submit_chat(player_id, channel_id, message)
+        self.record_channel_message(submission.channel_id, submission.message)
+        return submission
 
     def claimable_role_ids(self) -> tuple[str, ...]:
         """Return preset-declared CO targets permitted by the content-declared rule."""

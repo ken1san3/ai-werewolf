@@ -240,6 +240,7 @@ class GameStateTests(unittest.TestCase):
             "models.py": set(self.content.death_causes),
             "state.py": {"ability"},
             "available_actions.py": {"ability"},
+            "views.py": {"ability"},  # ActionSpec type vocabulary, not a death cause.
         }
         for source_path in sorted(core_root.rglob("*.py")):
             source = source_path.read_text(encoding="utf-8")

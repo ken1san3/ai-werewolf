@@ -40,6 +40,7 @@ class WebSocketGameServer:
         self._connections: dict[str, ServerConnection] = {}
         self._contexts: dict[str, ConnectionContext] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
+        self._dispatch_lock = asyncio.Lock()
         self._delivery_router = EventDeliveryRouter(
             registry.games,
             connected_player_ids=lambda game_id: self.sessions.session_for(
@@ -69,31 +70,39 @@ class WebSocketGameServer:
         context: ConnectionContext | None = None
         try:
             async for raw_message in websocket:
-                try:
-                    if context is None:
-                        result = self.sessions.handle_json(raw_message, None)
-                        context = result.context
-                        if result.reply is not None:
-                            await self._send_reply(websocket, result.reply)
-                        if context is not None:
-                            self._register_connection(context, websocket)
-                    else:
-                        lock = self._send_locks[context.connection_id]
-                        async with lock:
+                async with self._dispatch_lock:
+                    try:
+                        # Preserve queued event order before taking a reconnect snapshot.
+                        await self._flush_outbound_deliveries()
+                        if context is None:
+                            result = self.sessions.handle_json(raw_message, None)
+                            context = result.context
+                            sync = self.sessions.state_sync(context) if context is not None else None
+                            for reply in result.replay:
+                                await self._send_reply(websocket, reply)
+                            if result.reply is not None:
+                                await self._send_reply(websocket, result.reply)
+                            if sync is not None:
+                                await self._send_reply(websocket, sync)
+                            if context is not None:
+                                self._register_connection(context, websocket)
+                        else:
+                            if context.connection_id not in self._contexts:
+                                raise UnaddressableRequest("session_replaced")
                             result = self.sessions.handle_json(raw_message, context)
                             if result.reply is not None:
                                 await self._send_reply(websocket, result.reply)
-                except UnaddressableRequest:
-                    await websocket.close(code=1008, reason="invalid request")
-                    return
-                except ProtocolValidationError:
-                    LOGGER.exception("server generated an invalid protocol message")
-                    await websocket.close(code=1011, reason="server protocol error")
-                    return
-                await self._close_replaced_connections(result.replaced_connection_ids)
-                for channel_id, message in result.channel_messages:
-                    await self.publish_channel_message(context.game_id, channel_id, message)
-                await self._flush_outbound_deliveries()
+                    except UnaddressableRequest:
+                        await websocket.close(code=1008, reason="invalid request")
+                        return
+                    except ProtocolValidationError:
+                        LOGGER.exception("server generated an invalid protocol message")
+                        await websocket.close(code=1011, reason="server protocol error")
+                        return
+                    await self._close_replaced_connections(result.replaced_connection_ids)
+                    for channel_id, message in result.channel_messages:
+                        self._delivery_router.queue_channel_message(context.game_id, channel_id, message)
+                    await self._flush_outbound_deliveries()
         except ConnectionClosed:
             pass
         finally:
@@ -104,8 +113,10 @@ class WebSocketGameServer:
     ) -> None:
         """Deliver an already-accepted chat payload through its content channel."""
 
-        self._delivery_router.queue_channel_message(game_id, channel_id, message)
-        await self._flush_outbound_deliveries()
+        async with self._dispatch_lock:
+            self.sessions.registry.get(game_id).record_channel_message(channel_id, message)
+            self._delivery_router.queue_channel_message(game_id, channel_id, message)
+            await self._flush_outbound_deliveries()
 
     def _register_connection(
         self, context: ConnectionContext, websocket: ServerConnection
@@ -169,7 +180,8 @@ class WebSocketGameServer:
         while True:
             await asyncio.sleep(self._tick_interval_seconds)
             try:
-                self.ticker.advance_once()
-                await self._flush_outbound_deliveries()
+                async with self._dispatch_lock:
+                    self.ticker.advance_once()
+                    await self._flush_outbound_deliveries()
             except Exception:
                 LOGGER.exception("unexpected error in game tick")
