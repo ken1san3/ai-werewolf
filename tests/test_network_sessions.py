@@ -287,6 +287,26 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
             validator.validate_server(dict(chat, payload={"channel": "wolf"}))
 
 
+class ChatChannelRecipientTests(unittest.TestCase):
+    def test_public_channel_recipients_do_not_depend_on_every_role_declaration(self) -> None:
+        game = make_game()
+        game.players["player-0"] = replace(game.players["player-0"], alive=False)
+        expected = tuple(game.players)
+        self.assertEqual(game.chat_channel_recipient_ids("public"), expected)
+
+        silent_role = replace(
+            game.content.roles["villager"],
+            id="silent_observer",
+            chat_channels=(),
+        )
+        game.content = replace(
+            game.content,
+            roles={**game.content.roles, silent_role.id: silent_role},
+        )
+
+        self.assertEqual(game.chat_channel_recipient_ids("public"), expected)
+
+
 class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
     async def _join(self, socket, player_id: str) -> dict[str, object]:
         await socket.send(json.dumps(client_message("session.join", {"player_id": player_id})))

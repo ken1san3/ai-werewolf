@@ -396,12 +396,18 @@ def _parse_action_timing(data: Any, path: str) -> ActionTiming:
 
 def _parse_chat_channel(data: Any, path: str) -> ChatChannel:
     mapping = _mapping(data, path)
-    _keys(mapping, required={"id", "name", "phases", "allows_co"}, optional=set(), path=path)
+    _keys(
+        mapping,
+        required={"id", "name", "phases", "allows_co", "public"},
+        optional=set(),
+        path=path,
+    )
     return ChatChannel(
         id=_identifier(mapping["id"], f"{path}.id"),
         name=_non_empty_string(mapping["name"], f"{path}.name"),
         phases=_phase_ids(mapping["phases"], f"{path}.phases", allow_empty=True),
         allows_co=_boolean(mapping["allows_co"], f"{path}.allows_co"),
+        is_public=_boolean(mapping["public"], f"{path}.public"),
     )
 
 

@@ -179,11 +179,11 @@ class GameState:
     def chat_channel_recipient_ids(self, channel_id: str) -> tuple[str, ...]:
         """Return content-authorized recipients without exposing role details to network code."""
 
-        if channel_id not in self.content.chat_channels:
-            raise ValueError(f"unknown chat channel '{channel_id}'")
-        if all(
-            channel_id in role.chat_channels for role in self.content.roles.values()
-        ):
+        try:
+            channel = self.content.chat_channels[channel_id]
+        except KeyError as error:
+            raise ValueError(f"unknown chat channel '{channel_id}'") from error
+        if channel.is_public:
             return tuple(
                 player_id
                 for player_id in self.players

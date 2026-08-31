@@ -112,18 +112,57 @@ class ContentLoadingTests(unittest.TestCase):
 
     def test_chat_channel_co_permission_is_content_declared(self) -> None:
         channel = _parse_chat_channel(
-            {"id": "test_square", "name": "テスト広場", "phases": ["day"], "allows_co": True},
+            {
+                "id": "test_square",
+                "name": "テスト広場",
+                "phases": ["day"],
+                "allows_co": True,
+                "public": True,
+            },
             "test_chat_channel",
         )
         self.assertTrue(channel.allows_co)
+        self.assertTrue(channel.is_public)
         with self.assertRaisesRegex(ContentValidationError, "allows_co"):
             _parse_chat_channel(
-                {"id": "missing_permission", "name": "権限なし", "phases": ["day"]},
+                {
+                    "id": "missing_permission",
+                    "name": "権限なし",
+                    "phases": ["day"],
+                    "public": True,
+                },
+                "test_chat_channel",
+            )
+        with self.assertRaisesRegex(ContentValidationError, "public"):
+            _parse_chat_channel(
+                {
+                    "id": "missing_public",
+                    "name": "公開性なし",
+                    "phases": ["day"],
+                    "allows_co": True,
+                },
                 "test_chat_channel",
             )
         with self.assertRaisesRegex(ContentValidationError, "must be a boolean"):
             _parse_chat_channel(
-                {"id": "invalid_permission", "name": "無効権限", "phases": ["day"], "allows_co": 1},
+                {
+                    "id": "invalid_permission",
+                    "name": "無効権限",
+                    "phases": ["day"],
+                    "allows_co": 1,
+                    "public": False,
+                },
+                "test_chat_channel",
+            )
+        with self.assertRaisesRegex(ContentValidationError, "must be a boolean"):
+            _parse_chat_channel(
+                {
+                    "id": "invalid_public",
+                    "name": "無効公開性",
+                    "phases": ["day"],
+                    "allows_co": True,
+                    "public": 1,
+                },
                 "test_chat_channel",
             )
 

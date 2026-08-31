@@ -109,6 +109,7 @@ class ChatChannel:
     name: str
     phases: tuple[str, ...]
     allows_co: bool
+    is_public: bool
 
 
 @dataclass(frozen=True)
