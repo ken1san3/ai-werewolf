@@ -296,9 +296,9 @@ rules:
     allow_villager_claim: false    # 市民を騙れるか
   death:
     public_detail: phase           # phase | cause | none
-  sudden_death:                    # 未実装（Phase 2.4。発言数の集計が要る）
+  sudden_death:
     enabled: false                 # 昼に一度も発言しなかった生存者を Day 終了時に死亡させる
-  graveyard:                       # Phase 2.3 で公開 / private の送信経路と同時に実装
+  graveyard:
     view_public: true              # 死亡後も public を閲覧できる
     speak: false                   # 墓場での発言（Phase 7）
     reveal_roles: false            # 死亡者に全員の役職を見せる
@@ -427,7 +427,8 @@ Vote へ入る前に解決するため、突然死した者は投票しない。
 
 - 判定は Day のみ。Night の沈黙は対象にしない
 - 公開死因は他の昼の死亡と同じ `died_in_day` になる（§7.3 の導出に従う）
-- 霊能者は `targets` に `sudden_death` を含む場合に判定できる
+- 霊能者が突然死者を判定できるかは、役職側の `target.causes` が決める（D046）。
+  ルール設定ではない
 
 サーバは**観測できる事実だけ**で判定する。
 接続が切れたのか、クライアント側のLLMが応答しなかったのかは区別しない。
@@ -792,9 +793,10 @@ CO も列挙しない。両者を別々の条件で書かない。
 どのチャネルで CO を行えるかは `chat_channels.yaml` の `allows_co` が宣言する。
 コアが特定のチャネルIDを直書きしてはならない（§4.6）。
 
-`rules.co` の残りは受付だけでなく列挙にも効くが、`max_per_day` は日ごとの
-カウンタを、`allow_villager_claim` は CO 内容の検証を必要とするため、
-どちらも Phase 2.4 の受付実装と同時に反映する。
+`rules.co` は受付だけでなく列挙にも効く。`max_per_day` は日ごとのカウンタで、
+`allow_villager_claim` は騙り候補の絞り込みに使う。騙れる役職かどうかは
+役職 YAML の必須キー `claimable` が宣言し、候補の母集合は**その試合の配役**である
+（D044）。コアは役職 ID を知らない。
 
 ---
 
