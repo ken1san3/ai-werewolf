@@ -18,12 +18,15 @@ its llama.cpp `-c` argument. `llm.input_token_limit` reserves the requested outp
 the completion request and rejects an oversized payload with `input_too_long`. If `/tokenize` is
 unavailable, it falls back to the same numeric value as a conservative character limit.
 `summarize.py` does not automatically truncate by default; an explicit `--max-chars` truncation
-reports discarded characters to stderr and `usage.jsonl`.
+reports discarded characters to stderr and `usage.jsonl`. Every completion record declares whether
+it used `tokenize` or `character_fallback`, and `doctor.py` treats an unavailable `/tokenize` on a
+running server as unhealthy.
 
 ## Consequences
 
 - Limits follow profile configuration and actual tokenization rather than a fixed character ratio.
 - The usage log distinguishes a local pre-send rejection from an HTTP failure.
+- A fallback that still completes is visible in the usage log rather than silently reducing capacity.
 - An explicit truncation is observable rather than a successful-looking partial summary.
 - Long, append-only documents must be passed as a relevant extracted section rather than whole
   `-d` documents.
