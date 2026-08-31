@@ -54,6 +54,7 @@ class GameState:
     rng: RandomSource
     event_bus: EventBus
     event_sink: EventSink
+    preset_role_ids: frozenset[str] = field(default_factory=frozenset)
     day: int = 0
     phase: GamePhase = GamePhase.SETUP
     phase_started_at: int | None = None
@@ -126,6 +127,9 @@ class GameState:
             rng=rng if rng is not None else Random(),
             event_bus=event_bus,
             event_sink=sink,
+            preset_role_ids=frozenset(
+                role_id for role_id, count in preset.role_counts.items() if count != 0
+            ),
         )
         state._record_game_created(player_configs)
         state._apply_role_missing(role_ids, _role_missing_candidates(preset.rules, role_ids))
@@ -207,13 +211,12 @@ class GameState:
         return PlayerInteractions(self).submit_chat(player_id, channel_id, message)
 
     def claimable_role_ids(self) -> tuple[str, ...]:
-        """Return active-game CO targets permitted by the content-declared rule."""
+        """Return preset-declared CO targets permitted by the content-declared rule."""
 
-        assigned_roles = {player.role.id: player.role for player in self.players.values()}
         return tuple(
             role_id
-            for role_id, role in sorted(assigned_roles.items())
-            if self.rules.co.allow_villager_claim or role.claimable
+            for role_id in sorted(self.preset_role_ids)
+            if self.rules.co.allow_villager_claim or self.content.roles[role_id].claimable
         )
 
     def declare_co(self, player_id: str, claimed_role_id: str, comment: str) -> None:

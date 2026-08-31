@@ -61,6 +61,7 @@ class AvailableActionsTests(unittest.TestCase):
             rng=Random(7),
             event_bus=event_bus,
             event_sink=sink,
+            preset_role_ids=frozenset(roles.values()),
         )
         game.day = 1
         game._enter_phase(phase, 100)

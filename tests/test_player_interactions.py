@@ -67,23 +67,25 @@ class PlayerInteractionTests(unittest.TestCase):
             rng=Random(7),
             event_bus=event_bus,
             event_sink=sink,
+            preset_role_ids=frozenset(roles.values()),
         )
         game.day = 1
         game._enter_phase(GamePhase.DAY, 100)
         return game
 
-    def make_standard_day_game(self) -> GameState:
+    def make_standard_day_game(self, *, preset=None, rng_seed: int = 0) -> GameState:
+        preset = self.preset if preset is None else preset
         player_configs = tuple(
             PlayerConfig(f"player-{index}", f"Player {index}")
-            for index in range(sum(self.preset.role_counts.values()))
+            for index in range(sum(preset.role_counts.values()))
         )
         game = GameState.create_from_preset(
             self.content,
-            self.preset,
+            preset,
             player_configs,
             game_id="standard-claim-test",
             event_sink=InMemoryEventSink(),
-            rng=Random(0),
+            rng=Random(rng_seed),
             started_at=0,
         )
         game._enter_phase(GamePhase.DAY, 100)
@@ -131,16 +133,15 @@ class PlayerInteractionTests(unittest.TestCase):
         self.assertIn("villager", declaration.claimed_role_ids)
         permitted.declare_co("wolf", "villager", "I am a villager")
 
-    def test_claim_candidates_are_limited_to_the_active_standard_game_roles(self) -> None:
+    def test_claim_candidates_are_limited_to_the_preset_role_distribution(self) -> None:
         game = self.make_standard_day_game()
         player_id = next(iter(game.players))
         declaration = next(
             action for action in game.get_available_actions(player_id) if action.type == "co_declare"
         )
-        assigned_role_ids = {player.role.id for player in game.players.values()}
         expected = tuple(
             role_id
-            for role_id in sorted(assigned_role_ids)
+            for role_id in sorted(self.preset.role_counts)
             if self.content.roles[role_id].claimable
         )
         self.assertEqual(declaration.claimed_role_ids, expected)
@@ -148,7 +149,7 @@ class PlayerInteractionTests(unittest.TestCase):
         missing_role_id = next(
             role_id
             for role_id, role in self.content.roles.items()
-            if role_id not in assigned_role_ids and role.claimable
+            if role_id not in self.preset.role_counts and role.claimable
         )
         with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
             game.declare_co(player_id, missing_role_id, "not in this game")
@@ -168,6 +169,40 @@ class PlayerInteractionTests(unittest.TestCase):
                 action for action in game.get_available_actions(player_id) if action.type == "co_declare"
             )
             self.assertEqual(unchanged.claimed_role_ids, expected)
+
+    def test_role_missing_keeps_the_preset_co_candidates(self) -> None:
+        missing_preset = replace(
+            self.preset,
+            rules=replace(
+                self.preset.rules,
+                role_missing=replace(self.preset.rules.role_missing, enabled=True),
+            ),
+        )
+        expected = tuple(
+            role_id
+            for role_id in sorted(missing_preset.role_counts)
+            if self.content.roles[role_id].claimable
+        )
+
+        for seed in (1, 5, 11):
+            with self.subTest(seed=seed):
+                game = self.make_standard_day_game(preset=missing_preset, rng_seed=seed)
+                player_id = next(iter(game.players))
+                declaration = next(
+                    action
+                    for action in game.get_available_actions(player_id)
+                    if action.type == "co_declare"
+                )
+                missing_event = next(
+                    event
+                    for event in game.event_bus.events
+                    if event.type == "ROLE_MISSING_APPLIED"
+                )
+
+                self.assertEqual(declaration.claimed_role_ids, expected)
+                self.assertIn(
+                    missing_event.payload["missing_role_id"], declaration.claimed_role_ids
+                )
 
     def test_co_receipt_uses_the_claim_candidates_from_available_actions(self) -> None:
         game = self.make_day_game({"wolf": "werewolf", "seer": "seer"})
