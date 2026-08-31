@@ -50,6 +50,7 @@ from .models import (
     RoleOption,
     RulesConfig,
     ShorteningRules,
+    SuddenDeathRules,
     TargetSpec,
     TargetSelector,
     Team,
@@ -789,6 +790,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
             "medium",
             "wolf_attack",
             "co",
+            "sudden_death",
             "death",
             "graveyard",
             "role_missing",
@@ -816,6 +818,10 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         _mapping(data["wolf_attack"], f"{path}.rules.wolf_attack"), f"{path}.rules.wolf_attack"
     )
     co = _parse_co_rules(_mapping(data["co"], f"{path}.rules.co"), f"{path}.rules.co")
+    sudden_death = _parse_sudden_death_rules(
+        _mapping(data["sudden_death"], f"{path}.rules.sudden_death"),
+        f"{path}.rules.sudden_death",
+    )
     death = _parse_death_rules(_mapping(data["death"], f"{path}.rules.death"), f"{path}.rules.death")
     graveyard = _parse_graveyard_rules(
         _mapping(data["graveyard"], f"{path}.rules.graveyard"),
@@ -851,6 +857,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         medium=medium,
         wolf_attack=wolf_attack,
         co=co,
+        sudden_death=sudden_death,
         death=death,
         graveyard=graveyard,
         role_missing=role_missing,
@@ -951,6 +958,11 @@ def _parse_co_rules(data: Mapping[str, Any], path: str) -> CoRules:
         max_per_day=_optional_integer(data["max_per_day"], f"{path}.max_per_day", minimum=1),
         allow_villager_claim=_boolean(data["allow_villager_claim"], f"{path}.allow_villager_claim"),
     )
+
+
+def _parse_sudden_death_rules(data: Mapping[str, Any], path: str) -> SuddenDeathRules:
+    _keys(data, required={"enabled"}, optional=set(), path=path)
+    return SuddenDeathRules(enabled=_boolean(data["enabled"], f"{path}.enabled"))
 
 
 def _parse_death_rules(data: Mapping[str, Any], path: str) -> DeathRules:

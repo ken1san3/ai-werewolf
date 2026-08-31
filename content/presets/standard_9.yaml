@@ -23,6 +23,8 @@ rules:
   co:
     max_per_day: 3
     allow_villager_claim: false
+  sudden_death:
+    enabled: false
   death:
     public_detail: phase
   graveyard:

@@ -64,3 +64,23 @@ Join できる境界に留める。リモート公開前に、ロビー作成者
 初回席割当方式を決定する。
 
 ---
+
+## Q38 [Phase 2.4] CO の市民騙り識別子とチャット送信先
+
+`rules.co.allow_villager_claim` は「市民を騙れるか」を定めるが、DESIGN.md の
+`Role` / `RulesConfig` には市民役職を content から識別する属性または role ID を指定する
+設定がない。コアへ `"villager"` を直書きせずにこの制約を評価するため、次のいずれかを
+決定する必要がある。
+
+- `rules.co` に市民 role ID（または CO 禁止 role ID 群）を明示する
+- `Role` に市民 CO を識別する content 属性を加える
+- `allow_villager_claim` の意味を別の content 宣言で定義する
+
+また `chat.send` は本文だけの v1.0 例があり、DESIGN.md の `ActionSpec.channel` は送信要求の
+payload を定義していない。複数 chat channel が同時に利用可能な役職・Modifier でも送信先を
+一意にする payload を、Phase 8 の複数 channel 導入前に決める必要がある。
+
+Phase 2.4 の初期 channel 範囲では、core が列挙する chat action がちょうど1件のときだけ
+`chat.send` を受理する。市民騙りの内容制約は決定後に追加する。
+
+---

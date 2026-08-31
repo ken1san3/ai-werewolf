@@ -73,14 +73,16 @@ class WebSocketGameServer:
                     if context is None:
                         result = self.sessions.handle_json(raw_message, None)
                         context = result.context
-                        await self._send_reply(websocket, result.reply)
+                        if result.reply is not None:
+                            await self._send_reply(websocket, result.reply)
                         if context is not None:
                             self._register_connection(context, websocket)
                     else:
                         lock = self._send_locks[context.connection_id]
                         async with lock:
                             result = self.sessions.handle_json(raw_message, context)
-                            await self._send_reply(websocket, result.reply)
+                            if result.reply is not None:
+                                await self._send_reply(websocket, result.reply)
                 except UnaddressableRequest:
                     await websocket.close(code=1008, reason="invalid request")
                     return
@@ -89,6 +91,8 @@ class WebSocketGameServer:
                     await websocket.close(code=1011, reason="server protocol error")
                     return
                 await self._close_replaced_connections(result.replaced_connection_ids)
+                for channel_id, message in result.channel_messages:
+                    await self.publish_channel_message(context.game_id, channel_id, message)
                 await self._flush_outbound_deliveries()
         except ConnectionClosed:
             pass

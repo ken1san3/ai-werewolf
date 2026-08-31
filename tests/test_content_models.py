@@ -238,6 +238,7 @@ class ContentLoadingTests(unittest.TestCase):
     def test_enabled_when_boolean_paths_are_derived_from_dataclasses(self) -> None:
         self.assertIn("guard.consecutive", _boolean_rule_paths(RulesConfig))
         self.assertIn("shortening.enabled", _boolean_rule_paths(RulesConfig))
+        self.assertIn("sudden_death.enabled", _boolean_rule_paths(RulesConfig))
         self.assertEqual(_boolean_rule_paths(RulesConfigFixture), frozenset({"nested.enabled"}))
 
     def test_preset_loads_with_explicit_rules(self) -> None:
@@ -252,6 +253,7 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertFalse(preset.rules.graveyard.reveal_roles)
         self.assertIsNone(preset.rules.night_action.no_selection)
         self.assertFalse(preset.rules.shortening.enabled)
+        self.assertFalse(preset.rules.sudden_death.enabled)
         self.assertEqual(preset.rules.vote_seconds, 60)
         self.assertTrue(preset.rules.vote.abstain.enabled)
         self.assertIsNone(preset.rules.vote.abstain.max_per_player)

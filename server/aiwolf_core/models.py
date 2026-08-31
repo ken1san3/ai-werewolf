@@ -344,6 +344,11 @@ class CoRules:
 
 
 @dataclass(frozen=True)
+class SuddenDeathRules:
+    enabled: bool
+
+
+@dataclass(frozen=True)
 class DeathRules:
     public_detail: str
 
@@ -383,6 +388,7 @@ class RulesConfig:
     medium: MediumRules
     wolf_attack: WolfAttackRules
     co: CoRules
+    sudden_death: SuddenDeathRules
     death: DeathRules
     graveyard: GraveyardRules
     role_missing: RoleMissingRules

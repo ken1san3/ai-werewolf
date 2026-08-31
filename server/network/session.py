@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from ..aiwolf_core.clock import timestamp
+from ..aiwolf_core.interactions import ActionRejected
 
 from .protocol import ProtocolMessageValidator, ProtocolValidationError
 
@@ -29,6 +30,25 @@ class SessionGame(Protocol):
     players: Mapping[str, object]
 
     def advance_if_due(self, now: int) -> bool:
+        ...
+
+    def submit_chat(self, player_id: str, message: str) -> Any:
+        ...
+
+    def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
+        ...
+
+    def submit_action(
+        self, now: int, actor_player_id: str, ability_id: str, target_player_ids: tuple[str, ...]
+    ) -> None:
+        ...
+
+    def declare_co(self, player_id: str, claimed_role_id: str, comment: str) -> None:
+        ...
+
+    def report_co(
+        self, player_id: str, kind: str, target_player_id: str, claimed_result: str
+    ) -> None:
         ...
 
 
@@ -71,11 +91,12 @@ class ServerReply:
 
 @dataclass(frozen=True)
 class SessionResult:
-    """A direct reply plus the authenticated connection it belongs to."""
+    """Optional direct reply and accepted chat outputs for one authenticated request."""
 
-    reply: ServerReply
+    reply: ServerReply | None
     context: ConnectionContext | None
     replaced_connection_ids: tuple[str, ...] = ()
+    channel_messages: tuple[tuple[str, Mapping[str, Any]], ...] = ()
 
 
 def monotonic_seconds() -> int:
@@ -220,7 +241,7 @@ class _GameSession:
         return reply
 
 class SessionManager:
-    """Handle Join, Ready, Resume, and disconnect without touching game rules."""
+    """Authenticate requests and delegate every gameplay decision to the core."""
 
     def __init__(
         self,
@@ -232,6 +253,7 @@ class SessionManager:
         validator: ProtocolMessageValidator | None = None,
     ) -> None:
         self.registry = registry
+        self._clock = clock
         self._validator = validator if validator is not None else ProtocolMessageValidator()
         make_token = token_factory if token_factory is not None else lambda: secrets.token_urlsafe(32)
         make_event_id = event_id_factory if event_id_factory is not None else lambda: str(uuid4())
@@ -311,8 +333,17 @@ class SessionManager:
         message_type = message["type"]
         if message_type == "session.ready":
             return self._result(session.ready(context), context)
-
-        return self._result(session.rejected(context, message_type, "unsupported_action"), context)
+        try:
+            channel_messages = self._dispatch_game_action(
+                session.game, context.player_id, message_type, message["payload"]
+            )
+        except ActionRejected as error:
+            return self._result(session.rejected(context, message_type, error.reason), context)
+        except ValueError:
+            return self._result(session.rejected(context, message_type, "invalid_action"), context)
+        if channel_messages is None:
+            return self._result(None, context)
+        return self._result(None, context, channel_messages=channel_messages)
 
     def disconnect(self, context: ConnectionContext | None) -> None:
         if context is not None:
@@ -328,13 +359,51 @@ class SessionManager:
 
     def _result(
         self,
-        reply: ServerReply,
+        reply: ServerReply | None,
         context: ConnectionContext | None,
         replaced_connection_ids: tuple[str, ...] = (),
+        channel_messages: tuple[tuple[str, Mapping[str, Any]], ...] = (),
     ) -> SessionResult:
-        return SessionResult(
-            self._validated_reply(reply, context), context, replaced_connection_ids
-        )
+        validated_reply = self._validated_reply(reply, context) if reply is not None else None
+        return SessionResult(validated_reply, context, replaced_connection_ids, channel_messages)
+
+    def _dispatch_game_action(
+        self,
+        game: SessionGame,
+        player_id: str,
+        message_type: str,
+        raw_payload: object,
+    ) -> tuple[tuple[str, Mapping[str, Any]], ...] | None:
+        """Route typed protocol data while leaving action legality to the core service."""
+
+        if not isinstance(raw_payload, Mapping):
+            raise ActionRejected("invalid_message")
+        if message_type == "chat.send":
+            submission = game.submit_chat(player_id, raw_payload["message"])
+            return ((submission.channel_id, submission.message),)
+        if message_type == "vote.cast":
+            game.submit_vote(player_id, raw_payload["target_player_id"])
+            return None
+        if message_type == "ability.use":
+            game.submit_action(
+                timestamp(self._clock()),
+                player_id,
+                raw_payload["ability_id"],
+                tuple(raw_payload["target_player_ids"]),
+            )
+            return None
+        if message_type == "co.declare":
+            game.declare_co(player_id, raw_payload["claimed_role_id"], raw_payload["comment"])
+            return None
+        if message_type == "co.report":
+            game.report_co(
+                player_id,
+                raw_payload["kind"],
+                raw_payload["target_player_id"],
+                raw_payload["claimed_result"],
+            )
+            return None
+        raise ActionRejected("unsupported_action")
 
     def _validated_reply(
         self, reply: ServerReply, context: ConnectionContext | None

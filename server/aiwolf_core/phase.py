@@ -51,6 +51,13 @@ class PhaseManager:
         if self.game.phase in {GamePhase.NIGHT0, GamePhase.NIGHT}:
             ActionResolver(self.game).resolve(now)
             game_ended = WinEvaluator(self.game).evaluate_and_record() is not None or game_ended
+        elif self.game.phase is GamePhase.DAY:
+            from .sudden_death import DayEndResolver
+
+            DayEndResolver(self.game).resolve_sudden_death()
+            if self.game.game_result is not None:
+                self.enter(GamePhase.GAME_END, now)
+                return self.game.phase
         else:
             game_ended = self.game.game_result is not None or game_ended
         self.enter(self.next_phase(game_ended=game_ended), now)

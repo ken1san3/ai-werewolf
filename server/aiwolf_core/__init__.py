@@ -4,6 +4,7 @@ from .content import ContentPack, ContentValidationError, Preset, load_content, 
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
 from .death import public_death_cause
 from .game import GameState
+from .interactions import ActionRejected, ChatSubmission
 from .state import (
     ActionSpec,
     GameResult,
@@ -28,8 +29,10 @@ from .models import (
 __all__ = [
     "AppliedModifier",
     "ActionSpec",
+    "ActionRejected",
     "ContentPack",
     "ContentValidationError",
+    "ChatSubmission",
     "EffectiveAttributes",
     "EventBus",
     "EventSink",

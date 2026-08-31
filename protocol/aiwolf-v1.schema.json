@@ -137,6 +137,108 @@
       ],
       "description": "Mark the authenticated game seat as ready."
     },
+    "chat_send_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "chat.send" },
+            "payload": {
+              "type": "object",
+              "required": ["message"],
+              "properties": {
+                "message": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Send one message when the core exposes exactly one content-declared chat channel."
+    },
+    "vote_cast_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "vote.cast" },
+            "payload": {
+              "type": "object",
+              "required": ["target_player_id"],
+              "properties": {
+                "target_player_id": { "type": ["string", "null"], "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Reserve or replace the authenticated player's vote. null is explicit abstention."
+    },
+    "ability_use_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "ability.use" },
+            "payload": {
+              "type": "object",
+              "required": ["ability_id", "target_player_ids"],
+              "properties": {
+                "ability_id": { "type": "string", "minLength": 1 },
+                "target_player_ids": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Reserve an ability action for the authenticated player."
+    },
+    "co_declare_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "co.declare" },
+            "payload": {
+              "type": "object",
+              "required": ["claimed_role_id", "comment"],
+              "properties": {
+                "claimed_role_id": { "type": "string", "minLength": 1 },
+                "comment": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Publicly claim a content-registered role. The core does not verify truth."
+    },
+    "co_report_request": {
+      "allOf": [
+        { "$ref": "#/$defs/client_request" },
+        {
+          "properties": {
+            "type": { "const": "co.report" },
+            "payload": {
+              "type": "object",
+              "required": ["kind", "target_player_id", "claimed_result"],
+              "properties": {
+                "kind": { "type": "string", "minLength": 1 },
+                "target_player_id": { "type": "string", "minLength": 1 },
+                "claimed_result": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "description": "Publicly report a claim. The core does not verify truth."
+    },
     "action_rejected_payload": {
       "type": "object",
       "required": ["action", "reason"],

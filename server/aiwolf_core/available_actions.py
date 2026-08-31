@@ -65,7 +65,9 @@ class ActionAvailability(ActionConstraints):
             and self.game.content.chat_channels[action.channel].allows_co
             for action in chat_actions
         ):
-            actions.extend((ActionSpec(type="co_declare"), ActionSpec(type="co_report")))
+            if self.game.can_declare_co(player.player_id):
+                actions.append(ActionSpec(type="co_declare"))
+            actions.append(ActionSpec(type="co_report"))
         if self.game.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
             return actions
         actions.append(

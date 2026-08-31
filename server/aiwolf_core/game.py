@@ -12,6 +12,7 @@ from .available_actions import ActionAvailability
 from .content import ContentPack, Preset
 from .death import DeathResolver, public_death_cause
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
+from .interactions import ChatSubmission, PlayerInteractions
 from .models import GamePhase, RulesConfig
 from .phase import PhaseManager
 from .state import (
@@ -68,6 +69,8 @@ class GameState:
     night_actions_resolved: bool = False
     pending_votes: dict[str, str | None] = field(default_factory=dict)
     abstentions_used: dict[str, int] = field(default_factory=dict)
+    public_chat_counts: dict[tuple[int, str], int] = field(default_factory=dict)
+    co_declaration_counts: dict[tuple[int, str], int] = field(default_factory=dict)
     runoff_candidate_player_ids: tuple[str, ...] = ()
     last_vote_result: VoteResult | None = None
     game_result: GameResult | None = None
@@ -197,6 +200,31 @@ class GameState:
 
     def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
         VoteResolver(self).submit(voter_player_id, target_player_id)
+
+    def submit_chat(self, player_id: str, message: str) -> ChatSubmission:
+        """Accept chat through the core's player-view authorization service."""
+
+        return PlayerInteractions(self).submit_chat(player_id, message)
+
+    def declare_co(self, player_id: str, claimed_role_id: str, comment: str) -> None:
+        """Accept one public CO declaration without validating its truth."""
+
+        PlayerInteractions(self).declare_co(player_id, claimed_role_id, comment)
+
+    def report_co(
+        self, player_id: str, kind: str, target_player_id: str, claimed_result: str
+    ) -> None:
+        """Accept one public CO report without validating its truth."""
+
+        PlayerInteractions(self).report_co(player_id, kind, target_player_id, claimed_result)
+
+    def can_declare_co(self, player_id: str) -> bool:
+        """Return the content-configured declaration quota state for this day."""
+
+        if player_id not in self.players:
+            return False
+        limit = self.rules.co.max_per_day
+        return limit is None or self.co_declaration_counts.get((self.day, player_id), 0) < limit
 
     def resolve_votes(self, now: int) -> VoteResult:
         return VoteResolver(self).resolve(now)

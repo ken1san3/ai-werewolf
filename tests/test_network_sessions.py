@@ -12,6 +12,7 @@ from websockets.asyncio.client import connect
 
 from server.aiwolf_core import (
     EventVisibility,
+    GamePhase,
     GameState,
     GameEvent,
     InMemoryEventSink,
@@ -202,6 +203,64 @@ class SessionManagerTests(unittest.TestCase):
         self.assertEqual(result.reply.game_id, "standard-nine")
         ProtocolMessageValidator().validate_server(result.reply.as_message())
 
+    def test_authenticated_actions_delegate_to_core_and_return_rejections_only_on_failure(self) -> None:
+        self.game._enter_phase(GamePhase.DAY, 1)
+        joined = self.manager.handle_message(client_message("session.join", {"player_id": "player-0"}))
+
+        chat = self.manager.handle_message(
+            client_message("chat.send", {"message": "hello"}), joined.context
+        )
+        self.assertIsNone(chat.reply)
+        self.assertEqual(
+            chat.channel_messages,
+            ((
+                "public",
+                {"player_id": "player-0", "display_name": "Player 0", "message": "hello"},
+            ),),
+        )
+        self.assertEqual(
+            self.game.public_chat_counts[(self.game.day, "player-0")], 1
+        )
+
+        self.game._record_player_death("player-0", "lynched")
+        rejected = self.manager.handle_message(
+            client_message("co.declare", {"claimed_role_id": "seer", "comment": "too late"}),
+            joined.context,
+        )
+        self.assertIsNotNone(rejected.reply)
+        self.assertEqual(rejected.reply.type, "action.rejected")
+        self.assertEqual(rejected.reply.payload["reason"], "action_unavailable")
+
+    def test_ability_and_vote_requests_are_accepted_by_the_same_core_methods(self) -> None:
+        wolf_player_id = next(
+            player_id for player_id, player in self.game.players.items() if player.role.id == "werewolf"
+        )
+        target_player_id = next(
+            player_id
+            for player_id, player in self.game.players.items()
+            if player_id != wolf_player_id and player.role.id != "werewolf"
+        )
+        self.game.day = 1
+        self.game._enter_phase(GamePhase.NIGHT, 1)
+        joined = self.manager.handle_message(
+            client_message("session.join", {"player_id": wolf_player_id})
+        )
+        ability = self.manager.handle_message(
+            client_message(
+                "ability.use", {"ability_id": "attack", "target_player_ids": [target_player_id]}
+            ),
+            joined.context,
+        )
+        self.assertIsNone(ability.reply)
+        self.assertIn(wolf_player_id, self.game.pending_actions)
+
+        self.game._enter_phase(GamePhase.VOTE, 2)
+        vote = self.manager.handle_message(
+            client_message("vote.cast", {"target_player_id": target_player_id}), joined.context
+        )
+        self.assertIsNone(vote.reply)
+        self.assertEqual(self.game.pending_votes[wolf_player_id], target_player_id)
+
 
 class TickDriverTests(unittest.TestCase):
     def test_tick_uses_one_server_clock_value_for_every_registered_game(self) -> None:
@@ -285,6 +344,29 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
         validator.validate_server(chat)
         with self.assertRaises(ProtocolValidationError):
             validator.validate_server(dict(chat, payload={"channel": "wolf"}))
+
+    def test_player_action_requests_have_strict_type_specific_payloads(self) -> None:
+        validator = ProtocolMessageValidator()
+        validator.validate_client(
+            client_message("chat.send", {"message": "hello"})
+        )
+        validator.validate_client(
+            client_message("vote.cast", {"target_player_id": None})
+        )
+        validator.validate_client(
+            client_message("ability.use", {"ability_id": "inspect", "target_player_ids": ["player-1"]})
+        )
+        validator.validate_client(
+            client_message("co.declare", {"claimed_role_id": "seer", "comment": "CO"})
+        )
+        validator.validate_client(
+            client_message(
+                "co.report",
+                {"kind": "inspect_result", "target_player_id": "player-1", "claimed_result": "white"},
+            )
+        )
+        with self.assertRaises(ProtocolValidationError):
+            validator.validate_client(client_message("chat.send", {"channel": "public", "message": "extra"}))
 
 
 class ChatChannelRecipientTests(unittest.TestCase):
@@ -379,6 +461,40 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                 )
                 with self.assertRaises(asyncio.TimeoutError):
                     await asyncio.wait_for(blocked.recv(), timeout=0.05)
+        finally:
+            await server.close()
+
+    async def test_authenticated_chat_request_is_authorized_by_core_and_delivered_to_channel(self) -> None:
+        game = make_game()
+        game._enter_phase(GamePhase.DAY, 1)
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(registry, tick_interval_seconds=3600)
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as sender, connect(uri) as recipient:
+                await self._join(sender, "player-0")
+                await self._join(recipient, "player-1")
+                await sender.send(
+                    json.dumps(client_message("chat.send", {"message": "hello"}))
+                )
+                sender_message = json.loads(await sender.recv())
+                recipient_message = json.loads(await recipient.recv())
+                self.assertEqual(sender_message["type"], "chat.message")
+                self.assertEqual(sender_message["type"], recipient_message["type"])
+                self.assertEqual(sender_message["seq"], recipient_message["seq"])
+                self.assertEqual(sender_message["payload"], recipient_message["payload"])
+                self.assertEqual(
+                    sender_message["payload"],
+                    {
+                        "channel": "public",
+                        "message": {
+                            "player_id": "player-0",
+                            "display_name": "Player 0",
+                            "message": "hello",
+                        },
+                    },
+                )
         finally:
             await server.close()
 
