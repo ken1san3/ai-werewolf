@@ -13,14 +13,17 @@ reached the server only to fail before inference.
 ## Decision
 
 `C:\AIagent\agent\lib\conf.context_window` derives the active profile's context window from
-its llama.cpp `-c` argument. `llm.input_character_limit` reserves the requested output tokens and
-a 2,048-token safety margin. `llm` rejects oversized final payloads before HTTP and records an
-`input_too_long` outcome. `ask.py` checks after input concatenation; `summarize.py` clips its
-source text to the derived remaining capacity.
+its llama.cpp `-c` argument. `llm.input_token_limit` reserves the requested output tokens and a
+2,048-token safety margin. `llm` counts the final payload through llama.cpp's `/tokenize` before
+the completion request and rejects an oversized payload with `input_too_long`. If `/tokenize` is
+unavailable, it falls back to the same numeric value as a conservative character limit.
+`summarize.py` does not automatically truncate by default; an explicit `--max-chars` truncation
+reports discarded characters to stderr and `usage.jsonl`.
 
 ## Consequences
 
-- Limits follow profile configuration rather than a fixed character threshold.
+- Limits follow profile configuration and actual tokenization rather than a fixed character ratio.
 - The usage log distinguishes a local pre-send rejection from an HTTP failure.
+- An explicit truncation is observable rather than a successful-looking partial summary.
 - Long, append-only documents must be passed as a relevant extracted section rather than whole
   `-d` documents.
