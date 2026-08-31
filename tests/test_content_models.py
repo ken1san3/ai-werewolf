@@ -109,6 +109,8 @@ class ContentLoadingTests(unittest.TestCase):
             "lynched", "attacked", "retaliation", "cursed", "follow_death", "sudden_death", "ability"
         })
         self.assertEqual(set(self.content.death_causes), CORE_DEATH_CAUSE_IDS)
+        self.assertFalse(self.content.roles["villager"].claimable)
+        self.assertTrue(all(role.claimable for role_id, role in self.content.roles.items() if role_id != "villager"))
 
     def test_chat_channel_co_permission_is_content_declared(self) -> None:
         channel = _parse_chat_channel(
@@ -491,6 +493,7 @@ class ContentLoadingTests(unittest.TestCase):
             {
                 "id": "test_observer",
                 "name": "テスト観測者",
+                "claimable": True,
                 "team": "village",
                 "attack_result": "die",
                 "tags": [],
@@ -512,11 +515,13 @@ class ContentLoadingTests(unittest.TestCase):
         )
         self.assertEqual(role.id, "test_observer")
         self.assertEqual(role.attributes.inspect_result, "not_wolf")
+        self.assertTrue(role.claimable)
 
     def test_role_chat_channels_must_be_registered_content_channels(self) -> None:
         role_data = {
             "id": "invalid_private_channel",
             "name": "無効チャンネル役職",
+            "claimable": True,
             "team": "village",
             "attack_result": "die",
             "tags": [],
@@ -530,6 +535,33 @@ class ContentLoadingTests(unittest.TestCase):
             _parse_role(
                 role_data,
                 "invalid_private_channel.yaml",
+                self.content.teams,
+                self.content.effects,
+                self.content.passives,
+                self.content.selectors,
+                self.content.restriction_types,
+                self.content.action_timings,
+                self.content.chat_channels,
+                self.content.death_causes,
+            )
+
+    def test_role_claimable_declaration_is_required(self) -> None:
+        role_data = {
+            "id": "missing_claimable",
+            "name": "騙り可否なし",
+            "team": "village",
+            "attack_result": "die",
+            "tags": [],
+            "knows_teammates": False,
+            "chat_channels": ["public"],
+            "abilities": [],
+            "passives": [],
+            "options": {},
+        }
+        with self.assertRaisesRegex(ContentValidationError, "claimable"):
+            _parse_role(
+                role_data,
+                "missing_claimable.yaml",
                 self.content.teams,
                 self.content.effects,
                 self.content.passives,

@@ -1,5 +1,6 @@
 id: wise_werewolf
 name: 賢狼
+claimable: true
 team: wolf
 attack_result: immune
 tags: [werewolf]

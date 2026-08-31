@@ -65,8 +65,9 @@ class ActionAvailability(ActionConstraints):
             and self.game.content.chat_channels[action.channel].allows_co
             for action in chat_actions
         ):
-            if self.game.can_declare_co(player.player_id):
-                actions.append(ActionSpec(type="co_declare"))
+            claimed_role_ids = self.game.claimable_role_ids()
+            if self.game.can_declare_co(player.player_id) and claimed_role_ids:
+                actions.append(ActionSpec(type="co_declare", claimed_role_ids=claimed_role_ids))
             actions.append(ActionSpec(type="co_report"))
         if self.game.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
             return actions

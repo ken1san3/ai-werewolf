@@ -1,5 +1,6 @@
 id: seer
 name: 占い師
+claimable: true
 team: village
 attack_result: die
 tags: []

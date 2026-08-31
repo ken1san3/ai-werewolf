@@ -1,5 +1,6 @@
 id: madman
 name: 狂人
+claimable: true
 team: wolf
 count_as: village
 attack_result: die

@@ -1,5 +1,6 @@
 id: guard
 name: 狩人
+claimable: true
 team: village
 attack_result: die
 tags: []

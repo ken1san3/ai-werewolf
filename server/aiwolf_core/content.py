@@ -430,6 +430,7 @@ def _parse_role(
         required={
             "id",
             "name",
+            "claimable",
             "team",
             "attack_result",
             "tags",
@@ -474,6 +475,7 @@ def _parse_role(
     return Role(
         id=_identifier(mapping["id"], f"{path}.id"),
         name=_non_empty_string(mapping["name"], f"{path}.name"),
+        claimable=_boolean(mapping["claimable"], f"{path}.claimable"),
         attributes=attributes,
         tags=frozenset(_identifier(tag, f"{path}.tags") for tag in _list(mapping["tags"], f"{path}.tags")),
         knowledge=Knowledge(

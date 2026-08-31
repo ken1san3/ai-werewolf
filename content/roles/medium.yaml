@@ -1,5 +1,6 @@
 id: medium
 name: 霊能者
+claimable: true
 team: village
 attack_result: die
 tags: []

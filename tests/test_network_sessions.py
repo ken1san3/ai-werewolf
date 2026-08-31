@@ -208,7 +208,7 @@ class SessionManagerTests(unittest.TestCase):
         joined = self.manager.handle_message(client_message("session.join", {"player_id": "player-0"}))
 
         chat = self.manager.handle_message(
-            client_message("chat.send", {"message": "hello"}), joined.context
+            client_message("chat.send", {"channel_id": "public", "message": "hello"}), joined.context
         )
         self.assertIsNone(chat.reply)
         self.assertEqual(
@@ -380,7 +380,7 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
     def test_player_action_requests_have_strict_type_specific_payloads(self) -> None:
         validator = ProtocolMessageValidator()
         validator.validate_client(
-            client_message("chat.send", {"message": "hello"})
+            client_message("chat.send", {"channel_id": "public", "message": "hello"})
         )
         validator.validate_client(
             client_message("vote.cast", {"target_player_id": None})
@@ -398,7 +398,11 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
             )
         )
         with self.assertRaises(ProtocolValidationError):
-            validator.validate_client(client_message("chat.send", {"channel": "public", "message": "extra"}))
+            validator.validate_client(client_message("chat.send", {"message": "missing channel"}))
+        with self.assertRaises(ProtocolValidationError):
+            validator.validate_client(
+                client_message("chat.send", {"channel": "public", "channel_id": "public", "message": "extra"})
+            )
 
 
 class ChatChannelRecipientTests(unittest.TestCase):
@@ -508,7 +512,7 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                 await self._join(sender, "player-0")
                 await self._join(recipient, "player-1")
                 await sender.send(
-                    json.dumps(client_message("chat.send", {"message": "hello"}))
+                    json.dumps(client_message("chat.send", {"channel_id": "public", "message": "hello"}))
                 )
                 sender_message = json.loads(await sender.recv())
                 recipient_message = json.loads(await recipient.recv())

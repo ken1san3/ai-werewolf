@@ -151,6 +151,11 @@ ROADMAP の「TEST_POLICY 全項目」は、**その Phase が担当する節**�
 - [ ] 回数制限を超えた `co.declare` が拒否される
 - [ ] 人狼が実際とは異なる役職をCOでき、サーバが拒否しない
 - [ ] 死亡プレイヤーがCOできない
+- [ ] `allow_villager_claim: false` では `claimable: false` の Role がCO候補に現れず、指定すると拒否される。`true` では候補に現れる
+- [ ] `claimable` を宣言しない Role は content load でエラーになる
+- [ ] `claimable: false` の Role ID を改名しても、Python無変更で同じ候補除外・拒否になる
+- [ ] `chat.send` は利用可能チャネルが1件でも `channel_id` を必須とする
+- [ ] 列挙されていない `channel_id` は `action_unavailable` で拒否される
 
 ## 13. ログとリプレイ［Phase 1.8］
 

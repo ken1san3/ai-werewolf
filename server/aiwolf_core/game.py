@@ -201,10 +201,19 @@ class GameState:
     def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
         VoteResolver(self).submit(voter_player_id, target_player_id)
 
-    def submit_chat(self, player_id: str, message: str) -> ChatSubmission:
+    def submit_chat(self, player_id: str, channel_id: str, message: str) -> ChatSubmission:
         """Accept chat through the core's player-view authorization service."""
 
-        return PlayerInteractions(self).submit_chat(player_id, message)
+        return PlayerInteractions(self).submit_chat(player_id, channel_id, message)
+
+    def claimable_role_ids(self) -> tuple[str, ...]:
+        """Return content-declared CO targets permitted by the active rule set."""
+
+        return tuple(
+            role_id
+            for role_id, role in self.content.roles.items()
+            if self.rules.co.allow_villager_claim or role.claimable
+        )
 
     def declare_co(self, player_id: str, claimed_role_id: str, comment: str) -> None:
         """Accept one public CO declaration without validating its truth."""

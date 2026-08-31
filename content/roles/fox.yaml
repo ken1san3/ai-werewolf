@@ -1,5 +1,6 @@
 id: fox
 name: 妖狐
+claimable: true
 team: fox
 attack_result: immune
 tags: [fox]

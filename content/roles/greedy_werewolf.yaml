@@ -1,5 +1,6 @@
 id: greedy_werewolf
 name: 強欲な人狼
+claimable: true
 team: wolf
 attack_result: immune
 tags: [werewolf]

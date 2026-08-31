@@ -1,5 +1,6 @@
 id: whispering_madman
 name: 囁く狂人
+claimable: true
 team: wolf
 count_as: village
 attack_result: die

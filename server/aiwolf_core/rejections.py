@@ -12,7 +12,7 @@ PLAYER_ACTION_REJECTION_REASONS = frozenset(
         "action_deadline_passed",
         "action_unavailable",
         "actor_unavailable",
-        "ambiguous_chat_channel",
+        "claim_not_allowed",
         "co_limit_reached",
         "invalid_claimed_result",
         "invalid_comment",

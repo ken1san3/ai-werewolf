@@ -1,5 +1,6 @@
 id: villager
 name: 市民
+claimable: false
 team: village
 attack_result: die
 tags: []

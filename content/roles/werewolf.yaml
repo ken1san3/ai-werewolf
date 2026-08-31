@@ -1,5 +1,6 @@
 id: werewolf
 name: 人狼
+claimable: true
 team: wolf
 attack_result: immune
 tags: [werewolf]

@@ -32,7 +32,7 @@ class SessionGame(Protocol):
     def advance_if_due(self, now: int) -> bool:
         ...
 
-    def submit_chat(self, player_id: str, message: str) -> Any:
+    def submit_chat(self, player_id: str, channel_id: str, message: str) -> Any:
         ...
 
     def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
@@ -379,7 +379,7 @@ class SessionManager:
         if not isinstance(raw_payload, Mapping):
             raise ActionRejected("invalid_message")
         if message_type == "chat.send":
-            submission = game.submit_chat(player_id, raw_payload["message"])
+            submission = game.submit_chat(player_id, raw_payload["channel_id"], raw_payload["message"])
             return ((submission.channel_id, submission.message),)
         if message_type == "vote.cast":
             game.submit_vote(player_id, raw_payload["target_player_id"])

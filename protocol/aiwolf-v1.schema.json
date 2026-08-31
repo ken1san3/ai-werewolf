@@ -145,8 +145,9 @@
             "type": { "const": "chat.send" },
             "payload": {
               "type": "object",
-              "required": ["message"],
+              "required": ["channel_id", "message"],
               "properties": {
+                "channel_id": { "type": "string", "minLength": 1 },
                 "message": { "type": "string", "minLength": 1 }
               },
               "additionalProperties": false
@@ -154,7 +155,7 @@
           }
         }
       ],
-      "description": "Send one message when the core exposes exactly one content-declared chat channel."
+      "description": "Send one message to one content-declared chat channel."
     },
     "vote_cast_request": {
       "allOf": [

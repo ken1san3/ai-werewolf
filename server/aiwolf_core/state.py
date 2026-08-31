@@ -94,6 +94,7 @@ class ActionSpec:
     channel: str | None = None
     description: str | None = None
     valid_targets: tuple[str, ...] = ()
+    claimed_role_ids: tuple[str, ...] = ()
     target_count: int | None = None
     uses_remaining: int | None = None
     allows_abstain: bool = False
@@ -103,10 +104,15 @@ class ActionSpec:
             not player_id for player_id in self.valid_targets
         ):
             raise ValueError("valid targets must be unique non-empty player ids")
+        if len(self.claimed_role_ids) != len(set(self.claimed_role_ids)) or any(
+            not role_id for role_id in self.claimed_role_ids
+        ):
+            raise ValueError("claimed role ids must be unique non-empty role ids")
         if self.type == "ability":
             if (
                 not self.ability_id
                 or self.channel is not None
+                or self.claimed_role_ids
                 or self.target_count is None
                 or self.target_count < 1
                 or self.uses_remaining is not None
@@ -116,7 +122,13 @@ class ActionSpec:
                 raise ValueError("an ability action requires valid ability fields")
             return
         if self.type == "chat":
-            if self.channel and not self.ability_id and not self.valid_targets and self.target_count is None:
+            if (
+                self.channel
+                and not self.ability_id
+                and not self.valid_targets
+                and not self.claimed_role_ids
+                and self.target_count is None
+            ):
                 return
             raise ValueError("a chat action requires only a channel")
         if self.type == "vote":
@@ -124,17 +136,31 @@ class ActionSpec:
                 self.ability_id is None
                 and self.channel is None
                 and self.description is None
+                and not self.claimed_role_ids
                 and self.target_count == 1
                 and self.uses_remaining is None
             ):
                 return
             raise ValueError("a vote action requires vote target fields")
-        if self.type in {"co_declare", "co_report"}:
+        if self.type == "co_declare":
             if (
                 self.ability_id is None
                 and self.channel is None
                 and self.description is None
                 and not self.valid_targets
+                and self.claimed_role_ids
+                and self.target_count is None
+                and self.uses_remaining is None
+                and not self.allows_abstain
+            ):
+                return
+        if self.type == "co_report":
+            if (
+                self.ability_id is None
+                and self.channel is None
+                and self.description is None
+                and not self.valid_targets
+                and not self.claimed_role_ids
                 and self.target_count is None
                 and self.uses_remaining is None
                 and not self.allows_abstain

@@ -27,21 +27,12 @@ class PlayerInteractions:
     def __init__(self, game: GameState) -> None:
         self.game = game
 
-    def submit_chat(self, player_id: str, message: str) -> ChatSubmission:
+    def submit_chat(self, player_id: str, channel_id: str, message: str) -> ChatSubmission:
         """Accept one authorized chat message and record daytime public activity."""
 
         if not isinstance(message, str) or not message:
             raise ActionRejected("invalid_message")
-        channel_ids = tuple(
-            action.channel
-            for action in self.game.get_available_actions(player_id)
-            if action.type == "chat" and action.channel is not None
-        )
-        if not channel_ids:
-            raise ActionRejected("action_unavailable")
-        if len(channel_ids) != 1:
-            raise ActionRejected("ambiguous_chat_channel")
-        channel_id = channel_ids[0]
+        self._require_available(player_id, "chat", channel_id=channel_id)
         player = self.game.players[player_id]
         channel = self.game.content.chat_channels[channel_id]
         if channel.is_public and self.game.phase is GamePhase.DAY:
@@ -65,6 +56,8 @@ class PlayerInteractions:
         if not self.game.can_declare_co(player_id):
             raise ActionRejected("co_limit_reached")
         self._require_available(player_id, "co_declare")
+        if claimed_role_id not in self.game.claimable_role_ids():
+            raise ActionRejected("claim_not_allowed")
         key = (self.game.day, player_id)
         self.game.co_declaration_counts[key] = self.game.co_declaration_counts.get(key, 0) + 1
         self._record_public_activity(player_id)

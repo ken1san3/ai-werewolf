@@ -200,6 +200,7 @@ class Knowledge:
 class Role:
     id: str
     name: str
+    claimable: bool
     attributes: RoleAttributes
     tags: frozenset[str]
     knowledge: Knowledge

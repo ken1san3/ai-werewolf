@@ -1,5 +1,6 @@
 id: nekomata
 name: 猫又
+claimable: true
 team: village
 attack_result: die
 tags: []

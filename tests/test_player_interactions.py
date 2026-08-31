@@ -28,7 +28,15 @@ class PlayerInteractionTests(unittest.TestCase):
         self.content = load_content(CONTENT_ROOT)
         self.preset = load_preset(PRESET_PATH, self.content)
 
-    def make_day_game(self, roles: dict[str, str], *, sudden_death: bool = False) -> GameState:
+    def make_day_game(
+        self,
+        roles: dict[str, str],
+        *,
+        sudden_death: bool = False,
+        allow_villager_claim: bool | None = None,
+        content=None,
+    ) -> GameState:
+        content = self.content if content is None else content
         sink = InMemoryEventSink()
         event_bus = EventBus()
         for visibility in EventVisibility:
@@ -38,12 +46,17 @@ class PlayerInteractionTests(unittest.TestCase):
             day_seconds=10,
             sudden_death=replace(self.preset.rules.sudden_death, enabled=sudden_death),
         )
+        if allow_villager_claim is not None:
+            rules = replace(
+                rules,
+                co=replace(rules.co, allow_villager_claim=allow_villager_claim),
+            )
         game = GameState(
             game_id="interaction-test",
-            content=self.content,
+            content=content,
             rules=rules,
             players={
-                player_id: Player(player_id, player_id.title(), self.content.roles[role_id])
+                player_id: Player(player_id, player_id.title(), content.roles[role_id])
                 for player_id, role_id in roles.items()
             },
             rng=Random(7),
@@ -79,11 +92,54 @@ class PlayerInteractionTests(unittest.TestCase):
         with self.assertRaisesRegex(ActionRejected, "action_unavailable"):
             game.declare_co("wolf", "seer", "too late")
 
+    def test_claimable_roles_are_enumerated_and_enforced_from_content(self) -> None:
+        game = self.make_day_game(
+            {"wolf": "werewolf", "villager": "villager"}, allow_villager_claim=False
+        )
+        declaration = next(action for action in game.get_available_actions("wolf") if action.type == "co_declare")
+        self.assertNotIn("villager", declaration.claimed_role_ids)
+        self.assertIn("seer", declaration.claimed_role_ids)
+        with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
+            game.declare_co("wolf", "villager", "I am a villager")
+
+        permitted = self.make_day_game(
+            {"wolf": "werewolf", "villager": "villager"}, allow_villager_claim=True
+        )
+        declaration = next(action for action in permitted.get_available_actions("wolf") if action.type == "co_declare")
+        self.assertIn("villager", declaration.claimed_role_ids)
+        permitted.declare_co("wolf", "villager", "I am a villager")
+
+    def test_renamed_unclaimable_role_needs_no_python_change(self) -> None:
+        townie = replace(self.content.roles["villager"], id="townie")
+        renamed_content = replace(
+            self.content,
+            roles={role_id: role for role_id, role in self.content.roles.items() if role_id != "villager"}
+            | {"townie": townie},
+        )
+        game = self.make_day_game(
+            {"wolf": "werewolf", "townie": "townie"},
+            allow_villager_claim=False,
+            content=renamed_content,
+        )
+
+        declaration = next(action for action in game.get_available_actions("wolf") if action.type == "co_declare")
+        self.assertNotIn("townie", declaration.claimed_role_ids)
+        with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
+            game.declare_co("wolf", "townie", "I am a townie")
+
+    def test_chat_requires_an_enumerated_channel(self) -> None:
+        game = self.make_day_game({"wolf": "werewolf", "villager": "villager"})
+
+        with self.assertRaisesRegex(ActionRejected, "action_unavailable"):
+            game.submit_chat("wolf", "wolf", "wolves only")
+        submission = game.submit_chat("wolf", "public", "I spoke")
+        self.assertEqual(submission.channel_id, "public")
+
     def test_sudden_death_runs_before_vote_and_evaluates_the_win_immediately(self) -> None:
         game = self.make_day_game(
             {"wolf": "werewolf", "speaker": "seer", "silent": "villager"}, sudden_death=True
         )
-        game.submit_chat("wolf", "I spoke")
+        game.submit_chat("wolf", "public", "I spoke")
         game.declare_co("speaker", "seer", "I am the seer")
 
         self.assertTrue(game.advance_if_due(110))
@@ -100,7 +156,7 @@ class PlayerInteractionTests(unittest.TestCase):
 
     def test_each_public_operation_records_activity_for_sudden_death(self) -> None:
         operations = {
-            "chat": lambda game: game.submit_chat("reporter", "I spoke"),
+            "chat": lambda game: game.submit_chat("reporter", "public", "I spoke"),
             "co_declare": lambda game: game.declare_co("reporter", "seer", "I am the seer"),
             "co_report": lambda game: game.report_co(
                 "reporter", "inspect_result", "silent", "not_wolf"

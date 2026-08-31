@@ -1,5 +1,6 @@
 id: fanatic
 name: 狂信者
+claimable: true
 team: wolf
 count_as: village
 attack_result: die
