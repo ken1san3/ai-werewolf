@@ -287,8 +287,7 @@ rules:
   night_action:
     no_selection: null             # null=能力ごとの宣言に従う / random | skip=全能力を一括上書き
   medium:
-    notify_timing: night
-    targets: [lynched, sudden_death]
+    notify_timing: night           # 霊視できる死因は役職側の宣言（D046）
   wolf_attack:
     target_decision: majority      # majority | random（designated は未定義。§5 参照）
     tie: random

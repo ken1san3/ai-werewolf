@@ -118,6 +118,30 @@ def check_event_names() -> None:
             fail("event-name", f"DESIGN が `{name}` を挙げるが実装に無い")
 
 
+def rule_key_paths(block: str) -> set[str]:
+    """rules ブロックのキーをドット区切りのパス集合にする。
+
+    入れ子のキーまで見る。`^  (\\w+):` だけを見ていた頃は、`medium.targets` のような
+    2階層目の削除漏れを検出できなかった（2026-08-31、R-20260831-71 で発覚）。
+    """
+
+    paths: set[str] = set()
+    stack: list[str] = []
+    for line in block.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^(\s+)([\w.]+):", line)
+        if match is None:
+            continue
+        depth = len(match.group(1)) // 2 - 1
+        if depth < 0:
+            continue
+        del stack[depth:]
+        stack.append(match.group(2))
+        paths.add(".".join(stack))
+    return paths
+
+
 # --- 6. DESIGN §5 のルールキーが RulesConfig と一致するか ---------------------
 def check_rule_keys() -> None:
     design = read(DESIGN)
@@ -125,17 +149,14 @@ def check_rule_keys() -> None:
     if block is None:
         fail("rule-keys", "DESIGN §5 の rules ブロックを見つけられない")
         return
-    design_lines = block.group(1).splitlines()
-    design_all = {
-        m.group(1) for line in design_lines if (m := re.match(r"^  (\w+):", line))
-    }
+    design_all = rule_key_paths(block.group(1))
     # 「未実装」注記のあるキーは preset に有っても無くてよい。実装が追いついた時点で
     # 注記が古くなるだけであり、その除去は Reviewer の仕事（Codex に DESIGN を
     # 書き換えさせない）。
     future = future_rule_keys()
     preset = read(ROOT / "content" / "presets" / "standard_9.yaml")
     preset_block = re.search(r"(?ms)^rules:\n(.*?)^roles:", preset)
-    preset_keys = set(re.findall(r"(?m)^  (\w+):", preset_block.group(1)))
+    preset_keys = rule_key_paths(preset_block.group(1))
     for key in sorted((design_all - future) - preset_keys):
         fail("rule-keys", f"DESIGN §5 に `{key}` があるが standard_9.yaml に無い")
     for key in sorted(preset_keys - design_all):
