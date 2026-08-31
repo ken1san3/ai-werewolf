@@ -9,6 +9,7 @@ from .clock import timestamp
 from .death import DeathResolver
 from .events import EventVisibility, GameEvent
 from .models import Ability, CoreDeathCause, GamePhase
+from .rejections import ActionRejected
 from .state import ActionReservation, DeathRequest, ScheduledEffect
 from .targets import alive_player, effective_attributes, valid_target_ids
 
@@ -38,16 +39,23 @@ class ActionResolver(ActionConstraints):
 
         now = timestamp(now)
         if self.game.phase not in {GamePhase.NIGHT0, GamePhase.NIGHT}:
-            raise ValueError("abilities can only be submitted during a night phase")
+            raise ActionRejected("action_unavailable", "abilities can only be submitted during a night phase")
         if self.game.phase_started_at is None or self.game.phase_ends_at is None:
             raise RuntimeError("night actions require an authoritative deadline")
         if now < self.game.phase_started_at:
-            raise ValueError("abilities cannot be submitted before the phase starts")
+            raise ActionRejected(
+                "action_unavailable", "abilities cannot be submitted before the phase starts"
+            )
         if now >= self.game.phase_ends_at:
-            raise ValueError("abilities cannot be submitted after the deadline")
+            raise ActionRejected(
+                "action_deadline_passed", "abilities cannot be submitted after the deadline"
+            )
         if self.game.night_actions_resolved:
-            raise ValueError("night actions have already been resolved")
-        actor = alive_player(self.game, actor_player_id, "action actor")
+            raise ActionRejected("action_closed", "night actions have already been resolved")
+        try:
+            actor = alive_player(self.game, actor_player_id, "action actor")
+        except ValueError as error:
+            raise ActionRejected("actor_unavailable", str(error)) from error
         ability = self.ability_for(actor, ability_id)
         self.validate_ability_available(actor, ability)
         targets = self.validate_targets(actor, ability, target_player_ids)

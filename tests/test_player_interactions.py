@@ -107,6 +107,17 @@ class PlayerInteractionTests(unittest.TestCase):
         self.assertTrue(all(player.alive for player in game.players.values()))
         self.assertEqual(game.death_records, {})
 
+    def test_co_report_counts_as_a_public_operation_for_sudden_death(self) -> None:
+        game = self.make_day_game({"reporter": "werewolf", "silent": "villager"}, sudden_death=True)
+
+        game.report_co("reporter", "inspect_result", "silent", "not_wolf")
+        self.assertEqual(game.co_report_counts[(1, "reporter")], 1)
+        self.assertTrue(game.advance_if_due(110))
+
+        self.assertTrue(game.players["reporter"].alive)
+        self.assertFalse(game.players["silent"].alive)
+        self.assertEqual(game.death_records["silent"].cause, "sudden_death")
+
 
 if __name__ == "__main__":
     unittest.main()

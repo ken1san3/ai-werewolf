@@ -7,19 +7,10 @@ from typing import TYPE_CHECKING
 
 from .events import EventVisibility, GameEvent
 from .models import GamePhase
+from .rejections import ActionRejected
 
 if TYPE_CHECKING:
     from .game import GameState
-
-
-class ActionRejected(ValueError):
-    """A safe, machine-readable reason for rejecting one player operation."""
-
-    def __init__(self, reason: str) -> None:
-        if not reason:
-            raise ValueError("rejection reason must not be empty")
-        super().__init__(reason)
-        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -105,6 +96,8 @@ class PlayerInteractions:
         if not isinstance(claimed_result, str) or not claimed_result:
             raise ActionRejected("invalid_claimed_result")
         self._require_available(player_id, "co_report")
+        key = (self.game.day, player_id)
+        self.game.co_report_counts[key] = self.game.co_report_counts.get(key, 0) + 1
         self.game.event_bus.publish(
             GameEvent(
                 type="CO_REPORTED",

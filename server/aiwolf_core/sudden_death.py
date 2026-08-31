@@ -29,6 +29,7 @@ class DayEndResolver:
             if player.alive
             and self.game.public_chat_counts.get((self.game.day, player_id), 0) == 0
             and self.game.co_declaration_counts.get((self.game.day, player_id), 0) == 0
+            and self.game.co_report_counts.get((self.game.day, player_id), 0) == 0
         )
         for player_id in silent_player_ids:
             DeathResolver(self.game).record(player_id, CoreDeathCause.SUDDEN_DEATH.value)

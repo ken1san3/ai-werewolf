@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from ..aiwolf_core.clock import timestamp
-from ..aiwolf_core.interactions import ActionRejected
+from ..aiwolf_core.rejections import ActionRejected
 
 from .protocol import ProtocolMessageValidator, ProtocolValidationError
 

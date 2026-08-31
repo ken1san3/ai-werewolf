@@ -6,6 +6,7 @@ from itertools import combinations
 from typing import TYPE_CHECKING, Sequence
 
 from .models import Ability, GamePhase
+from .rejections import ActionRejected
 from .targets import night_number, valid_target_ids
 
 if TYPE_CHECKING:
@@ -29,7 +30,9 @@ class ActionConstraints:
         for ability in player.role.abilities:
             if ability.id == ability_id:
                 return ability
-        raise ValueError(f"player '{player.player_id}' does not have ability '{ability_id}'")
+        raise ActionRejected(
+            "unknown_ability", f"player '{player.player_id}' does not have ability '{ability_id}'"
+        )
 
     def validate_ability_available(self, actor: Player, ability: Ability) -> None:
         self.validate_ability_timing(actor, ability)
@@ -38,15 +41,21 @@ class ActionConstraints:
     def validate_ability_timing(self, actor: Player, ability: Ability) -> None:
         timing = self.game.content.action_timings[ability.timing]
         if self.game.phase.value not in timing.phases:
-            raise ValueError(
+            raise ActionRejected(
+                "action_unavailable",
                 f"ability '{ability.id}' is unavailable during phase '{self.game.phase.value}'"
             )
         current_night = night_number(self.game)
         if current_night is None or ability.available_from_night > current_night:
-            raise ValueError(f"ability '{ability.id}' is unavailable on this night")
+            raise ActionRejected(
+                "action_unavailable", f"ability '{ability.id}' is unavailable on this night"
+            )
         if self.game.phase is GamePhase.NIGHT0 and "inspect" in {effect.id for effect in ability.effects}:
             if self.game.rules.first_night_seer != "free":
-                raise ValueError("the first-night inspection is not player-selected by the current rules")
+                raise ActionRejected(
+                    "action_unavailable",
+                    "the first-night inspection is not player-selected by the current rules",
+                )
 
     def validate_ability_uses(self, actor: Player, ability: Ability) -> None:
         if self.uses_remaining(actor, ability) == 0:
@@ -55,8 +64,13 @@ class ActionConstraints:
                 ability.uses.per_game is not None
                 and self.game.ability_uses_per_game.get(key, 0) >= ability.uses.per_game
             ):
-                raise ValueError(f"ability '{ability.id}' has no remaining game uses")
-            raise ValueError(f"ability '{ability.id}' has no remaining uses this night")
+                raise ActionRejected(
+                    "ability_uses_exhausted", f"ability '{ability.id}' has no remaining game uses"
+                )
+            raise ActionRejected(
+                "ability_uses_exhausted",
+                f"ability '{ability.id}' has no remaining uses this night",
+            )
 
     def uses_remaining(self, actor: Player, ability: Ability) -> int | None:
         """Return the limiting remaining use count, or None when unlimited."""
@@ -80,12 +94,15 @@ class ActionConstraints:
         if any(not isinstance(player_id, str) for player_id in targets):
             raise TypeError("action target ids must be strings")
         if len(targets) != ability.target.count:
-            raise ValueError(f"ability '{ability.id}' requires exactly {ability.target.count} target(s)")
+            raise ActionRejected(
+                "invalid_target", f"ability '{ability.id}' requires exactly {ability.target.count} target(s)"
+            )
         if len(targets) != len(set(targets)):
-            raise ValueError("action targets must be unique")
+            raise ActionRejected("invalid_target", "action targets must be unique")
         invalid = set(targets) - set(valid_target_ids(self.game, actor, ability.target))
         if invalid:
-            raise ValueError(
+            raise ActionRejected(
+                "invalid_target",
                 f"ability '{ability.id}' has invalid target(s): {', '.join(sorted(invalid))}"
             )
         return targets
@@ -100,11 +117,16 @@ class ActionConstraints:
                 continue
             if restriction.type == "no_same_target_consecutive":
                 if self.game.last_resolved_targets.get((actor.player_id, ability.id)) == targets:
-                    raise ValueError(f"ability '{ability.id}' cannot target the same player consecutively")
+                    raise ActionRejected(
+                        "invalid_target",
+                        f"ability '{ability.id}' cannot target the same player consecutively",
+                    )
                 continue
             if restriction.type == "no_self_target":
                 if actor.player_id in targets:
-                    raise ValueError(f"ability '{ability.id}' cannot target the actor")
+                    raise ActionRejected(
+                        "invalid_target", f"ability '{ability.id}' cannot target the actor"
+                    )
                 continue
             raise RuntimeError(f"restriction '{restriction.type}' has no Phase 1.5 implementation")
 

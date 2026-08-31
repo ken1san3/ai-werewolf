@@ -9,6 +9,7 @@ from .death import DeathResolver
 from .events import EventVisibility, GameEvent
 from .models import CoreDeathCause, GamePhase
 from .phase import PhaseManager
+from .rejections import ActionRejected
 from .state import VoteResult, VoteResultKind
 from .targets import alive_player
 from .wins import WinEvaluator
@@ -54,16 +55,32 @@ class VoteResolver:
         """Reserve or replace one living player's vote for the current round."""
 
         if self.game.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
-            raise ValueError("votes can only be submitted during vote or runoff phases")
-        voter = alive_player(self.game, voter_player_id, "voter")
+            raise ActionRejected(
+                "vote_unavailable", "votes can only be submitted during vote or runoff phases"
+            )
+        try:
+            voter = alive_player(self.game, voter_player_id, "voter")
+        except ValueError as error:
+            raise ActionRejected("actor_unavailable", str(error)) from error
         if target_player_id is None:
             self.validate_abstention(voter.player_id)
         else:
-            target = alive_player(self.game, target_player_id, "vote target")
+            if target_player_id not in self.game.players:
+                raise ActionRejected(
+                    "unknown_target", f"unknown vote target '{target_player_id}'"
+                )
+            try:
+                target = alive_player(self.game, target_player_id, "vote target")
+            except ValueError as error:
+                raise ActionRejected("invalid_target", str(error)) from error
             if target.player_id not in valid_vote_target_ids(self.game, voter):
                 if not self.game.rules.vote.self_vote and voter.player_id == target.player_id:
-                    raise ValueError("self-voting is disabled by the current rules")
-                raise ValueError("runoff votes must target a runoff candidate")
+                    raise ActionRejected(
+                        "self_vote_disabled", "self-voting is disabled by the current rules"
+                    )
+                raise ActionRejected(
+                    "invalid_target", "runoff votes must target a runoff candidate"
+                )
         self.game.pending_votes[voter.player_id] = target_player_id
         self.game.event_bus.publish(
             GameEvent(
@@ -227,9 +244,13 @@ class VoteResolver:
     def validate_abstention(self, voter_player_id: str) -> None:
         abstain = self.game.rules.vote.abstain
         if not abstain.enabled:
-            raise ValueError("abstaining is disabled by the current rules")
+            raise ActionRejected(
+                "abstention_disabled", "abstaining is disabled by the current rules"
+            )
         if not can_abstain(self.game, voter_player_id):
-            raise ValueError("the abstention limit has been reached")
+            raise ActionRejected(
+                "abstention_limit_reached", "the abstention limit has been reached"
+            )
 
     def consume_abstentions(self, final_votes: Mapping[str, str | None]) -> None:
         for voter_player_id, target_player_id in final_votes.items():

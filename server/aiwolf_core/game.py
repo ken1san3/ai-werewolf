@@ -71,6 +71,7 @@ class GameState:
     abstentions_used: dict[str, int] = field(default_factory=dict)
     public_chat_counts: dict[tuple[int, str], int] = field(default_factory=dict)
     co_declaration_counts: dict[tuple[int, str], int] = field(default_factory=dict)
+    co_report_counts: dict[tuple[int, str], int] = field(default_factory=dict)
     runoff_candidate_player_ids: tuple[str, ...] = ()
     last_vote_result: VoteResult | None = None
     game_result: GameResult | None = None

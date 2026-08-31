@@ -261,6 +261,38 @@ class SessionManagerTests(unittest.TestCase):
         self.assertIsNone(vote.reply)
         self.assertEqual(self.game.pending_votes[wolf_player_id], target_player_id)
 
+    def test_vote_and_ability_rejections_expose_safe_distinct_reason_codes(self) -> None:
+        player_id = next(
+            player_id for player_id, player in self.game.players.items() if not player.role.abilities
+        )
+        self.game._enter_phase(GamePhase.VOTE, 1)
+        joined = self.manager.handle_message(
+            client_message("session.join", {"player_id": player_id})
+        )
+
+        self_vote = self.manager.handle_message(
+            client_message("vote.cast", {"target_player_id": player_id}), joined.context
+        )
+        unknown_target = self.manager.handle_message(
+            client_message("vote.cast", {"target_player_id": "missing-player"}), joined.context
+        )
+        self.game.day = 1
+        self.game._enter_phase(GamePhase.NIGHT, 2)
+        unknown_ability = self.manager.handle_message(
+            client_message("ability.use", {"ability_id": "inspect", "target_player_ids": ["player-0"]}),
+            joined.context,
+        )
+
+        replies = (self_vote.reply, unknown_target.reply, unknown_ability.reply)
+        self.assertTrue(all(reply is not None and reply.type == "action.rejected" for reply in replies))
+        self.assertEqual(
+            tuple(reply.payload["reason"] for reply in replies),
+            ("self_vote_disabled", "unknown_target", "unknown_ability"),
+        )
+        self.assertTrue(
+            all(set(reply.payload) == {"action", "reason"} for reply in replies)
+        )
+
 
 class TickDriverTests(unittest.TestCase):
     def test_tick_uses_one_server_clock_value_for_every_registered_game(self) -> None:
