@@ -11,6 +11,7 @@ abilities:
     timing: night_action
     available_from_night: 1
     priority: 30
+    resolution: individual
     target:
       selector: alive_all
       count: 1

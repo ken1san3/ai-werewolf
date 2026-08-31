@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from pathlib import Path
+from shutil import copytree
 from tempfile import TemporaryDirectory
 from typing import Sequence, TypeVar
 import unittest
@@ -47,15 +48,21 @@ class ActionResolverTests(unittest.TestCase):
         self.preset = load_preset(PRESET_PATH, self.content)
 
     def make_game(
-        self, roles: dict[str, str], *, rules=None, event_sink: EventSink | None = None
+        self,
+        roles: dict[str, str],
+        *,
+        rules=None,
+        event_sink: EventSink | None = None,
+        content=None,
     ) -> GameState:
+        content = self.content if content is None else content
         sink = event_sink or InMemoryEventSink()
         game = GameState(
             game_id="action-test",
-            content=self.content,
+            content=content,
             rules=rules or replace(self.preset.rules, night_seconds=10),
             players={
-                player_id: Player(player_id, player_id, self.content.roles[role_id])
+                player_id: Player(player_id, player_id, content.roles[role_id])
                 for player_id, role_id in roles.items()
             },
             rng=FirstChoiceRandom(),
@@ -139,6 +146,41 @@ class ActionResolverTests(unittest.TestCase):
         guard_events = [event for event in game.event_bus.events if event.type == "GUARD_SUCCEEDED"]
         self.assertEqual([event.recipient_player_id for event in guard_events], ["guard"])
         self.assertEqual(game.ability_uses_per_game[("greedy", "double_attack")], 1)
+
+    def test_group_attack_uses_ability_resolution_after_tag_rename(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            renamed_root = Path(temporary_directory) / "content"
+            copytree(CONTENT_ROOT, renamed_root)
+            for role_path in (renamed_root / "roles").glob("*werewolf.yaml"):
+                role_path.write_text(
+                    role_path.read_text(encoding="utf-8")
+                    .replace("tags: [werewolf]", "tags: [predator]")
+                    .replace("tag: werewolf", "tag: predator"),
+                    encoding="utf-8",
+                )
+            teams_path = renamed_root / "teams.yaml"
+            teams_path.write_text(
+                teams_path.read_text(encoding="utf-8").replace(
+                    "role_tag: werewolf", "role_tag: predator"
+                ),
+                encoding="utf-8",
+            )
+            renamed_content = load_content(renamed_root)
+
+        game = self.make_game(
+            {
+                "first_wolf": "werewolf",
+                "second_wolf": "werewolf",
+                "first": "villager",
+                "second": "villager",
+            },
+            content=renamed_content,
+        )
+        game.submit_action(101, "first_wolf", "attack", ("first",))
+        game.submit_action(101, "second_wolf", "attack", ("second",))
+        game.resolve_pending_actions(110)
+
+        self.assertEqual(set(game.death_records), {"first"})
 
     def test_guarded_and_fox_attack_have_identical_public_event_sequences(self) -> None:
         guarded = self.make_game(

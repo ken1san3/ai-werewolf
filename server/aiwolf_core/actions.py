@@ -305,8 +305,10 @@ class ActionResolver(ActionConstraints):
         direct_effects: list[ScheduledEffect] = []
         group_effects: list[ScheduledEffect] = []
         for effect in effects:
-            actor = self.game.players[effect.actor_player_id]
-            if len(effect.target_player_ids) > 1 or "werewolf" not in actor.role.tags:
+            ability = self.ability_for(
+                self.game.players[effect.actor_player_id], effect.ability_id
+            )
+            if ability.resolution == "individual":
                 direct_effects.append(effect)
             else:
                 group_effects.append(effect)

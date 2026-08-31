@@ -151,6 +151,7 @@ class Ability:
     timing: str
     available_from_night: int
     priority: int
+    resolution: str
     target: TargetSpec
     uses: Uses
     no_selection: str

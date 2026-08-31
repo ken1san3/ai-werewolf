@@ -565,6 +565,7 @@ def _parse_ability(
             "timing",
             "available_from_night",
             "priority",
+            "resolution",
             "target",
             "uses",
             "no_selection",
@@ -578,6 +579,9 @@ def _parse_ability(
     uses_mapping = _mapping(mapping["uses"], f"{path}.uses")
     _keys(uses_mapping, required={"per_night", "per_game"}, optional=set(), path=f"{path}.uses")
     ability_priority = _integer(mapping["priority"], f"{path}.priority", minimum=0)
+    target_count = _integer(target_mapping["count"], f"{path}.target.count", minimum=1)
+    resolution = mapping["resolution"]
+    _one_of(resolution, {"group", "individual"}, f"{path}.resolution")
     effect_references = _parse_effect_references(
         mapping.get("effects", []),
         f"{path}.effects",
@@ -597,14 +601,17 @@ def _parse_ability(
     )
     no_selection = mapping["no_selection"]
     _one_of(no_selection, {"random", "skip"}, f"{path}.no_selection")
+    if resolution == "group" and target_count != 1:
+        raise ContentValidationError(f"{path}.resolution 'group' requires target.count to be 1")
     return Ability(
         id=_identifier(mapping["id"], f"{path}.id"),
         timing=_registered_id(mapping["timing"], f"{path}.timing", action_timings, "action timing"),
         available_from_night=_integer(mapping["available_from_night"], f"{path}.available_from_night", minimum=0),
         priority=ability_priority,
+        resolution=resolution,
         target=TargetSpec(
             selector=selector,
-            count=_integer(target_mapping["count"], f"{path}.target.count", minimum=1),
+            count=target_count,
             options={key: value for key, value in target_mapping.items() if key not in {"selector", "count"}},
         ),
         uses=Uses(

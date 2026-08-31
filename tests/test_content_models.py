@@ -314,6 +314,7 @@ class ContentLoadingTests(unittest.TestCase):
             "timing": "night_action",
             "available_from_night": 1,
             "priority": 50,
+            "resolution": "individual",
             "target": {"selector": "alive_other", "count": 1},
             "uses": {"per_night": 1, "per_game": None},
             "no_selection": "skip",
@@ -323,6 +324,47 @@ class ContentLoadingTests(unittest.TestCase):
         with self.assertRaisesRegex(ContentValidationError, "unregistered effect"):
             _parse_ability(
                 ability,
+                "test.ability",
+                self.content.effects,
+                self.content.action_timings,
+                self.content.selectors,
+                self.content.restriction_types,
+                self.content.death_causes,
+            )
+
+        missing_resolution = deepcopy(ability)
+        missing_resolution.pop("resolution")
+        with self.assertRaisesRegex(ContentValidationError, "resolution"):
+            _parse_ability(
+                missing_resolution,
+                "test.ability",
+                self.content.effects,
+                self.content.action_timings,
+                self.content.selectors,
+                self.content.restriction_types,
+                self.content.death_causes,
+            )
+
+        invalid_resolution = deepcopy(ability)
+        invalid_resolution["resolution"] = "invalid"
+        with self.assertRaisesRegex(ContentValidationError, "resolution"):
+            _parse_ability(
+                invalid_resolution,
+                "test.ability",
+                self.content.effects,
+                self.content.action_timings,
+                self.content.selectors,
+                self.content.restriction_types,
+                self.content.death_causes,
+            )
+
+        group_multiple_targets = deepcopy(ability)
+        group_multiple_targets["resolution"] = "group"
+        group_multiple_targets["target"]["count"] = 2
+        group_multiple_targets["effects"] = ["inspect"]
+        with self.assertRaisesRegex(ContentValidationError, "requires target.count to be 1"):
+            _parse_ability(
+                group_multiple_targets,
                 "test.ability",
                 self.content.effects,
                 self.content.action_timings,

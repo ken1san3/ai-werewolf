@@ -216,6 +216,40 @@ class GameStateTests(unittest.TestCase):
             with self.subTest(module=source_path.relative_to(core_root)):
                 self.assertNotIn("random.", source_path.read_text(encoding="utf-8"))
 
+    def test_game_core_does_not_hardcode_content_ids(self) -> None:
+        core_root = PROJECT_ROOT / "server" / "aiwolf_core"
+        content_ids = (
+            set(self.content.roles)
+            | {tag for role in self.content.roles.values() for tag in role.tags}
+            | set(self.content.teams)
+            | set(self.content.chat_channels)
+            | set(self.content.death_causes)
+        )
+        allowed_by_module = {
+            "content.py": {
+                "graveyard",
+                "guard",
+                "lynched",
+                "medium",
+                "none",
+                "public",
+                "sudden_death",
+                "village",
+                "wolf",
+            },
+            "events.py": {"public"},
+            "models.py": set(self.content.death_causes),
+            "state.py": {"ability"},
+            "available_actions.py": {"ability"},
+        }
+        for source_path in sorted(core_root.rglob("*.py")):
+            source = source_path.read_text(encoding="utf-8")
+            allowed = allowed_by_module.get(source_path.name, set())
+            for content_id in sorted(content_ids - allowed):
+                with self.subTest(module=source_path.relative_to(core_root), content_id=content_id):
+                    self.assertNotIn(f'"{content_id}"', source)
+                    self.assertNotIn(f"'{content_id}'", source)
+
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]

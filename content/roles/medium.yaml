@@ -11,6 +11,7 @@ abilities:
     timing: night_action
     available_from_night: 1
     priority: 45
+    resolution: individual
     target:
       selector: unexamined_dead_by_cause
       causes: [lynched, sudden_death]
