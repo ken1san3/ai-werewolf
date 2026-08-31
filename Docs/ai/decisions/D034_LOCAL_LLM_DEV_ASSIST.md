@@ -115,15 +115,33 @@ git diff | python C:\AIagent\agent\tools\summarize.py --kind diff
 
 :: 単発の問い合わせ
 python C:\AIagent\agent\tools\ask.py "変更の要点を5行で" -f <path>
-python C:\AIagent\agent\tools\ask.py "残課題を挙げて" -p aiwolf -d current -d review_inbox
+python C:\AIagent\agent\tools\ask.py "この節の残課題を挙げて" -p aiwolf -d design
 
 :: 動かないときの切り分け
 python C:\AIagent\agent\tools\doctor.py
 python C:\AIagent\agent\tools\probe.py
 ```
 
+### 入力の長さ
+
+**dev プロファイルのコンテキストは 32,768 トークン**（`config.toml` の `-c`）。
+`max_tokens` の予約を引くと、**入力に使えるのは日本語でおよそ 28,000 文字までである。**
+超えるとサーバが即座に HTTP 500 を返し、要約も問い合わせも成立しない。
+
+長い文書は丸ごと渡さない。目安:
+
+| 渡すもの | 文字数 | 可否 |
+|---|---|---|
+| `DESIGN.md` / `TEST_POLICY.md` / `AGENTS.md` / `ROADMAP.md` | 〜21,000 | 単独なら可 |
+| `CURRENT_STATE.md` | 約 35,000 | **単独でも不可** |
+| `REVIEW_INBOX.md` | 約 64,000 | **不可。今後も増える** |
+
+`CURRENT_STATE.md` と `REVIEW_INBOX.md` は追記で伸び続けるため、
+**キー指定で丸ごと渡す使い方は成立しない。** 必要な節だけを切り出して `-f` で渡すこと。
+
 **応答本文が空で返ったら異常として扱い、その結果を使わない。** 原因の切り分けは
 `probe.py`。実際に発生した事例は F004。
+**HTTP 500 が返った場合はまず入力の長さを疑う。**
 
 ## Consequences
 
