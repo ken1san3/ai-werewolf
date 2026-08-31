@@ -67,6 +67,11 @@ def client_message(
     }
 
 
+def join_message(registry, player_id, *, game_id=GAME_ID, protocol_version="1.0"):
+    return client_message("session.join", {"entry_token": registry.entry_tokens_for(game_id)[player_id]},
+                          game_id=game_id, protocol_version=protocol_version)
+
+
 class SessionManagerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.game = make_game()
@@ -82,7 +87,7 @@ class SessionManagerTests(unittest.TestCase):
 
     def test_join_issues_token_only_to_the_joined_session_and_ready_marks_seat(self) -> None:
         result = self.manager.handle_message(
-            client_message("session.join", {"player_id": "player-0"})
+            join_message(self.registry, "player-0")
         )
         reply, context = result.reply, result.context
 
@@ -110,7 +115,7 @@ class SessionManagerTests(unittest.TestCase):
 
     def test_resume_verifies_token_without_accepting_player_id_claim(self) -> None:
         joined_result = self.manager.handle_message(
-            client_message("session.join", {"player_id": "player-0"})
+            join_message(self.registry, "player-0")
         )
         joined_reply, joined_context = joined_result.reply, joined_result.context
         self.manager.disconnect(joined_context)
@@ -147,18 +152,18 @@ class SessionManagerTests(unittest.TestCase):
     def test_major_protocol_mismatch_and_unknown_player_are_rejected_without_token(self) -> None:
         with self.assertRaises(UnaddressableRequest):
             self.manager.handle_message(
-                client_message("session.join", {"player_id": "player-0"}, protocol_version="2.0")
+                join_message(self.registry, "player-0", protocol_version="2.0")
             )
         self.assertFalse(self.manager.session_for(GAME_ID).has_joined("player-0"))
 
         with self.assertRaises(UnaddressableRequest):
             self.manager.handle_message(
-                client_message("session.join", {"player_id": "not-a-player"})
+                client_message("session.join", {"entry_token": "unknown-entry"})
             )
 
     def test_disconnect_keeps_the_game_and_seat_intact(self) -> None:
         result = self.manager.handle_message(
-            client_message("session.join", {"player_id": "player-0"})
+            join_message(self.registry, "player-0")
         )
         context = result.context
         phase_before = self.game.phase
@@ -170,9 +175,9 @@ class SessionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.session_for(GAME_ID).connected_player_ids, frozenset())
 
     def test_sequences_are_contiguous_per_player_and_continue_across_reconnection(self) -> None:
-        first = self.manager.handle_message(client_message("session.join", {"player_id": "player-0"}))
+        first = self.manager.handle_message(join_message(self.registry, "player-0"))
         first_ready = self.manager.handle_message(client_message("session.ready", {}), first.context)
-        second = self.manager.handle_message(client_message("session.join", {"player_id": "player-1"}))
+        second = self.manager.handle_message(join_message(self.registry, "player-1"))
         second_ready = self.manager.handle_message(client_message("session.ready", {}), second.context)
 
         self.assertEqual([first.reply.seq, first_ready.reply.seq], [1, 2])
@@ -197,7 +202,7 @@ class SessionManagerTests(unittest.TestCase):
         )
 
         result = manager.handle_message(
-            client_message("session.join", {"player_id": "player-0"}, game_id=game.game_id)
+            join_message(manager.registry, "player-0", game_id=game.game_id)
         )
 
         self.assertEqual(result.reply.game_id, "standard-nine")
@@ -205,7 +210,7 @@ class SessionManagerTests(unittest.TestCase):
 
     def test_authenticated_actions_delegate_to_core_and_return_rejections_only_on_failure(self) -> None:
         self.game._enter_phase(GamePhase.DAY, 1)
-        joined = self.manager.handle_message(client_message("session.join", {"player_id": "player-0"}))
+        joined = self.manager.handle_message(join_message(self.registry, "player-0"))
 
         chat = self.manager.handle_message(
             client_message("chat.send", {"channel_id": "public", "message": "hello"}), joined.context
@@ -243,7 +248,7 @@ class SessionManagerTests(unittest.TestCase):
         self.game.day = 1
         self.game._enter_phase(GamePhase.NIGHT, 1)
         joined = self.manager.handle_message(
-            client_message("session.join", {"player_id": wolf_player_id})
+            join_message(self.registry, wolf_player_id)
         )
         ability = self.manager.handle_message(
             client_message(
@@ -267,7 +272,7 @@ class SessionManagerTests(unittest.TestCase):
         )
         self.game._enter_phase(GamePhase.VOTE, 1)
         joined = self.manager.handle_message(
-            client_message("session.join", {"player_id": player_id})
+            join_message(self.registry, player_id)
         )
 
         self_vote = self.manager.handle_message(
@@ -426,8 +431,8 @@ class ChatChannelRecipientTests(unittest.TestCase):
 
 
 class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
-    async def _join(self, socket, player_id: str) -> dict[str, object]:
-        await socket.send(json.dumps(client_message("session.join", {"player_id": player_id})))
+    async def _join(self, socket, registry, player_id: str) -> dict[str, object]:
+        await socket.send(json.dumps(join_message(registry, player_id)))
         joined = json.loads(await socket.recv())
         sync = json.loads(await socket.recv())
         self.assertEqual(sync["type"], "game.state_sync")
@@ -447,8 +452,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         try:
             async with connect(uri) as first, connect(uri) as second:
-                self.assertEqual((await self._join(first, "player-0"))["seq"], 1)
-                self.assertEqual((await self._join(second, "player-1"))["seq"], 1)
+                self.assertEqual((await self._join(first, registry, "player-0"))["seq"], 1)
+                self.assertEqual((await self._join(second, registry, "player-1"))["seq"], 1)
                 game.event_bus.publish(
                     GameEvent("TEST_PUBLIC", EventVisibility.PUBLIC, {"safe": "yes"})
                 )
@@ -489,8 +494,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         try:
             async with connect(uri) as permitted, connect(uri) as blocked:
-                await self._join(permitted, authorized[0])
-                await self._join(blocked, unauthorized)
+                await self._join(permitted, registry, authorized[0])
+                await self._join(blocked, registry, unauthorized)
                 await server.publish_channel_message(
                     game.game_id, "wolf", {"text": "wolves only"}
                 )
@@ -514,8 +519,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         try:
             async with connect(uri) as sender, connect(uri) as recipient:
-                await self._join(sender, "player-0")
-                await self._join(recipient, "player-1")
+                await self._join(sender, registry, "player-0")
+                await self._join(recipient, registry, "player-1")
                 await sender.send(
                     json.dumps(client_message("chat.send", {"channel_id": "public", "message": "hello"}))
                 )
@@ -551,8 +556,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         try:
             async with connect(uri) as dead_socket, connect(uri) as live_socket:
-                await self._join(dead_socket, "player-0")
-                await self._join(live_socket, "player-1")
+                await self._join(dead_socket, registry, "player-0")
+                await self._join(live_socket, registry, "player-1")
                 game._record_player_death("player-0", "attacked")
                 dead_event = json.loads(await dead_socket.recv())
                 live_event = json.loads(await live_socket.recv())
@@ -591,8 +596,8 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         try:
             async with connect(uri) as dead_socket, connect(uri) as live_socket:
-                await self._join(dead_socket, "player-0")
-                await self._join(live_socket, "player-1")
+                await self._join(dead_socket, registry, "player-0")
+                await self._join(live_socket, registry, "player-1")
                 game._record_player_death("player-0", "attacked")
                 received = json.loads(await live_socket.recv())
                 self.assertEqual(received["type"], "game.event")
@@ -647,7 +652,7 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         try:
             async with connect(uri) as joined_socket, connect(uri) as other_socket:
                 await joined_socket.send(
-                    json.dumps(client_message("session.join", {"player_id": "player-0"}))
+                    json.dumps(join_message(registry, "player-0"))
                 )
                 joined = json.loads(await joined_socket.recv())
                 self.assertEqual(joined["type"], "session.joined")
@@ -703,7 +708,7 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
             async with connect(uri) as socket:
                 with self.assertLogs("server.network.server", level="ERROR"):
                     await socket.send(
-                        json.dumps(client_message("session.join", {"player_id": "player-0"}))
+                        json.dumps(join_message(registry, "player-0"))
                     )
                     await socket.wait_closed()
                 self.assertEqual(socket.close_code, 1011)

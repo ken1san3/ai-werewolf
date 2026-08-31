@@ -91,16 +91,16 @@
             "type": { "const": "session.join" },
             "payload": {
               "type": "object",
-              "required": ["player_id"],
+              "required": ["entry_token"],
               "properties": {
-                "player_id": { "type": "string", "minLength": 1 }
+                "entry_token": { "type": "string", "minLength": 1 }
               },
               "additionalProperties": false
             }
           }
         }
       ],
-      "description": "Initial binding of one pre-registered, unbound game seat."
+      "description": "Initial seat admission using its single-use entry token; player_id claims are forbidden."
     },
     "session_resume_request": {
       "allOf": [

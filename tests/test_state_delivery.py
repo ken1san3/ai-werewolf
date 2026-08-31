@@ -11,7 +11,7 @@ from server.aiwolf_core import EventVisibility, GameEvent, GamePhase
 from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGameServer
 from server.network.protocol import ProtocolMessageValidator, ProtocolValidationError
 from server.network.session import UnaddressableRequest
-from tests.test_network_sessions import GAME_ID, client_message, make_game
+from tests.test_network_sessions import GAME_ID, client_message, join_message, make_game
 
 
 def role_player(game, role_id):
@@ -131,7 +131,7 @@ class StateSchemaTests(unittest.TestCase):
     def test_all_state_types_are_validated_and_reject_hidden_or_missing_fields(self):
         game = make_game()
         manager = SessionManager(GameRegistry({GAME_ID: game}), clock=lambda: 0)
-        context = manager.handle_message(client_message("session.join", {"player_id": "player-0"})).context
+        context = manager.handle_message(join_message(manager.registry, "player-0")).context
         validator = ProtocolMessageValidator()
         for message_type, payload in (
             ("player.list", game.get_player_list()),
@@ -153,8 +153,8 @@ class StateSchemaTests(unittest.TestCase):
     def test_resume_replays_only_newer_own_events_and_rejects_future_cursor(self):
         game = make_game()
         manager = SessionManager(GameRegistry({GAME_ID: game}), clock=lambda: 0)
-        first = manager.handle_message(client_message("session.join", {"player_id": "player-0"}))
-        second = manager.handle_message(client_message("session.join", {"player_id": "player-1"}))
+        first = manager.handle_message(join_message(manager.registry, "player-0"))
+        second = manager.handle_message(join_message(manager.registry, "player-1"))
         own = manager.server_event(first.context, "game.event", {"event_type": "OWN", "event_payload": {}})
         manager.server_event(second.context, "game.event", {"event_type": "OTHER", "event_payload": {}})
         request = client_message("session.resume", {"connection_token": first.context.connection_token, "last_seq": 999})
@@ -189,7 +189,7 @@ class StateWebSocketTests(unittest.IsolatedAsyncioTestCase):
         return message
 
     async def join(self, socket, player_id):
-        await socket.send(json.dumps(client_message("session.join", {"player_id": player_id})))
+        await socket.send(json.dumps(join_message(self.registry, player_id)))
         joined = await self.receive(socket)
         sync = await self.receive(socket)
         self.assertEqual(sync["type"], "game.state_sync")

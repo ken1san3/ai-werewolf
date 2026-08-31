@@ -7,8 +7,10 @@ import logging
 import secrets
 import time
 from copy import deepcopy
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
+from types import MappingProxyType
 from uuid import uuid4
 
 from ..aiwolf_core.clock import timestamp
@@ -116,11 +118,30 @@ def monotonic_seconds() -> int:
 class GameRegistry:
     """Own the server-side set of games without making games connection-dependent."""
 
-    def __init__(self, games: Mapping[str, SessionGame]) -> None:
+    def __init__(
+        self, games: Mapping[str, SessionGame], *, entry_token_factory: TokenFactory | None = None
+    ) -> None:
         self._games = dict(games)
+        self._entry_tokens: dict[str, dict[str, str]] = {}
+        make_token = entry_token_factory or (lambda: "entry_" + secrets.token_urlsafe(32))
+        issued: set[str] = set()
         for game_id, game in self._games.items():
             if game_id != game.game_id:
                 raise ValueError("game registry key must match game.game_id")
+            tokens: dict[str, str] = {}
+            for player_id in game.players:
+                token = make_token()
+                if not isinstance(token, str) or not token or token in issued:
+                    raise ValueError("entry token factory must return distinct non-empty strings")
+                issued.add(token)
+                tokens[player_id] = token
+            self._entry_tokens[game_id] = tokens
+
+    def entry_tokens_for(self, game_id: str) -> Mapping[str, str]:
+        """Trusted launcher API; never expose this credential map over the game protocol."""
+
+        self.get(game_id)
+        return MappingProxyType(self._entry_tokens[game_id])
 
     @property
     def games(self) -> Mapping[str, SessionGame]:
@@ -142,6 +163,8 @@ class _GameSession:
         clock: Clock,
         token_factory: TokenFactory,
         event_id_factory: EventIdFactory,
+        entry_tokens: Mapping[str, str],
+        replay_history_limit: int,
     ) -> None:
         self.game = game
         self._clock = clock
@@ -149,10 +172,14 @@ class _GameSession:
         self._event_id_factory = event_id_factory
         self._tokens_by_player: dict[str, str] = {}
         self._players_by_token: dict[str, str] = {}
+        self._players_by_entry_token = {token: player_id for player_id, token in entry_tokens.items()}
+        self._entry_token_values = frozenset(entry_tokens.values())
         self._connections: dict[str, set[str]] = {}
         self._ready_player_ids: set[str] = set()
         self._next_seq_by_player: dict[str, int] = {}
-        self._history_by_player: dict[str, list[ServerReply]] = {}
+        self._history_by_player: dict[str, deque[ServerReply]] = {}
+        self._replay_history_limit = replay_history_limit
+        self._replay_floor_by_player: dict[str, int] = {}
 
     @property
     def ready_player_ids(self) -> frozenset[str]:
@@ -165,8 +192,12 @@ class _GameSession:
     def connection_count(self, player_id: str) -> int:
         return len(self._connections.get(player_id, ()))
 
-    def join(self, player_id: str) -> tuple[ConnectionContext, ServerReply]:
+    def join(self, entry_token: str) -> tuple[ConnectionContext, ServerReply]:
+        player_id = self._players_by_entry_token.get(entry_token)
+        if player_id is None or self.has_joined(player_id):
+            raise UnaddressableRequest("invalid_entry_token")
         token = self._new_token()
+        del self._players_by_entry_token[entry_token]
         self._tokens_by_player[player_id] = token
         self._players_by_token[token] = player_id
         context = self._connect(player_id, token)
@@ -184,9 +215,15 @@ class _GameSession:
             raise UnaddressableRequest("invalid_connection_token")
         if last_seq >= self._next_seq_by_player.get(player_id, 1):
             raise UnaddressableRequest("invalid_last_seq")
+        history = self._history_by_player.setdefault(player_id, deque())
         replay = tuple(
-            deepcopy(reply) for reply in self._history_by_player.get(player_id, ())
+            deepcopy(reply) for reply in history
             if reply.seq > last_seq
+        ) if last_seq >= self._replay_floor_by_player.get(player_id, 0) else ()
+        while history and history[0].seq <= last_seq:
+            history.popleft()
+        self._replay_floor_by_player[player_id] = max(
+            last_seq, self._replay_floor_by_player.get(player_id, 0)
         )
         replaced_connection_ids = tuple(self._connections.pop(player_id, ()))
         context = self._connect(player_id, connection_token)
@@ -236,9 +273,21 @@ class _GameSession:
         token = self._token_factory()
         if not isinstance(token, str) or not token:
             raise ValueError("connection token factory must return a non-empty string")
-        if token in self._players_by_token:
+        if token in self._entry_token_values or token in self._players_by_token:
             raise ValueError("connection token factory returned a duplicate token")
         return token
+
+    def remember(self, player_id: str, reply: ServerReply) -> None:
+        history = self._history_by_player.setdefault(player_id, deque())
+        if reply.type == "game.state_sync":
+            # A fresh snapshot supersedes prior replay, but is never retained itself.
+            history.clear()
+            self._replay_floor_by_player[player_id] = reply.seq
+            return
+        history.append(deepcopy(reply))
+        while len(history) > self._replay_history_limit:
+            evicted = history.popleft()
+            self._replay_floor_by_player[player_id] = evicted.seq
 
     def _reply(
         self, player_id: str, message_type: str, payload: Mapping[str, Any]
@@ -266,11 +315,14 @@ class SessionManager:
         token_factory: TokenFactory | None = None,
         event_id_factory: EventIdFactory | None = None,
         validator: ProtocolMessageValidator | None = None,
+        replay_history_limit: int = 128,
     ) -> None:
         self.registry = registry
+        if replay_history_limit < 1:
+            raise ValueError("replay_history_limit must be positive")
         self._clock = clock
         self._validator = validator if validator is not None else ProtocolMessageValidator()
-        make_token = token_factory if token_factory is not None else lambda: secrets.token_urlsafe(32)
+        make_token = token_factory if token_factory is not None else lambda: "connection_" + secrets.token_urlsafe(32)
         make_event_id = event_id_factory if event_id_factory is not None else lambda: str(uuid4())
         self._sessions = {
             game_id: _GameSession(
@@ -278,6 +330,8 @@ class SessionManager:
                 clock=clock,
                 token_factory=make_token,
                 event_id_factory=make_event_id,
+                entry_tokens=registry.entry_tokens_for(game_id),
+                replay_history_limit=replay_history_limit,
             )
             for game_id, game in registry.games.items()
         }
@@ -318,12 +372,7 @@ class SessionManager:
                 raise UnaddressableRequest("unsupported_protocol_version")
             message_type = message["type"]
             if message_type == "session.join":
-                player_id = message["payload"]["player_id"]
-                if player_id not in session.game.players:
-                    raise UnaddressableRequest("unknown_player")
-                if session.has_joined(player_id):
-                    raise UnaddressableRequest("already_joined")
-                new_context, reply = session.join(player_id)
+                new_context, reply = session.join(message["payload"]["entry_token"])
                 return self._result(reply, new_context)
             if message_type == "session.resume":
                 new_context, reply, replaced_connection_ids, replay = session.resume(
@@ -435,7 +484,7 @@ class SessionManager:
             raise
         if context is not None:
             session = self.session_for(context.game_id)
-            session._history_by_player.setdefault(context.player_id, []).append(deepcopy(reply))
+            session.remember(context.player_id, reply)
         return reply
 
 
