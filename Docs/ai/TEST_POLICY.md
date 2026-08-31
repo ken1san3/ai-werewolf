@@ -172,3 +172,4 @@ ROADMAP の「TEST_POLICY 全項目」は、**その Phase が担当する節**�
 - [ ] 役職を1つ追加するのに Python の変更が不要
 - [ ] 狂人 / 狂信者 / 囁く狂人 がゲームコアの分岐なしに区別される
 - [ ] 人狼 / 強欲な人狼 / 賢狼 が同一属性で Ability だけの差として表現される
+- [ ] content が宣言する ID（role id / tag / team id / channel id / death cause id）が `server/aiwolf_core/` に直書きされていない（静的チェック）
