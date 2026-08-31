@@ -91,6 +91,16 @@ Docs/ai/TEST_POLICY.md
 どれを読むかの絞り込みにローカルLLMを使ってよいが、
 **差分に含まれるファイルは減らさず全部開く**（D034）。
 
+**Reviewer 環境からローカルLLMへは到達できない。** Reviewer が動く Linux VM は
+ネットワークを持たず（`Network is unreachable`）、llama-server は Windows 側の
+`127.0.0.1:8080` に bind している。したがって Reviewer の報告では
+ローカルLLMは常に「環境から到達不可のため未使用」であり、
+**サーバが起動しているかどうかとは無関係である。**
+
+同じ理由で、`usage.jsonl` の `outcome: unreachable` が Reviewer の実行によるものなら、
+それはサーバ停止を意味しない。`tool` 欄で実行元を確認すること。
+入力長やトークン数の Verification のように**サーバが必要な確認は Implementer が行う。**
+
 ### 2.2 確認する
 
 `AGENTS.md` の Review checklist を必ず通す。加えて:
