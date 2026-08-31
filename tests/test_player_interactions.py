@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from random import Random
+from shutil import copytree
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from server.aiwolf_core import (
     ActionRejected,
@@ -13,9 +16,11 @@ from server.aiwolf_core import (
     GameState,
     InMemoryEventSink,
     Player,
+    PlayerConfig,
     load_content,
     load_preset,
 )
+from server.aiwolf_core.available_actions import ActionAvailability
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -67,8 +72,25 @@ class PlayerInteractionTests(unittest.TestCase):
         game._enter_phase(GamePhase.DAY, 100)
         return game
 
+    def make_standard_day_game(self) -> GameState:
+        player_configs = tuple(
+            PlayerConfig(f"player-{index}", f"Player {index}")
+            for index in range(sum(self.preset.role_counts.values()))
+        )
+        game = GameState.create_from_preset(
+            self.content,
+            self.preset,
+            player_configs,
+            game_id="standard-claim-test",
+            event_sink=InMemoryEventSink(),
+            rng=Random(0),
+            started_at=0,
+        )
+        game._enter_phase(GamePhase.DAY, 100)
+        return game
+
     def test_false_co_is_public_but_quota_removes_declaration_action_and_rejects_more(self) -> None:
-        game = self.make_day_game({"wolf": "werewolf", "villager": "villager"})
+        game = self.make_day_game({"wolf": "werewolf", "seer": "seer", "villager": "villager"})
 
         for number in range(1, 4):
             game.declare_co("wolf", "seer", f"claim {number}")
@@ -98,7 +120,7 @@ class PlayerInteractionTests(unittest.TestCase):
         )
         declaration = next(action for action in game.get_available_actions("wolf") if action.type == "co_declare")
         self.assertNotIn("villager", declaration.claimed_role_ids)
-        self.assertIn("seer", declaration.claimed_role_ids)
+        self.assertIn("werewolf", declaration.claimed_role_ids)
         with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
             game.declare_co("wolf", "villager", "I am a villager")
 
@@ -108,6 +130,65 @@ class PlayerInteractionTests(unittest.TestCase):
         declaration = next(action for action in permitted.get_available_actions("wolf") if action.type == "co_declare")
         self.assertIn("villager", declaration.claimed_role_ids)
         permitted.declare_co("wolf", "villager", "I am a villager")
+
+    def test_claim_candidates_are_limited_to_the_active_standard_game_roles(self) -> None:
+        game = self.make_standard_day_game()
+        player_id = next(iter(game.players))
+        declaration = next(
+            action for action in game.get_available_actions(player_id) if action.type == "co_declare"
+        )
+        assigned_role_ids = {player.role.id for player in game.players.values()}
+        expected = tuple(
+            role_id
+            for role_id in sorted(assigned_role_ids)
+            if self.content.roles[role_id].claimable
+        )
+        self.assertEqual(declaration.claimed_role_ids, expected)
+
+        missing_role_id = next(
+            role_id
+            for role_id, role in self.content.roles.items()
+            if role_id not in assigned_role_ids and role.claimable
+        )
+        with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
+            game.declare_co(player_id, missing_role_id, "not in this game")
+
+        with TemporaryDirectory() as temporary_directory:
+            extended_root = Path(temporary_directory) / "content"
+            copytree(CONTENT_ROOT, extended_root)
+            added_role_path = extended_root / "roles" / "modded_seer.yaml"
+            added_role_path.write_text(
+                (CONTENT_ROOT / "roles" / "seer.yaml")
+                .read_text(encoding="utf-8")
+                .replace("id: seer", "id: modded_seer", 1),
+                encoding="utf-8",
+            )
+            game.content = load_content(extended_root)
+            unchanged = next(
+                action for action in game.get_available_actions(player_id) if action.type == "co_declare"
+            )
+            self.assertEqual(unchanged.claimed_role_ids, expected)
+
+    def test_co_receipt_uses_the_claim_candidates_from_available_actions(self) -> None:
+        game = self.make_day_game({"wolf": "werewolf", "seer": "seer"})
+        original_phase_actions = ActionAvailability.phase_actions
+
+        def without_seer(availability, player, chat_actions):
+            return [
+                replace(
+                    action,
+                    claimed_role_ids=tuple(
+                        role_id for role_id in action.claimed_role_ids if role_id != "seer"
+                    ),
+                )
+                if action.type == "co_declare"
+                else action
+                for action in original_phase_actions(availability, player, chat_actions)
+            ]
+
+        with patch.object(ActionAvailability, "phase_actions", without_seer):
+            with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
+                game.declare_co("wolf", "seer", "filtered by enumeration")
 
     def test_renamed_unclaimable_role_needs_no_python_change(self) -> None:
         townie = replace(self.content.roles["villager"], id="townie")
@@ -166,7 +247,7 @@ class PlayerInteractionTests(unittest.TestCase):
         for operation_name, operation in operations.items():
             with self.subTest(operation=operation_name):
                 game = self.make_day_game(
-                    {"reporter": "werewolf", "silent": "villager"}, sudden_death=True
+                    {"reporter": "werewolf", "seer": "seer", "silent": "villager"}, sudden_death=True
                 )
 
                 operation(game)

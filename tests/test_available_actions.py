@@ -7,6 +7,7 @@ import unittest
 
 from server.aiwolf_core import (
     AppliedModifier,
+    ActionSpec,
     EventBus,
     EventVisibility,
     GamePhase,
@@ -34,6 +35,14 @@ class AvailableActionsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.content = load_content(CONTENT_ROOT)
         self.preset = load_preset(PRESET_PATH, self.content)
+
+    def test_co_action_specs_report_invalid_fields_without_claiming_the_type_is_unknown(self) -> None:
+        with self.assertRaisesRegex(ValueError, "CO declaration action requires"):
+            ActionSpec(type="co_declare")
+        with self.assertRaisesRegex(ValueError, "CO report action requires"):
+            ActionSpec(type="co_report", channel="public")
+        with self.assertRaisesRegex(ValueError, "unsupported action type"):
+            ActionSpec(type="unknown")
 
     def make_game(self, roles: dict[str, str], *, rules=None, phase=GamePhase.NIGHT, content=None) -> GameState:
         content = self.content if content is None else content
@@ -141,7 +150,7 @@ class AvailableActionsTests(unittest.TestCase):
 
     def test_day_vote_and_dead_player_actions_are_player_specific(self) -> None:
         game = self.make_game(
-            {"villager": "villager", "other": "villager"}, phase=GamePhase.DAY
+            {"villager": "villager", "other": "seer"}, phase=GamePhase.DAY
         )
         day_actions = game.get_available_actions("villager")
         self.assertEqual(
@@ -169,7 +178,7 @@ class AvailableActionsTests(unittest.TestCase):
             overrides=AttributeOverrides(),
             exclusions=frozenset(),
         )
-        game = self.make_game({"villager": "villager"})
+        game = self.make_game({"villager": "villager", "seer": "seer"})
         game.players["villager"] = replace(
             game.players["villager"], modifiers=(AppliedModifier.grant(modifier),)
         )
@@ -195,7 +204,7 @@ class AvailableActionsTests(unittest.TestCase):
         )
 
         night_game = self.make_game(
-            {"villager": "villager"}, content=night_public_content, phase=GamePhase.NIGHT
+            {"villager": "villager", "seer": "seer"}, content=night_public_content, phase=GamePhase.NIGHT
         )
         self.assertEqual(
             [(action.type, action.channel) for action in night_game.get_available_actions("villager")],
@@ -203,7 +212,7 @@ class AvailableActionsTests(unittest.TestCase):
         )
 
         day_game = self.make_game(
-            {"villager": "villager"}, content=night_public_content, phase=GamePhase.DAY
+            {"villager": "villager", "seer": "seer"}, content=night_public_content, phase=GamePhase.DAY
         )
         self.assertEqual(day_game.get_available_actions("villager"), [])
 
@@ -229,7 +238,7 @@ class AvailableActionsTests(unittest.TestCase):
             },
         )
         game = self.make_game(
-            {"villager": "villager"}, content=renamed_content, phase=GamePhase.DAY
+            {"villager": "villager", "seer": "seer"}, content=renamed_content, phase=GamePhase.DAY
         )
 
         self.assertEqual(

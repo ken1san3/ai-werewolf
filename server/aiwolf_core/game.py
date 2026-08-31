@@ -207,11 +207,12 @@ class GameState:
         return PlayerInteractions(self).submit_chat(player_id, channel_id, message)
 
     def claimable_role_ids(self) -> tuple[str, ...]:
-        """Return content-declared CO targets permitted by the active rule set."""
+        """Return active-game CO targets permitted by the content-declared rule."""
 
+        assigned_roles = {player.role.id: player.role for player in self.players.values()}
         return tuple(
             role_id
-            for role_id, role in self.content.roles.items()
+            for role_id, role in sorted(assigned_roles.items())
             if self.rules.co.allow_villager_claim or role.claimable
         )
 

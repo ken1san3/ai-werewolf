@@ -154,6 +154,7 @@ class ActionSpec:
                 and not self.allows_abstain
             ):
                 return
+            raise ValueError("a CO declaration action requires claimed role ids only")
         if self.type == "co_report":
             if (
                 self.ability_id is None
@@ -166,6 +167,7 @@ class ActionSpec:
                 and not self.allows_abstain
             ):
                 return
+            raise ValueError("a CO report action requires no additional fields")
         raise ValueError(f"unsupported action type '{self.type}'")
 
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from .events import EventVisibility, GameEvent
 from .models import GamePhase
+from .state import ActionSpec
 from .rejections import ActionRejected
 
 if TYPE_CHECKING:
@@ -55,8 +56,8 @@ class PlayerInteractions:
             raise ActionRejected("invalid_comment")
         if not self.game.can_declare_co(player_id):
             raise ActionRejected("co_limit_reached")
-        self._require_available(player_id, "co_declare")
-        if claimed_role_id not in self.game.claimable_role_ids():
+        action = self._require_available(player_id, "co_declare")
+        if claimed_role_id not in action.claimed_role_ids:
             raise ActionRejected("claim_not_allowed")
         key = (self.game.day, player_id)
         self.game.co_declaration_counts[key] = self.game.co_declaration_counts.get(key, 0) + 1
@@ -103,12 +104,12 @@ class PlayerInteractions:
             )
         )
 
-    def _require_available(self, player_id: str, action_type: str, *, channel_id: str | None = None) -> None:
-        if any(
-            action.type == action_type and (channel_id is None or action.channel == channel_id)
-            for action in self.game.get_available_actions(player_id)
-        ):
-            return
+    def _require_available(
+        self, player_id: str, action_type: str, *, channel_id: str | None = None
+    ) -> ActionSpec:
+        for action in self.game.get_available_actions(player_id):
+            if action.type == action_type and (channel_id is None or action.channel == channel_id):
+                return action
         raise ActionRejected("action_unavailable")
 
     def _record_public_activity(self, player_id: str) -> None:
