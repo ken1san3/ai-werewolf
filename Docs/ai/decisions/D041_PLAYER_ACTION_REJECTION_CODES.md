@@ -17,17 +17,11 @@ The game core raises `ActionRejected(reason, detail)` for player-correctable act
 `reason` is the only value sent on the wire; `detail` remains local for direct core callers and
 tests. The network boundary neither parses details nor decides action legality.
 
-The initial reason vocabulary is:
-
-- `unknown_ability`, `action_unavailable`, `action_deadline_passed`, `action_closed`,
-  `ability_uses_exhausted`, `invalid_target`, `actor_unavailable`
-- `vote_unavailable`, `self_vote_disabled`, `unknown_target`, `abstention_disabled`,
-  `abstention_limit_reached`
-- the existing chat / CO codes such as `action_unavailable`, `co_limit_reached`, and
-  `unknown_claimed_role`
-
-Future player-correctable rejection reasons are added at this core boundary with an
-accompanying test; internal exceptions remain server errors and are not exposed as details.
+The single source of truth for the initial and future vocabulary is
+`server.aiwolf_core.rejections.PLAYER_ACTION_REJECTION_REASONS`.
+`ActionRejected` rejects codes outside that constant. Future player-correctable reasons are
+added there with an accompanying test; internal exceptions remain server errors and are not
+exposed as details.
 
 ## Consequences
 
@@ -35,7 +29,7 @@ accompanying test; internal exceptions remain server errors and are not exposed 
 - Existing direct core callers can continue to catch `ValueError`, because `ActionRejected`
   is its subclass.
 - The protocol schema remains a non-empty string for forward-compatible reason codes; the
-  vocabulary is owned here rather than duplicated in the wire schema.
+  vocabulary is owned by the core constant rather than duplicated in the wire schema.
 
 ## Verification
 

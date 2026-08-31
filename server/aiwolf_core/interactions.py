@@ -28,7 +28,7 @@ class PlayerInteractions:
         self.game = game
 
     def submit_chat(self, player_id: str, message: str) -> ChatSubmission:
-        """Accept one authorized chat message and record its daytime public count."""
+        """Accept one authorized chat message and record daytime public activity."""
 
         if not isinstance(message, str) or not message:
             raise ActionRejected("invalid_message")
@@ -45,8 +45,7 @@ class PlayerInteractions:
         player = self.game.players[player_id]
         channel = self.game.content.chat_channels[channel_id]
         if channel.is_public and self.game.phase is GamePhase.DAY:
-            key = (self.game.day, player_id)
-            self.game.public_chat_counts[key] = self.game.public_chat_counts.get(key, 0) + 1
+            self._record_public_activity(player_id)
         return ChatSubmission(
             channel_id=channel_id,
             message={
@@ -68,6 +67,7 @@ class PlayerInteractions:
         self._require_available(player_id, "co_declare")
         key = (self.game.day, player_id)
         self.game.co_declaration_counts[key] = self.game.co_declaration_counts.get(key, 0) + 1
+        self._record_public_activity(player_id)
         self.game.event_bus.publish(
             GameEvent(
                 type="CO_DECLARED",
@@ -96,8 +96,7 @@ class PlayerInteractions:
         if not isinstance(claimed_result, str) or not claimed_result:
             raise ActionRejected("invalid_claimed_result")
         self._require_available(player_id, "co_report")
-        key = (self.game.day, player_id)
-        self.game.co_report_counts[key] = self.game.co_report_counts.get(key, 0) + 1
+        self._record_public_activity(player_id)
         self.game.event_bus.publish(
             GameEvent(
                 type="CO_REPORTED",
@@ -118,3 +117,10 @@ class PlayerInteractions:
         ):
             return
         raise ActionRejected("action_unavailable")
+
+    def _record_public_activity(self, player_id: str) -> None:
+        """Record one public operation for the current day in the single activity source."""
+
+        key = (self.game.day, player_id)
+        counts = self.game.public_activity_counts
+        counts[key] = counts.get(key, 0) + 1

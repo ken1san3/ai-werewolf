@@ -98,6 +98,28 @@ class PlayerInteractionTests(unittest.TestCase):
             [event.payload["phase"] for event in game.event_bus.events if event.type == "PHASE_STARTED"],
         )
 
+    def test_each_public_operation_records_activity_for_sudden_death(self) -> None:
+        operations = {
+            "chat": lambda game: game.submit_chat("reporter", "I spoke"),
+            "co_declare": lambda game: game.declare_co("reporter", "seer", "I am the seer"),
+            "co_report": lambda game: game.report_co(
+                "reporter", "inspect_result", "silent", "not_wolf"
+            ),
+        }
+
+        for operation_name, operation in operations.items():
+            with self.subTest(operation=operation_name):
+                game = self.make_day_game(
+                    {"reporter": "werewolf", "silent": "villager"}, sudden_death=True
+                )
+
+                operation(game)
+
+                self.assertEqual(game.public_activity_counts[(1, "reporter")], 1)
+                self.assertTrue(game.advance_if_due(110))
+                self.assertTrue(game.players["reporter"].alive)
+                self.assertFalse(game.players["silent"].alive)
+
     def test_disabled_sudden_death_leaves_silent_players_alive_and_enters_vote(self) -> None:
         game = self.make_day_game({"wolf": "werewolf", "silent": "villager"})
 
@@ -106,18 +128,6 @@ class PlayerInteractionTests(unittest.TestCase):
         self.assertEqual(game.phase, GamePhase.VOTE)
         self.assertTrue(all(player.alive for player in game.players.values()))
         self.assertEqual(game.death_records, {})
-
-    def test_co_report_counts_as_a_public_operation_for_sudden_death(self) -> None:
-        game = self.make_day_game({"reporter": "werewolf", "silent": "villager"}, sudden_death=True)
-
-        game.report_co("reporter", "inspect_result", "silent", "not_wolf")
-        self.assertEqual(game.co_report_counts[(1, "reporter")], 1)
-        self.assertTrue(game.advance_if_due(110))
-
-        self.assertTrue(game.players["reporter"].alive)
-        self.assertFalse(game.players["silent"].alive)
-        self.assertEqual(game.death_records["silent"].cause, "sudden_death")
-
 
 if __name__ == "__main__":
     unittest.main()

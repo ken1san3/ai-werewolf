@@ -219,7 +219,7 @@ class SessionManagerTests(unittest.TestCase):
             ),),
         )
         self.assertEqual(
-            self.game.public_chat_counts[(self.game.day, "player-0")], 1
+            self.game.public_activity_counts[(self.game.day, "player-0")], 1
         )
 
         self.game._record_player_death("player-0", "lynched")

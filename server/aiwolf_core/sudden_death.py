@@ -19,7 +19,7 @@ class DayEndResolver:
         self.game = game
 
     def resolve_sudden_death(self) -> bool:
-        """Kill every living player with neither public chat nor a CO declaration today."""
+        """Kill every living player without a recorded public activity today."""
 
         if not self.game.rules.sudden_death.enabled:
             return False
@@ -27,9 +27,7 @@ class DayEndResolver:
             player_id
             for player_id, player in self.game.players.items()
             if player.alive
-            and self.game.public_chat_counts.get((self.game.day, player_id), 0) == 0
-            and self.game.co_declaration_counts.get((self.game.day, player_id), 0) == 0
-            and self.game.co_report_counts.get((self.game.day, player_id), 0) == 0
+            and self.game.public_activity_counts.get((self.game.day, player_id), 0) == 0
         )
         for player_id in silent_player_ids:
             DeathResolver(self.game).record(player_id, CoreDeathCause.SUDDEN_DEATH.value)
