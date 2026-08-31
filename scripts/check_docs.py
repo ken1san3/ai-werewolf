@@ -34,10 +34,15 @@ def fail(check: str, detail: str) -> None:
     problems.append(f"[{check}] {detail}")
 
 
+# 過去の記録は当時の節番号・ルール名・ファイル構成を保存する。現在の文書との一致は
+# 求めない。検査すると、書いた当時は正しかった記述が「不整合」として報告される。
+ARCHIVE_DIRS = {"_to_delete", "review_archive"}
+
+
 def docs_files() -> list[Path]:
     """検査対象。AGENTS.md はリポジトリ直下だが運用の規範なので含める。"""
 
-    files = [p for p in DOCS.rglob("*.md") if "_to_delete" not in p.parts]
+    files = [p for p in DOCS.rglob("*.md") if not ARCHIVE_DIRS & set(p.parts)]
     files.append(ROOT / "AGENTS.md")
     return sorted(files)
 
@@ -236,6 +241,33 @@ def check_test_policy_refs() -> None:
                 fail("test-policy-ref", f"ROADMAP が TEST_POLICY §{ref} を参照するが節が無い")
 
 
+# --- 13. 常時参照する文書のサイズ上限 -----------------------------------------
+# RUNBOOK §1.1 / INDEX の「Always read」は毎セッション必ず文脈へ入る。ここが伸びると、
+# 全セッションのコストが恒久的に上がる。伸びた分は review_archive/ へ退避する。
+# 上限は「現状の約2倍」で置いてある。引き上げるのではなく、まず退避すること。
+ALWAYS_READ_LIMITS = {
+    ROOT / "AGENTS.md": 8000,
+    DOCS / "CURRENT_STATE.md": 12000,
+    DOCS / "REVIEW_INBOX.md": 24000,
+    DOCS / "ROADMAP.md": 10000,
+    DOCS / "INDEX.md": 6000,
+}
+
+
+def check_always_read_size() -> None:
+    for path, limit in sorted(ALWAYS_READ_LIMITS.items()):
+        if not path.exists():
+            fail("doc-size", f"{path.name} が見つからない")
+            continue
+        size = len(read(path))
+        if size > limit:
+            fail(
+                "doc-size",
+                f"{path.name} が {size} 文字（上限 {limit}）。"
+                "毎セッション読む文書なので、古い記録を review_archive/ へ退避する",
+            )
+
+
 def main() -> int:
     for check in (
         check_design_sections,
@@ -250,6 +282,7 @@ def main() -> int:
         check_rule_paths,
         check_random_event_table,
         check_test_policy_refs,
+        check_always_read_size,
     ):
         check()
     if problems:

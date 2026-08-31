@@ -35,9 +35,22 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 | 目的 | ファイル |
 |---|---|
 | 設計判断の理由 | `decisions/` |
+| 過去のレビュー指摘の本文 | `review_archive/<年-月>.md` |
+| 過去のレビューの判断と観察 | `review_archive/REVIEW_LOG.md` |
+| 各 Phase で何を作ったかの経緯 | `review_archive/BUILD_LOG.md` |
 | 元仕様への指摘 | `SPEC_REVIEW.md` |
 | 元仕様の原文 | `spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
 | 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
+
+`review_archive/` は**過去の記録**であり、当時の節番号・ファイル構成・ルール名を
+そのまま保存する。現在の文書との一致は求めず、`check_docs.py` も検査しない。
+**追記しない。** 現在の状態は `CURRENT_STATE.md` にだけ置く。
+
+## 文書のサイズ
+
+`Always read` の文書は毎セッション必ず文脈へ入る。伸びると全セッションの
+コストが恒久的に上がるため、`check_docs.py` が上限を検査する。
+上限に当たったら**上限を上げるのではなく、古い記録を `review_archive/` へ退避する。**
 | ロードマップ全体 | `ROADMAP.md` |
 | 文書と実装の不整合検査 | `scripts/check_docs.py` |
 | Phase引継ぎ | `handoffs/` |

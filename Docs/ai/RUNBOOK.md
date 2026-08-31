@@ -28,6 +28,11 @@ Docs/ai/TEST_POLICY.md  ← 対象サブPhaseに関係するカテゴリのみ
 
 これ以外は必要になってから読む。リポジトリ全体を読まない。
 
+**この5つは毎回読むため、伸びると全セッションのコストが恒久的に上がる。**
+`check_docs.py` がサイズ上限を検査する。上限に当たったら上限を上げず、
+古い記録を `review_archive/` へ退避する。`review_archive/` は追記専用の
+過去記録であり、通常のセッションでは読まない。
+
 `Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` は元になった旧仕様であり、
 DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先する。**
 `Docs/ai/decisions/` は判断の理由。DESIGN.md の意図が読み取れないときだけ開く。
