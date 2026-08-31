@@ -229,7 +229,6 @@ class GameStateTests(unittest.TestCase):
             "content.py": {
                 "graveyard",
                 "guard",
-                "lynched",
                 "medium",
                 "none",
                 "public",

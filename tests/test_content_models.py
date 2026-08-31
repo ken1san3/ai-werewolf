@@ -304,6 +304,15 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertEqual(preset.rules.first_night_seer, "random_white")
         self.assertEqual(self.content.roles["seer"].options, {})
 
+    def test_medium_rules_reject_the_removed_targets_setting(self) -> None:
+        preset = load_preset(PRESET_PATH, self.content)
+        self.assertFalse(hasattr(preset.rules.medium, "targets"))
+        rules = yaml.safe_load(PRESET_PATH.read_text(encoding="utf-8"))["rules"]
+        self.assertNotIn("targets", rules["medium"])
+        rules["medium"]["targets"] = ["lynched"]
+        with self.assertRaisesRegex(ContentValidationError, r"rules\.medium.*unknown.*targets"):
+            _parse_rules(rules, "test", self.content)
+
     def test_project_declares_the_supported_minimum_python_version(self) -> None:
         metadata = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('requires-python = ">=3.10"', metadata)

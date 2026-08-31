@@ -330,7 +330,6 @@ class NightActionRules:
 @dataclass(frozen=True)
 class MediumRules:
     notify_timing: str
-    targets: tuple[str, ...]
 
 
 @dataclass(frozen=True)

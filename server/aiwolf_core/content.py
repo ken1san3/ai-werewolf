@@ -944,14 +944,9 @@ def _parse_night_action_rules(data: Mapping[str, Any], path: str) -> NightAction
 
 
 def _parse_medium_rules(data: Mapping[str, Any], path: str) -> MediumRules:
-    _keys(data, required={"notify_timing", "targets"}, optional=set(), path=path)
+    _keys(data, required={"notify_timing"}, optional=set(), path=path)
     _one_of(data["notify_timing"], {"night", "dawn"}, f"{path}.notify_timing")
-    targets = tuple(_list(data["targets"], f"{path}.targets"))
-    if not targets or any(target not in {"lynched", "sudden_death"} for target in targets):
-        raise ContentValidationError(f"{path}.targets must contain lynched and/or sudden_death")
-    if len(targets) != len(set(targets)):
-        raise ContentValidationError(f"{path}.targets contains duplicates")
-    return MediumRules(data["notify_timing"], targets)
+    return MediumRules(data["notify_timing"])
 
 
 def _parse_wolf_attack_rules(data: Mapping[str, Any], path: str) -> WolfAttackRules:

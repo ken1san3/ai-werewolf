@@ -9,6 +9,7 @@ from typing import Sequence, TypeVar
 import unittest
 
 from server.aiwolf_core import (
+    ActionRejected,
     EventSink,
     EventVisibility,
     GamePhase,
@@ -506,6 +507,52 @@ class ActionResolverTests(unittest.TestCase):
         self.assertEqual(result.recipient_player_id, "medium")
         self.assertEqual(result.payload, {"target_player_id": "dead", "result": "wolf"})
         self.assertIn(("medium", "dead"), game.medium_examined_deaths)
+
+    def test_medium_targets_and_submission_follow_role_yaml_causes(self) -> None:
+        deaths = {"executed": "lynched", "idle": "sudden_death", "attacked": "attacked"}
+        cases = (
+            ("lynched, sudden_death", ("executed", "idle")),
+            ("lynched", ("executed",)),
+            ("attacked", ("attacked",)),
+        )
+        for causes, expected in cases:
+            with self.subTest(causes=causes), TemporaryDirectory() as temporary_directory:
+                content_root = Path(temporary_directory) / "content"
+                copytree(CONTENT_ROOT, content_root)
+                role_path = content_root / "roles" / "medium.yaml"
+                role_path.write_text(
+                    role_path.read_text(encoding="utf-8").replace(
+                        "causes: [lynched, sudden_death]", f"causes: [{causes}]"
+                    ),
+                    encoding="utf-8",
+                )
+                content = load_content(content_root)
+                preset = load_preset(content_root / "presets" / "standard_9.yaml", content)
+                game = self.make_game(
+                    {"medium": "medium", **{player_id: "villager" for player_id in deaths}},
+                    content=content,
+                    rules=replace(preset.rules, night_seconds=10),
+                )
+                for player_id, cause in deaths.items():
+                    game._record_player_death(player_id, cause)
+                action = next(
+                    action for action in game.get_available_actions("medium")
+                    if action.ability_id == "medium_inspect"
+                )
+                self.assertEqual(action.valid_targets, expected)
+                for player_id in deaths:
+                    if player_id in expected:
+                        game.submit_action(101, "medium", "medium_inspect", (player_id,))
+                    else:
+                        with self.assertRaises(ActionRejected) as rejected:
+                            game.submit_action(101, "medium", "medium_inspect", (player_id,))
+                        self.assertEqual(rejected.exception.reason, "invalid_target")
+                game.resolve_pending_actions(110)
+                results = [event for event in game.event_bus.events if event.type == "MEDIUM_RESULT"]
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0].payload["target_player_id"], expected[-1])
+                self.assertEqual(results[0].visibility, EventVisibility.PRIVATE)
+                self.assertEqual(results[0].recipient_player_id, "medium")
 
     def test_medium_dawn_notification_is_held_until_dawn(self) -> None:
         rules = replace(

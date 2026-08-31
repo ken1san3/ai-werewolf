@@ -16,7 +16,6 @@ rules:
     no_selection: null
   medium:
     notify_timing: night
-    targets: [lynched, sudden_death]
   wolf_attack:
     target_decision: majority
     tie: random
