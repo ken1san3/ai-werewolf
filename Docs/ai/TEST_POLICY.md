@@ -152,6 +152,8 @@ ROADMAP の「TEST_POLICY 全項目」は、**その Phase が担当する節**�
 - [ ] 人狼が実際とは異なる役職をCOでき、サーバが拒否しない
 - [ ] 死亡プレイヤーがCOできない
 - [ ] `allow_villager_claim: false` では `claimable: false` の Role がCO候補に現れず、指定すると拒否される。`true` では候補に現れる
+- [ ] CO候補はその試合の配役に含まれる役職だけで、配役に無い役職は候補に現れず指定しても拒否される
+- [ ] `content/roles/` に役職を1つ足しても、進行中の試合のCO候補が変わらない
 - [ ] `claimable` を宣言しない Role は content load でエラーになる
 - [ ] `claimable: false` の Role ID を改名しても、Python無変更で同じ候補除外・拒否になる
 - [ ] `chat.send` は利用可能チャネルが1件でも `channel_id` を必須とする
