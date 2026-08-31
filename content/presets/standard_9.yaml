@@ -25,6 +25,10 @@ rules:
     allow_villager_claim: false
   death:
     public_detail: phase
+  graveyard:
+    view_public: true
+    speak: false
+    reveal_roles: false
   role_missing:
     enabled: false
     replacement_role_id: villager

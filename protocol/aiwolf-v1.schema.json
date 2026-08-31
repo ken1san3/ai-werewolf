@@ -152,6 +152,26 @@
       },
       "description": "A machine-readable rejection reason at a granularity a client can act on."
     },
+    "game_event_payload": {
+      "type": "object",
+      "required": ["event_type", "event_payload"],
+      "properties": {
+        "event_type": { "type": "string", "minLength": 1 },
+        "event_payload": { "type": "object" }
+      },
+      "additionalProperties": false,
+      "description": "A public or recipient-private core event after server visibility filtering."
+    },
+    "chat_message_payload": {
+      "type": "object",
+      "required": ["channel", "message"],
+      "properties": {
+        "channel": { "type": "string", "minLength": 1 },
+        "message": { "type": "object" }
+      },
+      "additionalProperties": false,
+      "description": "A chat payload sent only to the channel recipients authorized by content."
+    },
     "server_event": {
       "allOf": [
         { "$ref": "#/$defs/envelope" },
@@ -242,6 +262,30 @@
         }
       ],
       "description": "Private direct acknowledgement for an authenticated ready request."
+    },
+    "game_event": {
+      "allOf": [
+        { "$ref": "#/$defs/server_event" },
+        {
+          "properties": {
+            "type": { "const": "game.event" },
+            "payload": { "$ref": "#/$defs/game_event_payload" }
+          }
+        }
+      ],
+      "description": "A versioned server envelope for one safe core event."
+    },
+    "chat_message": {
+      "allOf": [
+        { "$ref": "#/$defs/server_event" },
+        {
+          "properties": {
+            "type": { "const": "chat.message" },
+            "payload": { "$ref": "#/$defs/chat_message_payload" }
+          }
+        }
+      ],
+      "description": "A versioned server envelope for one content-authorized chat message."
     }
   }
 }

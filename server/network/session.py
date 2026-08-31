@@ -318,18 +318,33 @@ class SessionManager:
         if context is not None:
             self.session_for(context.game_id).disconnect(context)
 
+    def server_event(
+        self, context: ConnectionContext, message_type: str, payload: Mapping[str, Any]
+    ) -> ServerReply:
+        """Envelope a pre-filtered outbound event on the player's sequence stream."""
+
+        session = self.session_for(context.game_id)
+        return self._validated_reply(session._reply(context.player_id, message_type, payload), context)
+
     def _result(
         self,
         reply: ServerReply,
         context: ConnectionContext | None,
         replaced_connection_ids: tuple[str, ...] = (),
     ) -> SessionResult:
+        return SessionResult(
+            self._validated_reply(reply, context), context, replaced_connection_ids
+        )
+
+    def _validated_reply(
+        self, reply: ServerReply, context: ConnectionContext | None
+    ) -> ServerReply:
         try:
             self._validator.validate_server(reply.as_message())
         except ProtocolValidationError:
             self.disconnect(context)
             raise
-        return SessionResult(reply, context, replaced_connection_ids)
+        return reply
 
 
 class TickDriver:

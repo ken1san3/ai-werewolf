@@ -348,6 +348,13 @@ class DeathRules:
 
 
 @dataclass(frozen=True)
+class GraveyardRules:
+    view_public: bool
+    speak: bool
+    reveal_roles: bool
+
+
+@dataclass(frozen=True)
 class RoleMissingRules:
     enabled: bool
     replacement_role_id: str
@@ -376,6 +383,7 @@ class RulesConfig:
     wolf_attack: WolfAttackRules
     co: CoRules
     death: DeathRules
+    graveyard: GraveyardRules
     role_missing: RoleMissingRules
     day_seconds: int
     vote_seconds: int

@@ -32,6 +32,7 @@ from .models import (
     EffectReference,
     ExtensionRules,
     GamePhase,
+    GraveyardRules,
     GuardRules,
     Knowledge,
     MediumRules,
@@ -783,6 +784,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
             "wolf_attack",
             "co",
             "death",
+            "graveyard",
             "role_missing",
             "day_seconds",
             "vote_seconds",
@@ -809,6 +811,10 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
     )
     co = _parse_co_rules(_mapping(data["co"], f"{path}.rules.co"), f"{path}.rules.co")
     death = _parse_death_rules(_mapping(data["death"], f"{path}.rules.death"), f"{path}.rules.death")
+    graveyard = _parse_graveyard_rules(
+        _mapping(data["graveyard"], f"{path}.rules.graveyard"),
+        f"{path}.rules.graveyard",
+    )
     role_missing = _parse_role_missing_rules(
         _mapping(data["role_missing"], f"{path}.rules.role_missing"),
         f"{path}.rules.role_missing",
@@ -840,6 +846,7 @@ def _parse_rules(data: Mapping[str, Any], path: str, content: ContentPack) -> Ru
         wolf_attack=wolf_attack,
         co=co,
         death=death,
+        graveyard=graveyard,
         role_missing=role_missing,
         day_seconds=_integer(data["day_seconds"], f"{path}.rules.day_seconds", minimum=1),
         vote_seconds=_integer(data["vote_seconds"], f"{path}.rules.vote_seconds", minimum=1),
@@ -944,6 +951,15 @@ def _parse_death_rules(data: Mapping[str, Any], path: str) -> DeathRules:
     _keys(data, required={"public_detail"}, optional=set(), path=path)
     _one_of(data["public_detail"], {"phase", "cause", "none"}, f"{path}.public_detail")
     return DeathRules(data["public_detail"])
+
+
+def _parse_graveyard_rules(data: Mapping[str, Any], path: str) -> GraveyardRules:
+    _keys(data, required={"view_public", "speak", "reveal_roles"}, optional=set(), path=path)
+    return GraveyardRules(
+        view_public=_boolean(data["view_public"], f"{path}.view_public"),
+        speak=_boolean(data["speak"], f"{path}.speak"),
+        reveal_roles=_boolean(data["reveal_roles"], f"{path}.reveal_roles"),
+    )
 
 
 def _parse_extension_rules(data: Mapping[str, Any], path: str) -> ExtensionRules:

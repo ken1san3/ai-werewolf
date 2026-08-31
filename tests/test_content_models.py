@@ -208,6 +208,9 @@ class ContentLoadingTests(unittest.TestCase):
         self.assertFalse(preset.rules.guard.consecutive)
         self.assertFalse(preset.rules.role_missing.enabled)
         self.assertEqual(preset.rules.role_missing.replacement_role_id, "villager")
+        self.assertTrue(preset.rules.graveyard.view_public)
+        self.assertFalse(preset.rules.graveyard.speak)
+        self.assertFalse(preset.rules.graveyard.reveal_roles)
         self.assertIsNone(preset.rules.night_action.no_selection)
         self.assertFalse(preset.rules.shortening.enabled)
         self.assertEqual(preset.rules.vote_seconds, 60)
@@ -400,9 +403,20 @@ class ContentLoadingTests(unittest.TestCase):
         invalid_role_missing["role_missing"]["replacement_role_id"] = "unknown_role"
         unknown_key = deepcopy(base)
         unknown_key["unknown_rule"] = True
+        missing_graveyard = deepcopy(base)
+        missing_graveyard.pop("graveyard")
+        invalid_graveyard = deepcopy(base)
+        invalid_graveyard["graveyard"]["view_public"] = 1
         incomplete_order = deepcopy(base)
         incomplete_order["win_evaluation_order"] = ["village", "wolf"]
-        for rules in (invalid_value, invalid_role_missing, unknown_key, incomplete_order):
+        for rules in (
+            invalid_value,
+            invalid_role_missing,
+            unknown_key,
+            missing_graveyard,
+            invalid_graveyard,
+            incomplete_order,
+        ):
             with self.subTest(rules=rules):
                 with self.assertRaises(ContentValidationError):
                     _parse_rules(rules, "test", self.content)

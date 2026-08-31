@@ -299,7 +299,7 @@ rules:
     public_detail: phase           # phase | cause | none
   sudden_death:                    # 未実装（Phase 2.4。発言数の集計が要る）
     enabled: false                 # 昼に一度も発言しなかった生存者を Day 終了時に死亡させる
-  graveyard:                       # 未実装（Phase 2.3。送信経路の分離と同時）
+  graveyard:                       # Phase 2.3 で公開 / private の送信経路と同時に実装
     view_public: true              # 死亡後も public を閲覧できる
     speak: false                   # 墓場での発言（Phase 7）
     reveal_roles: false            # 死亡者に全員の役職を見せる

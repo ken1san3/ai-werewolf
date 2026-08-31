@@ -19,7 +19,7 @@ class ProtocolValidationError(ValueError):
 
 
 class ProtocolMessageValidator:
-    """Validate common envelopes and the Session message types used in Phase 2.2."""
+    """Validate common envelopes and every schema-declared network message type."""
 
     def __init__(
         self,

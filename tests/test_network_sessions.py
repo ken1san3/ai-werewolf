@@ -11,7 +11,9 @@ import unittest
 from websockets.asyncio.client import connect
 
 from server.aiwolf_core import (
+    EventVisibility,
     GameState,
+    GameEvent,
     InMemoryEventSink,
     PlayerConfig,
     load_content,
@@ -264,8 +266,164 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
             validator.validate_client(client_message("session.test", {}))
         validator.validate_client(client_message("session.test", {"value": "ok"}))
 
+    def test_delivery_message_types_receive_schema_specific_validation(self) -> None:
+        validator = ProtocolMessageValidator()
+        event = {
+            "type": "game.event",
+            "protocol_version": "1.0",
+            "event_id": "123e4567-e89b-12d3-a456-426614174102",
+            "game_id": GAME_ID,
+            "seq": 1,
+            "timestamp": 0,
+            "payload": {"event_type": "PHASE_STARTED", "event_payload": {}},
+        }
+        validator.validate_server(event)
+        with self.assertRaises(ProtocolValidationError):
+            validator.validate_server(dict(event, payload={"event_type": "PHASE_STARTED"}))
+
+        chat = dict(event, type="chat.message", payload={"channel": "wolf", "message": {"text": "hi"}})
+        validator.validate_server(chat)
+        with self.assertRaises(ProtocolValidationError):
+            validator.validate_server(dict(chat, payload={"channel": "wolf"}))
+
 
 class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
+    async def _join(self, socket, player_id: str) -> dict[str, object]:
+        await socket.send(json.dumps(client_message("session.join", {"player_id": player_id})))
+        return json.loads(await socket.recv())
+
+    async def test_event_delivery_separates_public_private_and_server_visibility(self) -> None:
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(
+            registry,
+            ticker=TickDriver(registry, clock=lambda: 0),
+            tick_interval_seconds=0.001,
+        )
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as first, connect(uri) as second:
+                self.assertEqual((await self._join(first, "player-0"))["seq"], 1)
+                self.assertEqual((await self._join(second, "player-1"))["seq"], 1)
+                game.event_bus.publish(
+                    GameEvent("TEST_PUBLIC", EventVisibility.PUBLIC, {"safe": "yes"})
+                )
+                game.event_bus.publish(
+                    GameEvent(
+                        "TEST_PRIVATE",
+                        EventVisibility.PRIVATE,
+                        {"secret": "player-0-only"},
+                        recipient_player_id="player-0",
+                    )
+                )
+                game.event_bus.publish(
+                    GameEvent("INTERNAL", EventVisibility.SERVER, {"cause": "attacked"})
+                )
+
+                first_public = json.loads(await first.recv())
+                first_private = json.loads(await first.recv())
+                second_public = json.loads(await second.recv())
+                self.assertEqual([first_public["seq"], first_private["seq"]], [2, 3])
+                self.assertEqual(second_public["seq"], 2)
+                self.assertEqual(first_public["payload"], {"event_type": "TEST_PUBLIC", "event_payload": {"safe": "yes"}})
+                self.assertEqual(first_private["payload"], {"event_type": "TEST_PRIVATE", "event_payload": {"secret": "player-0-only"}})
+                self.assertNotIn("visibility", first_private["payload"])
+                self.assertNotIn("recipient_player_id", first_private["payload"])
+                self.assertEqual(second_public["payload"], first_public["payload"])
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(second.recv(), timeout=0.05)
+        finally:
+            await server.close()
+
+    async def test_channel_delivery_uses_content_authorized_recipients(self) -> None:
+        game = make_game()
+        authorized = game.chat_channel_recipient_ids("wolf")
+        unauthorized = next(player_id for player_id in game.players if player_id not in authorized)
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(registry, tick_interval_seconds=3600)
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as permitted, connect(uri) as blocked:
+                await self._join(permitted, authorized[0])
+                await self._join(blocked, unauthorized)
+                await server.publish_channel_message(
+                    game.game_id, "wolf", {"text": "wolves only"}
+                )
+                received = json.loads(await permitted.recv())
+                self.assertEqual(received["type"], "chat.message")
+                self.assertEqual(
+                    received["payload"],
+                    {"channel": "wolf", "message": {"text": "wolves only"}},
+                )
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(blocked.recv(), timeout=0.05)
+        finally:
+            await server.close()
+
+    async def test_dead_player_receives_only_public_events_by_default(self) -> None:
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(
+            registry,
+            ticker=TickDriver(registry, clock=lambda: 0),
+            tick_interval_seconds=0.001,
+        )
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as dead_socket, connect(uri) as live_socket:
+                await self._join(dead_socket, "player-0")
+                await self._join(live_socket, "player-1")
+                game._record_player_death("player-0", "attacked")
+                dead_event = json.loads(await dead_socket.recv())
+                live_event = json.loads(await live_socket.recv())
+                self.assertEqual(dead_event["payload"], live_event["payload"])
+                self.assertEqual(dead_event["payload"]["event_type"], "PLAYER_DIED")
+                self.assertNotIn("cause", dead_event["payload"]["event_payload"])
+                self.assertNotIn("role_id", dead_event["payload"]["event_payload"])
+                game.event_bus.publish(
+                    GameEvent(
+                        "POST_DEATH_PRIVATE",
+                        EventVisibility.PRIVATE,
+                        {"secret": "not-for-the-dead"},
+                        recipient_player_id="player-0",
+                    )
+                )
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(dead_socket.recv(), timeout=0.05)
+        finally:
+            await server.close()
+
+    async def test_dead_player_without_public_view_cannot_receive_public_events(self) -> None:
+        content = load_content(PROJECT_ROOT / "content")
+        preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
+        rules = replace(
+            preset.rules,
+            graveyard=replace(preset.rules.graveyard, view_public=False),
+        )
+        game = make_game(rules=rules)
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(
+            registry,
+            ticker=TickDriver(registry, clock=lambda: 0),
+            tick_interval_seconds=0.001,
+        )
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as dead_socket, connect(uri) as live_socket:
+                await self._join(dead_socket, "player-0")
+                await self._join(live_socket, "player-1")
+                game._record_player_death("player-0", "attacked")
+                received = json.loads(await live_socket.recv())
+                self.assertEqual(received["type"], "game.event")
+                self.assertEqual(received["payload"]["event_type"], "PLAYER_DIED")
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(dead_socket.recv(), timeout=0.05)
+        finally:
+            await server.close()
     async def test_server_ticker_completes_a_standard_game_without_manual_phase_calls(self) -> None:
         content = load_content(PROJECT_ROOT / "content")
         preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)

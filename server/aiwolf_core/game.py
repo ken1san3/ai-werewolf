@@ -25,6 +25,7 @@ from .state import (
     VoteResult,
     VoteResultKind,
 )
+from .targets import chat_channels_for
 from .voting import VoteResolver
 
 
@@ -162,6 +163,37 @@ class GameState:
         """Return only the action choices the named player may currently know about."""
 
         return ActionAvailability(self).get(player_id)
+
+    def can_view_public_events(self, player_id: str) -> bool:
+        """Return whether a player may receive public events after death."""
+
+        player = self.players.get(player_id)
+        return player is not None and (player.alive or self.rules.graveyard.view_public)
+
+    def can_receive_private_events(self, player_id: str) -> bool:
+        """Return whether the player remains entitled to direct game information."""
+
+        player = self.players.get(player_id)
+        return player is not None and player.alive
+
+    def chat_channel_recipient_ids(self, channel_id: str) -> tuple[str, ...]:
+        """Return content-authorized recipients without exposing role details to network code."""
+
+        if channel_id not in self.content.chat_channels:
+            raise ValueError(f"unknown chat channel '{channel_id}'")
+        if all(
+            channel_id in role.chat_channels for role in self.content.roles.values()
+        ):
+            return tuple(
+                player_id
+                for player_id in self.players
+                if self.can_view_public_events(player_id)
+            )
+        return tuple(
+            player_id
+            for player_id, player in self.players.items()
+            if player.alive and channel_id in chat_channels_for(player)
+        )
 
     def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
         VoteResolver(self).submit(voter_player_id, target_player_id)
