@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -40,13 +41,15 @@ class DesignGateTests(unittest.TestCase):
         self.assertNotIn("NOT REQUIRED", output.getvalue())
 
     def test_missing_design_is_unknown_and_blocked(self) -> None:
-        request = ai_status.ROOT / "Docs/ai/design/PHASE3_1_NETWORK_CLIENT_REQUEST.md"
         output = io.StringIO()
-        with patch.object(ai_status, "design_gate_documents", return_value=[request]):
-            with redirect_stdout(output):
-                ai_status.print_design_gate(
-                    "Target subphase: 3.1\nDesign gate: REQUIRED\n"
-                )
+        with TemporaryDirectory() as temporary_directory:
+            request = Path(temporary_directory) / "PHASE3_1_NETWORK_CLIENT_REQUEST.md"
+            request.write_text("DESIGN: REQUIRED\n", encoding="utf-8")
+            with patch.object(ai_status, "design_gate_documents", return_value=[request]):
+                with redirect_stdout(output):
+                    ai_status.print_design_gate(
+                        "Target subphase: 3.1\nDesign gate: REQUIRED\n"
+                    )
         self.assertIn("_DESIGN.md が無い", output.getvalue())
         self.assertIn("implementation: blocked", output.getvalue())
 
