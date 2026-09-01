@@ -120,6 +120,16 @@ def check_runbook_sections() -> None:
             fail("runbook-section", f"role '{role}' の RUNBOOK §{number} が無い")
 
 
+# --- 5b. Design Gate の必須文書に機械判定用 Status があるか -------------
+def check_design_gate_status() -> None:
+    for path in ai_status.design_gate_documents():
+        if not re.search(r"(?m)^Status:\s*\S", read(path)):
+            fail(
+                "design-status",
+                f"{path.relative_to(ROOT)} は DESIGN: REQUIRED だが Status: 行が無い",
+            )
+
+
 # --- 6. CURRENT_STATE の Next Task が実在ファイルを指すか -----------------
 def check_next_task_file() -> None:
     text = read(CURRENT_STATE)
@@ -314,7 +324,7 @@ def check_test_policy_refs() -> None:
 SESSION_CONTEXT_LIMITS = {
     ROOT / "AGENTS.md": 8000,
     DOCS / "CURRENT_STATE.md": 12000,
-    DOCS / "REVIEW_INBOX.md": 24000,
+    DOCS / "REVIEW_INBOX.md": 8000,
     DOCS / "ROADMAP.md": 10000,
     DOCS / "RUNBOOK.md": 16000,
 }
@@ -332,10 +342,14 @@ def check_session_context_size() -> None:
             else len(content)
         )
         if size > limit:
+            if path == DOCS / "REVIEW_INBOX.md":
+                remedy = "OPEN / IN_PROGRESS の指摘を閉じて active ブロックを減らす"
+            else:
+                remedy = "セッション入口の出力元を分割または短縮する"
             fail(
                 "doc-size",
                 f"{path.name} が {size} 文字（上限 {limit}）。"
-                "セッション入口の出力元なので、古い記録を review_archive/ へ退避する",
+                f"{remedy}",
             )
 
 
@@ -346,6 +360,7 @@ def main() -> int:
         check_open_questions,
         check_review_inbox,
         check_runbook_sections,
+        check_design_gate_status,
         check_next_task_file,
         check_event_names,
         check_rule_keys,

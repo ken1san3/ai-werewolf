@@ -116,7 +116,17 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                     for player_id in game.players
                 }
                 self.assertTrue(all(status["game_end"] for status in statuses.values()))
-                self.assertTrue(any(status["co_declared"] for status in statuses.values()))
+                self.assertEqual(
+                    sum(len(status["action_rejections"]) for status in statuses.values()),
+                    0,
+                    statuses,
+                )
+                self.assertGreater(
+                    sum(status["chat_messages_received"] for status in statuses.values()),
+                    0,
+                    statuses,
+                )
+                self.assertTrue(any(status["co_declared"] for status in statuses.values()), statuses)
                 self.assertTrue(statuses[restarted_player]["resumed"])
                 self.assertEqual(len(observed_pids), len(game.players) + 1)
                 self.assertNotIn(os.getpid(), observed_pids)

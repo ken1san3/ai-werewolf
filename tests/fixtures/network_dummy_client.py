@@ -111,6 +111,8 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
     connection_token = str(credentials["connection_token"]) if credentials is not None else ""
     sent_day_actions: set[tuple[int, str]] = set()
     co_declared = False
+    action_rejections: list[dict[str, object]] = []
+    chat_messages_received = 0
     async with connect(uri) as socket:
         if resumed:
             await socket.send(request("session.resume", game_id, {
@@ -138,6 +140,13 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                 )
             elif message.get("type") == "player.action_state":
                 await send_available_action(socket, game_id, message["payload"], sent_day_actions)
+            elif message.get("type") == "action.rejected":
+                payload = message.get("payload")
+                action_rejections.append(
+                    dict(payload) if isinstance(payload, dict) else {"payload": payload}
+                )
+            elif message.get("type") == "chat.message":
+                chat_messages_received += 1
             elif (
                 message.get("type") == "game.event"
                 and message["payload"].get("event_type") == "CO_DECLARED"
@@ -153,6 +162,8 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                     "resumed": resumed,
                     "last_seq": last_seq,
                     "co_declared": co_declared,
+                    "action_rejections": action_rejections,
+                    "chat_messages_received": chat_messages_received,
                 })
                 return
 

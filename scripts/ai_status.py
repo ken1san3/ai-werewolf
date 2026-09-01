@@ -27,7 +27,9 @@ for _stream in (sys.stdout, sys.stderr):
 ROOT = Path(__file__).resolve().parent.parent
 AI = ROOT / "Docs" / "ai"
 
-ROLE_SECTIONS = {"implement": "1", "review": "2", "fix": "3"}
+ROLE_SECTIONS = {"implement": "1", "review": "2", "fix": "3", "design": "4"}
+DESIGN_REQUIRED_MARKER = re.compile(r"(?m)^DESIGN: REQUIRED\s*$")
+STATUS_LINE = re.compile(r"(?m)^Status:\s*(.*?)\s*$")
 
 
 def section(text: str, heading: str) -> str:
@@ -93,6 +95,53 @@ def active_review_blocks(inbox: str) -> list[str]:
     return [block for _, block in active]
 
 
+def design_gate_documents() -> list[Path]:
+    """Return design documents that declare a required Design Gate."""
+
+    design_dir = AI / "design"
+    if not design_dir.is_dir():
+        return []
+    return sorted(
+        path
+        for path in design_dir.glob("*.md")
+        if DESIGN_REQUIRED_MARKER.search(read(path))
+    )
+
+
+def design_phase_label(path: Path) -> str:
+    match = re.search(r"PHASE(\d+(?:_\d+)*)", path.stem, flags=re.IGNORECASE)
+    return f"Phase {match.group(1).replace('_', '.')}" if match else path.stem
+
+
+def design_status(path: Path) -> tuple[str, bool]:
+    match = STATUS_LINE.search(read(path))
+    value = match.group(1).strip() if match else "(missing Status: line)"
+    approved = bool(
+        re.match(
+            r"^(?:DESIGN REVIEW:\s*)?APPROVED(?:\s|$)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    return value, approved
+
+
+def print_design_gate() -> None:
+    print("=" * 60)
+    print("DESIGN GATE")
+    print("=" * 60)
+    documents = design_gate_documents()
+    if not documents:
+        print("target subphase: DESIGN: NOT REQUIRED (no declarative design marker)")
+        return
+    for path in documents:
+        status, approved = design_status(path)
+        print(f"target subphase: {design_phase_label(path)}: DESIGN: REQUIRED")
+        print(f"design document: {path.relative_to(ROOT)}")
+        print(f"Status: {status}")
+        print(f"approved: {'yes' if approved else 'no'}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Print the project's dynamic AI session context."
@@ -122,6 +171,10 @@ def main() -> int:
     print("NEXT TASK")
     print("=" * 60)
     print(section(state, "Next Task") or "(unknown)")
+
+    if args.role == "implement":
+        print()
+        print_design_gate()
 
     print()
     print("=" * 60)
