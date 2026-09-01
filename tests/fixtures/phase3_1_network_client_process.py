@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from ai_client.network import (
     AbilityAction,
     ActionRejected,
+    ChatAction,
     ClientExitReason,
     CoDeclareAction,
     FileCredentialStore,
@@ -46,6 +47,8 @@ async def run_driver(
     resumed = False
     game_ended = False
     send_errors: list[dict[str, str]] = []
+    chat_sent = 0
+    chat_received = 0
 
     async def run_client() -> object:
         return await client.run()
@@ -60,6 +63,8 @@ async def run_driver(
             continue
         if isinstance(event, ServerEvent) and event.type == "session.resumed":
             resumed = True
+        if isinstance(event, ServerEvent) and event.type == "chat.message":
+            chat_received += 1
         if not isinstance(event, ServerEvent) or event.type not in {
             "game.state_sync",
             "player.action_state",
@@ -75,6 +80,8 @@ async def run_driver(
                     await client.send_co_declare(
                         action, action.claimed_role_ids[0], "I claim this role."
                     )
+                elif isinstance(action, ChatAction):
+                    await client.send_chat(action, "Protocol-only client speaking.")
                 elif isinstance(action, VoteAction) and action.valid_targets:
                     await client.send_vote(action, action.valid_targets[0])
                 elif isinstance(action, AbilityAction):
@@ -95,6 +102,8 @@ async def run_driver(
                 )
                 continue
             sent_action_generations.add(key)
+            if isinstance(action, ChatAction):
+                chat_sent += 1
             if isinstance(action, (VoteAction, AbilityAction)):
                 break
 
@@ -109,6 +118,8 @@ async def run_driver(
                 "last_seq": client.snapshot().last_seq,
                 "action_rejections": rejections,
                 "send_errors": send_errors,
+                "chat_sent": chat_sent,
+                "chat_received": chat_received,
                 "exit_reason": getattr(result_reason, "value", result_reason),
             },
             ensure_ascii=False,

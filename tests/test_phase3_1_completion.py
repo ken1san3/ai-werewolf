@@ -134,6 +134,16 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                     0,
                     statuses,
                 )
+                self.assertGreater(
+                    sum(status["chat_sent"] for status in statuses.values()),
+                    0,
+                    statuses,
+                )
+                self.assertGreater(
+                    sum(status["chat_received"] for status in statuses.values()),
+                    0,
+                    statuses,
+                )
                 event_types = [event.type for event in game.event_bus.events]
                 for event_type in ("CO_DECLARED", "VOTE_SUBMITTED", "ACTION_SUBMITTED"):
                     self.assertIn(event_type, event_types, event_types)

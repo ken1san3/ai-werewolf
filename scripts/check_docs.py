@@ -95,9 +95,16 @@ def check_open_questions() -> None:
 
 
 # --- 4. REVIEW_INBOX: ID の重複と欠番 ----------------------------------------
+def review_archive_files() -> list[Path]:
+    """Return only monthly review records, excluding narrative archives."""
+
+    return sorted((DOCS / "review_archive").glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].md"))
+
+
 def check_review_inbox() -> None:
     text = read(DOCS / "REVIEW_INBOX.md")
-    ids = re.findall(r"(?m)^## (R-\d{8}-\d+) \[", text)
+    archive_text = "\n".join(read(path) for path in review_archive_files())
+    ids = re.findall(r"(?m)^## (R-\d{8}-\d+) \[", f"{text}\n{archive_text}")
     for rid in sorted({i for i in ids if ids.count(i) > 1}):
         fail("review-inbox", f"{rid} が重複している")
     states = set(re.findall(r"(?m)^## R-\d{8}-\d+ \[(\w+)\]", text))

@@ -132,6 +132,28 @@ class DesignGateTests(unittest.TestCase):
             check_docs.check_design_target()
         self.assertTrue(any("NOT REQUIRED" in problem for problem in check_docs.problems))
 
+    def test_docs_checker_rejects_review_id_reused_in_archive(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        archive = Path("2026-09.md")
+        inbox_text = "## R-20260902-99 [OPEN] Medium\n"
+        archive_text = "## R-20260902-99 [FIXED] Medium\n"
+
+        def read(path: Path) -> str:
+            if path == check_docs.DOCS / "REVIEW_INBOX.md":
+                return inbox_text
+            if path == archive:
+                return archive_text
+            raise AssertionError(f"unexpected read: {path}")
+
+        with (
+            patch.object(check_docs, "read", side_effect=read),
+            patch.object(check_docs, "review_archive_files", return_value=[archive]),
+        ):
+            check_docs.check_review_inbox()
+
+        self.assertTrue(any("R-20260902-99 が重複" in problem for problem in check_docs.problems))
+
 
 if __name__ == "__main__":
     unittest.main()

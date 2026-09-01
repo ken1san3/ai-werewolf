@@ -137,6 +137,7 @@ class NetworkClient:
         )
         self._event_stream_closed = False
         self._stop_requested = False
+        self._stop_event = asyncio.Event()
         self._run_started = False
         self._checkpoint: SessionCheckpoint | None = None
         self._connection_generation = 0
@@ -149,8 +150,11 @@ class NetworkClient:
         self._connected_once_in_generation = False
         self._join_request_sent = False
         self._resume_request_sent = False
+        self._resume_last_seq_requested: int | None = None
         self._join_retry_after_ambiguous = False
         self._resume_sync_required = False
+        self._sync_deadline: float | None = None
+        self._sequence_gap_previous_seq: int | None = None
         self._background_failure: _FatalFailure | _TransientFailure | None = None
 
     @property
@@ -188,6 +192,8 @@ class NetworkClient:
             raise RuntimeError("NetworkClient.run() may only be called once")
         self._run_started = True
         self._stop_requested = False
+        self._stop_event.clear()
+        self._sequence_gap_previous_seq = None
         disconnected_since: float | None = None
         retry_number = 0
 
@@ -259,6 +265,7 @@ class NetworkClient:
         """Request a graceful stop and close the active transport."""
 
         self._stop_requested = True
+        self._stop_event.set()
         if self._run_started and not self._event_stream_closed:
             await self._set_lifecycle(ClientLifecycle.STOPPING)
         await self._close_socket()
@@ -348,7 +355,11 @@ class NetworkClient:
         self._connected_once_in_generation = False
         self._join_request_sent = False
         self._resume_request_sent = False
+        self._resume_last_seq_requested = (
+            self._checkpoint.last_seq if self._checkpoint is not None else None
+        )
         self._resume_sync_required = False
+        self._sync_deadline = None
         self._background_failure = None
         await self._set_lifecycle(
             ClientLifecycle.RESUMING if self._checkpoint is not None else ClientLifecycle.JOINING
@@ -357,14 +368,14 @@ class NetworkClient:
         socket: Socket | None = None
         try:
             try:
-                socket, _owner = await asyncio.wait_for(
-                    self._open_socket(), self.config.connect_timeout_seconds
-                )
+                socket, _owner = await self._open_socket_or_stop()
             except asyncio.TimeoutError as error:
                 raise _TransientFailure("connect_timeout") from error
             except (OSError, ConnectionError) as error:
                 raise _TransientFailure("connect_failed") from error
             self._socket = socket
+            if self._stop_requested:
+                raise _TransientFailure("stopped")
             self._outbound = asyncio.Queue(maxsize=self.config.outbound_command_capacity)
             self._sender_task = asyncio.create_task(self._sender_loop(socket, generation))
 
@@ -384,6 +395,9 @@ class NetworkClient:
                     },
                     generation,
                 )
+            self._sync_deadline = (
+                asyncio.get_running_loop().time() + self.config.sync_timeout_seconds
+            )
             await self._set_lifecycle(ClientLifecycle.SYNCHRONIZING)
             await self._send_request("session.ready", {}, generation)
 
@@ -419,10 +433,36 @@ class NetworkClient:
             await self._close_socket()
             await self._stop_sender()
             self._state.invalidate_actions()
+            self._sync_deadline = None
             self._socket = None
             self._outbound = None
 
         return _GenerationOutcome(connected=self._connected_once_in_generation)
+
+    async def _open_socket_or_stop(self) -> tuple[Socket, Any | None]:
+        connect_task = asyncio.create_task(self._open_socket())
+        stop_task = asyncio.create_task(self._stop_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {connect_task, stop_task},
+                timeout=self.config.connect_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if connect_task in done:
+                return await connect_task
+            if stop_task in done or self._stop_requested:
+                connect_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await connect_task
+                raise _TransientFailure("stopped")
+            connect_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await connect_task
+            raise asyncio.TimeoutError()
+        finally:
+            stop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stop_task
 
     async def _open_socket(self) -> tuple[Socket, Any | None]:
         candidate = self._connector(self.config.uri)
@@ -438,7 +478,14 @@ class NetworkClient:
         if receiver is None:
             raise TypeError("WebSocket connection has no recv()")
         if self._awaiting_sync:
-            return await asyncio.wait_for(receiver(), self.config.sync_timeout_seconds)
+            if self._sync_deadline is None:
+                self._sync_deadline = (
+                    asyncio.get_running_loop().time() + self.config.sync_timeout_seconds
+                )
+            remaining = self._sync_deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            return await asyncio.wait_for(receiver(), remaining)
         return await receiver()
 
     async def _accept_server_message(self, raw_message: str | bytes) -> None:
@@ -456,6 +503,34 @@ class NetworkClient:
         message_type = message["type"]
         is_sync_barrier = message_type == "game.state_sync" and self._awaiting_sync
 
+        expected_ack = "session.resumed" if self._checkpoint is not None else "session.joined"
+        if message_type in {"session.joined", "session.resumed"}:
+            if message_type != expected_ack or self._authenticated:
+                raise _FatalFailure(
+                    ClientExitReason.INVALID_SERVER_MESSAGE,
+                    f"unexpected authentication response: {message_type}",
+                )
+            if message_type == "session.resumed":
+                if (
+                    not self._resume_request_sent
+                    or message["payload"]["last_seq"] != self._resume_last_seq_requested
+                ):
+                    raise _FatalFailure(
+                        ClientExitReason.INVALID_SERVER_MESSAGE,
+                        "session.resumed does not match the requested checkpoint",
+                    )
+            elif not self._join_request_sent:
+                raise _FatalFailure(
+                    ClientExitReason.INVALID_SERVER_MESSAGE,
+                    "session.joined was not requested",
+                )
+
+        if is_sync_barrier and not self._authenticated:
+            raise _FatalFailure(
+                ClientExitReason.INVALID_SERVER_MESSAGE,
+                "game.state_sync arrived before session authentication",
+            )
+
         if (
             self._resume_request_sent
             and self._awaiting_sync
@@ -470,6 +545,8 @@ class NetworkClient:
                 )
             )
             self._resume_sync_required = True
+            if self._sequence_gap_previous_seq is None:
+                self._sequence_gap_previous_seq = previous_seq
             self._authenticated = True
             self._state.apply_server_event(message)
             await self._publish(self._server_event(message))
@@ -490,6 +567,8 @@ class NetworkClient:
                     connection_generation=self._connection_generation,
                 )
             )
+            if self._sequence_gap_previous_seq is None:
+                self._sequence_gap_previous_seq = previous_seq
             raise _TransientFailure("sequence_gap")
 
         self._state.apply_server_event(message)
@@ -532,14 +611,15 @@ class NetworkClient:
             )
 
         if is_sync_barrier:
-            if sequence > previous_seq + 1 and previous_seq > 0:
+            if self._sequence_gap_previous_seq is not None:
                 await self._publish(
                     SequenceGapRecovered(
-                        previous_seq=previous_seq,
+                        previous_seq=self._sequence_gap_previous_seq,
                         recovered_seq=sequence,
                         connection_generation=self._connection_generation,
                     )
                 )
+                self._sequence_gap_previous_seq = None
             self._awaiting_sync = False
             self._resume_sync_required = False
             self._connected_once_in_generation = True
@@ -566,7 +646,11 @@ class NetworkClient:
     async def _send_request(
         self, message_type: str, payload: Mapping[str, Any], generation: int
     ) -> SendReceipt:
-        if generation != self._connection_generation or self._outbound is None:
+        if (
+            self._stop_requested
+            or generation != self._connection_generation
+            or self._outbound is None
+        ):
             raise NotDeliveredError("connection generation is no longer active")
         message = make_client_request(
             message_type,
@@ -608,6 +692,9 @@ class NetworkClient:
         queue = self._outbound
         while True:
             command = await queue.get()
+            if self._stop_requested:
+                await self._complete_not_delivered(command, "client_stopping")
+                return
             if command.generation != generation:
                 await self._complete_not_delivered(command, "stale_generation")
                 continue
