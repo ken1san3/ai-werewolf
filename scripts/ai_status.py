@@ -137,7 +137,7 @@ def print_design_gate() -> None:
     for path in documents:
         status, approved = design_status(path)
         print(f"target subphase: {design_phase_label(path)}: DESIGN: REQUIRED")
-        print(f"design document: {path.relative_to(ROOT)}")
+        print(f"design document: {path.relative_to(ROOT).as_posix()}")
         print(f"Status: {status}")
         print(f"approved: {'yes' if approved else 'no'}")
 
