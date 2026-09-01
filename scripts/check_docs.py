@@ -106,6 +106,12 @@ def check_review_inbox() -> None:
     severities = set(re.findall(r"(?m)^## R-\d{8}-\d+ \[\w+\] (\w+)", text))
     for severity in sorted(severities - {"Critical", "High", "Medium", "Low"}):
         fail("review-inbox", f"未定義の重要度 {severity} がある")
+    completed = re.findall(
+        r"(?m)^## (R-\d{8}-\d+) \[(FIXED|REJECTED|DEFERRED)\]",
+        text,
+    )
+    for rid, state in completed:
+        fail("review-inbox", f"{rid} [{state}] が REVIEW_INBOX.md に残っている")
     for block in re.split(r"(?m)^(?=## R-)", text):
         m = re.match(r"## (R-\d{8}-\d+) \[FIXED\]", block)
         if m and "\nFix:" not in block:
