@@ -44,18 +44,44 @@ class DesignGateTests(unittest.TestCase):
         output = io.StringIO()
         with patch.object(ai_status, "design_gate_documents", return_value=[request]):
             with redirect_stdout(output):
-                ai_status.print_design_gate("Target subphase: 3.1\n")
+                ai_status.print_design_gate(
+                    "Target subphase: 3.1\nDesign gate: REQUIRED\n"
+                )
         self.assertIn("_DESIGN.md が無い", output.getvalue())
         self.assertIn("implementation: blocked", output.getvalue())
 
-    def test_missing_request_is_unknown_and_blocked(self) -> None:
+    def test_not_required_is_allowed_without_request(self) -> None:
         output = io.StringIO()
         with patch.object(ai_status, "design_gate_documents", return_value=[]):
             with redirect_stdout(output):
-                ai_status.print_design_gate("Target subphase: 3.1\n")
+                ai_status.print_design_gate(
+                    "Target subphase: 1.4\nDesign gate: NOT REQUIRED\n"
+                )
+        self.assertIn("DESIGN: NOT REQUIRED", output.getvalue())
+        self.assertIn("implementation: allowed", output.getvalue())
+
+    def test_required_without_request_is_unknown_and_blocked(self) -> None:
+        output = io.StringIO()
+        with patch.object(ai_status, "design_gate_documents", return_value=[]):
+            with redirect_stdout(output):
+                ai_status.print_design_gate(
+                    "Target subphase: 3.1\nDesign gate: REQUIRED\n"
+                )
         self.assertIn("UNKNOWN", output.getvalue())
-        self.assertNotIn("NOT REQUIRED", output.getvalue())
         self.assertIn("implementation: blocked", output.getvalue())
+
+    def test_missing_or_invalid_gate_is_unknown_and_blocked(self) -> None:
+        declarations = (
+            "",
+            "Design gate: LATER\n",
+            "Design gate: REQUIRED\nDesign gate: NOT REQUIRED\n",
+        )
+        for declaration in declarations:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                ai_status.print_design_gate(f"Target subphase: 3.1\n{declaration}")
+            self.assertIn("UNKNOWN", output.getvalue())
+            self.assertIn("implementation: blocked", output.getvalue())
 
     def test_docs_checker_rejects_invalid_status(self) -> None:
         check_docs.problems.clear()
@@ -67,6 +93,41 @@ class DesignGateTests(unittest.TestCase):
         ):
             check_docs.check_design_gate_status()
         self.assertTrue(any("許可語彙外" in problem for problem in check_docs.problems))
+
+    def test_docs_checker_allows_not_required_without_request(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        with (
+            patch.object(check_docs, "read", return_value="## 1.4\n"),
+            patch.object(check_docs.ai_status, "target_subphase", return_value="1.4"),
+            patch.object(check_docs.ai_status, "design_gate", return_value="NOT REQUIRED"),
+            patch.object(check_docs.ai_status, "design_gate_documents", return_value=[]),
+        ):
+            check_docs.check_design_target()
+        self.assertEqual(check_docs.problems, [])
+
+    def test_docs_checker_rejects_gate_request_mismatches(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        request = Path("PHASE3_1_NETWORK_CLIENT_REQUEST.md")
+        with (
+            patch.object(check_docs, "read", return_value="## 3.1\n"),
+            patch.object(check_docs.ai_status, "target_subphase", return_value="3.1"),
+            patch.object(check_docs.ai_status, "design_gate", return_value="REQUIRED"),
+            patch.object(check_docs.ai_status, "design_gate_documents", return_value=[]),
+        ):
+            check_docs.check_design_target()
+        self.assertTrue(any("REQUEST が1件無い" in problem for problem in check_docs.problems))
+
+        check_docs.problems.clear()
+        with (
+            patch.object(check_docs, "read", return_value="## 3.1\n"),
+            patch.object(check_docs.ai_status, "target_subphase", return_value="3.1"),
+            patch.object(check_docs.ai_status, "design_gate", return_value="NOT REQUIRED"),
+            patch.object(check_docs.ai_status, "design_gate_documents", return_value=[request]),
+        ):
+            check_docs.check_design_target()
+        self.assertTrue(any("NOT REQUIRED" in problem for problem in check_docs.problems))
 
 
 if __name__ == "__main__":

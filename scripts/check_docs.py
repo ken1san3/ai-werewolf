@@ -122,16 +122,30 @@ def check_runbook_sections() -> None:
 
 # --- 5b. Design Gate の対象と Status 語彙が機械判定できるか ---------------
 def check_design_target() -> None:
-    target = ai_status.target_subphase(read(CURRENT_STATE))
+    state = read(CURRENT_STATE)
+    target = ai_status.target_subphase(state)
     if target is None:
         fail("design-target", "CURRENT_STATE.md に Target subphase: 行が無い")
+        return
+    decision = ai_status.design_gate(state)
+    if decision is None:
+        fail(
+            "design-target",
+            "CURRENT_STATE.md に Design gate: REQUIRED / NOT REQUIRED の宣言が無い、重複、または語彙外",
+        )
         return
     if not re.search(
         rf"(?m)^## {re.escape(target)}(?:\s|$)",
         read(DOCS / "ROADMAP.md"),
     ):
         fail("design-target", f"Target subphase {target} の ROADMAP 節が無い")
-    if len(ai_status.design_gate_documents(target)) != 1:
+    requests = ai_status.design_gate_documents(target)
+    if decision == "NOT REQUIRED" and requests:
+        fail(
+            "design-target",
+            f"Target subphase {target} は Design gate: NOT REQUIRED なのに DESIGN: REQUIRED の REQUEST がある",
+        )
+    elif decision == "REQUIRED" and len(requests) != 1:
         fail(
             "design-target",
             f"Target subphase {target} に DESIGN: REQUIRED の REQUEST が1件無い",

@@ -34,6 +34,8 @@ STATUS_VALUE = re.compile(
     r"^(REQUESTED|DRAFT|IN_REVIEW|APPROVED|SUPERSEDED)(?:\s+—(?:\s.*)?)?$"
 )
 TARGET_SUBPHASE_LINE = re.compile(r"(?m)^Target subphase:\s*([0-9]+(?:\.[0-9]+)*)\s*$")
+DESIGN_GATE_LINE = re.compile(r"(?m)^Design gate:\s*(.*?)\s*$")
+DESIGN_GATE_VALUES = {"REQUIRED", "NOT REQUIRED"}
 
 
 def section(text: str, heading: str) -> str:
@@ -108,6 +110,18 @@ def target_subphase(state: str | None = None) -> str | None:
     return match.group(1) if match else None
 
 
+def design_gate(state: str | None = None) -> str | None:
+    """Return the explicitly declared two-value Design Gate decision."""
+
+    if state is None:
+        state = read(AI / "CURRENT_STATE.md")
+    declarations = DESIGN_GATE_LINE.findall(state)
+    if len(declarations) != 1:
+        return None
+    value = declarations[0].strip()
+    return value if value in DESIGN_GATE_VALUES else None
+
+
 def design_phase_key(path: Path) -> str | None:
     match = re.match(r"^PHASE(\d+(?:_\d+)*)_", path.stem, flags=re.IGNORECASE)
     return match.group(1).replace("_", ".") if match else None
@@ -170,7 +184,26 @@ def print_design_gate(state: str) -> None:
         print("target subphase: UNKNOWN — CURRENT_STATE に Target subphase が無い")
         print("implementation: blocked")
         return
+    decision = design_gate(state)
+    if decision is None:
+        print(
+            f"target subphase: Phase {target}: UNKNOWN — Design gate: "
+            "REQUIRED / NOT REQUIRED の宣言が無い、重複、または語彙外"
+        )
+        print("implementation: blocked")
+        return
     requests = design_gate_documents(target)
+    if decision == "NOT REQUIRED":
+        if requests:
+            print(
+                f"target subphase: Phase {target}: UNKNOWN — "
+                "Design gate: NOT REQUIRED に DESIGN: REQUIRED の依頼書がある"
+            )
+            print("implementation: blocked")
+            return
+        print(f"target subphase: Phase {target}: DESIGN: NOT REQUIRED")
+        print("implementation: allowed")
+        return
     if len(requests) != 1:
         print(f"target subphase: Phase {target}: UNKNOWN — DESIGN: REQUIRED の依頼書を一意に決められない")
         print("implementation: blocked")
