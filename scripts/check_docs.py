@@ -28,6 +28,9 @@ DESIGN = DOCS / "spec" / "DESIGN.md"
 CURRENT_STATE = DOCS / "CURRENT_STATE.md"
 CORE = ROOT / "server" / "aiwolf_core"
 
+sys.path.insert(0, str(ROOT))
+from scripts import ai_status
+
 problems: list[str] = []
 
 
@@ -109,7 +112,15 @@ def check_review_inbox() -> None:
             fail("review-inbox", f"{m.group(1)} が FIXED なのに Fix: 行が無い")
 
 
-# --- 5. CURRENT_STATE の Next Task が実在ファイルを指すか -----------------
+# --- 5. ai_status が参照する RUNBOOK の role 節が実在するか ----------------
+def check_runbook_sections() -> None:
+    runbook = read(DOCS / "RUNBOOK.md")
+    for role, number in ai_status.ROLE_SECTIONS.items():
+        if not ai_status.runbook_section(runbook, number):
+            fail("runbook-section", f"role '{role}' の RUNBOOK §{number} が無い")
+
+
+# --- 6. CURRENT_STATE の Next Task が実在ファイルを指すか -----------------
 def check_next_task_file() -> None:
     text = read(CURRENT_STATE)
     section = re.search(r"(?ms)^## Next Task\s*\n(.*?)(?=^## |\Z)", text)
@@ -140,7 +151,7 @@ def check_next_task_file() -> None:
     )
 
 
-# --- 6. DESIGN が挙げるイベント名が実装に存在するか ---------------------------
+# --- 7. DESIGN が挙げるイベント名が実装に存在するか ---------------------------
 def check_event_names() -> None:
     core_events = set()
     for path in CORE.glob("*.py"):
@@ -177,7 +188,7 @@ def rule_key_paths(block: str) -> set[str]:
     return paths
 
 
-# --- 7. DESIGN §5 のルールキーが RulesConfig と一致するか ---------------------
+# --- 8. DESIGN §5 のルールキーが RulesConfig と一致するか ---------------------
 def check_rule_keys() -> None:
     design = read(DESIGN)
     block = re.search(r"# content/presets/standard_9\.yaml\nrules:\n(.*?)\n\nroles:", design, re.S)
@@ -198,7 +209,7 @@ def check_rule_keys() -> None:
         fail("rule-keys", f"standard_9.yaml に `{key}` があるが DESIGN §5 に無い")
 
 
-# --- 8. DESIGN §11 の役職一覧が content と一致するか --------------------------
+# --- 9. DESIGN §11 の役職一覧が content と一致するか --------------------------
 def check_role_table() -> None:
     design = read(DESIGN)
     table = re.search(r"(?ms)^## 11\. 初期実装役職.*?^\n(\| id \|.*?)\n\n", design)
@@ -213,7 +224,7 @@ def check_role_table() -> None:
         fail("role-table", f"content/roles に `{role}` があるが DESIGN §11 に無い")
 
 
-# --- 9. DESIGN が挙げるチャネル / 死因が content registry にあるか ------------
+# --- 10. DESIGN が挙げるチャネル / 死因が content registry にあるか ------------
 def check_registry_ids() -> None:
     design = read(DESIGN)
     channels = set(re.findall(r"(?m)^  - id: (\w+)", read(ROOT / "content" / "chat_channels.yaml")))
@@ -234,14 +245,14 @@ def check_registry_ids() -> None:
                 fail("death-cause", f"DESIGN §7.2 の `{name}` が death_causes.yaml に無い")
 
 
-# --- 10. TEST_POLICY の節が担当 Phase を宣言しているか ------------------------
+# --- 11. TEST_POLICY の節が担当 Phase を宣言しているか ------------------------
 def check_test_policy_phases() -> None:
     for line in read(DOCS / "TEST_POLICY.md").splitlines():
         if line.startswith("## ") and re.match(r"## \d+\.", line) and "［" not in line:
             fail("test-policy", f"担当 Phase の表記が無い: {line}")
 
 
-# --- 11. 文書が挙げる rules.<path> が RulesConfig に存在するか ----------------
+# --- 12. 文書が挙げる rules.<path> が RulesConfig に存在するか ----------------
 def future_rule_keys() -> set[str]:
     """DESIGN §5 で「未実装」と注記されたルールキー。実装より先に書いてよい。"""
 
@@ -269,7 +280,7 @@ def check_rule_paths() -> None:
                 fail("rule-path", f"{path.relative_to(ROOT)} の rules.{ref} に無い項目 `{unknown[0]}`")
 
 
-# --- 12. 実装の乱数イベントが DESIGN §10 の表にあるか -------------------------
+# --- 13. 実装の乱数イベントが DESIGN §10 の表にあるか -------------------------
 def check_random_event_table() -> None:
     design = read(DESIGN)
     table = re.search(r"(?ms)^\| ランダム要素 \| イベント \|\n(.*?)\n\n", design)
@@ -285,7 +296,7 @@ def check_random_event_table() -> None:
             fail("random-table", f"乱数イベント `{name}` が DESIGN §10 の表に無い")
 
 
-# --- 13. ROADMAP が参照する TEST_POLICY 節が存在するか ------------------------
+# --- 14. ROADMAP が参照する TEST_POLICY 節が存在するか ------------------------
 def check_test_policy_refs() -> None:
     sections = set(re.findall(r"(?m)^## (\d+)\.", read(DOCS / "TEST_POLICY.md")))
     roadmap = read(DOCS / "ROADMAP.md")
@@ -297,13 +308,14 @@ def check_test_policy_refs() -> None:
                 fail("test-policy-ref", f"ROADMAP が TEST_POLICY §{ref} を参照するが節が無い")
 
 
-# --- 14. セッション入口を構成する文書のサイズ上限 ---------------------
+# --- 15. セッション入口を構成する文書のサイズ上限 ---------------------
 # AGENTS.md と ai_status.py の出力元が伸びると、全セッションのコストが
 # 恒久的に上がる。上限は引き上げず、古い記録を review_archive/ へ退避する。
 SESSION_CONTEXT_LIMITS = {
     ROOT / "AGENTS.md": 8000,
     DOCS / "CURRENT_STATE.md": 12000,
     DOCS / "REVIEW_INBOX.md": 24000,
+    DOCS / "ROADMAP.md": 10000,
     DOCS / "RUNBOOK.md": 16000,
 }
 
@@ -313,7 +325,12 @@ def check_session_context_size() -> None:
         if not path.exists():
             fail("doc-size", f"{path.name} が見つからない")
             continue
-        size = len(read(path))
+        content = read(path)
+        size = (
+            sum(len(block) for block in ai_status.active_review_blocks(content))
+            if path == DOCS / "REVIEW_INBOX.md"
+            else len(content)
+        )
         if size > limit:
             fail(
                 "doc-size",
@@ -328,6 +345,7 @@ def main() -> int:
         check_decision_refs,
         check_open_questions,
         check_review_inbox,
+        check_runbook_sections,
         check_next_task_file,
         check_event_names,
         check_rule_keys,

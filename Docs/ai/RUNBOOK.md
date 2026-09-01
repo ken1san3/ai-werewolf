@@ -27,7 +27,8 @@ Docs/ai/TEST_POLICY.md  ← 対象サブPhaseに関係するカテゴリのみ
 
 `AGENTS.md` はセッション開始時に既に読み込む。`ai_status.py` の出力と
 そこが指定した範囲以外は、必要になってから読む。リポジトリ全体を読まない。
-`review_archive/` は追記専用の過去記録であり、通常のセッションでは読まない。
+`review_archive/` は過去の記録であり、現在の状態を書き足さない。FIXED /
+REJECTED / DEFERRED の指摘はここへ退避し、通常のセッションでは読まない。
 
 `Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` は元になった旧仕様であり、
 DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先する。**

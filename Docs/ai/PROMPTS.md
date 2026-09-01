@@ -1,7 +1,9 @@
 # Prompts
 
-通常運用でユーザーが打つのは次の3つだけ。手順は `RUNBOOK.md` にあり、
-各エージェントは `AGENTS.md` の冒頭からそこへ辿る。
+通常運用でユーザーが打つのは次の3つだけ。各エージェントは `AGENTS.md` を
+読んだあと、指示に応じて
+`python scripts/ai_status.py implement` または
+`python scripts/ai_status.py fix` を実行する。
 
 ```
 Phase X.Y を実装して
@@ -9,7 +11,7 @@ Phase X.Y を実装して
 レビュー内容を確認して修正して
 ```
 
-フェーズ番号を省略すると `CURRENT_STATE.md` の Next Task が使われる。
+フェーズ番号を省略すると `ai_status.py` の出力にある Next Task が使われる。
 
 方向性の変更・新しい仕様判断・スコープの変更は、この3つの外側であり、
 ユーザーが個別に指示する。
@@ -22,22 +24,21 @@ Codex の新しいチャットで、AGENTS.md を自動で読まない場合の�
 2回目以降は不要。
 
 ```
-このリポジトリは AGENTS.md と Docs/ai/RUNBOOK.md に作業手順が書いてある。
+このリポジトリの恒久ルールは AGENTS.md にある。
 
-セッション開始時に必ず次を読むこと:
-1. AGENTS.md
-2. Docs/ai/RUNBOOK.md
+セッション開始時に必ず AGENTS.md を読み、指示に応じて次を実行すること:
+1. Phase の実装: `python scripts/ai_status.py implement`
+2. レビュー内容の修正: `python scripts/ai_status.py fix`
 
 以降、私は次の3つしか指示しない。
 
-- 「Phase X.Y を実装して」   → RUNBOOK §1 の手順で実装する
-- 「レビュー内容を確認して修正して」→ RUNBOOK §3 の手順で修正する
+- 「Phase X.Y を実装して」   → `python scripts/ai_status.py implement`
+- 「レビュー内容を確認して修正して」→ `python scripts/ai_status.py fix`
 
 （「レビューして」は別のエージェントが担当するので、あなたは実行しない）
 
-指示を受けたら、追加の質問をせずに RUNBOOK の手順どおり進めること。
-スコープは Docs/ai/ROADMAP.md の該当サブPhaseにある。
-仕様に疑問が出たら Docs/ai/OPEN_QUESTIONS.md へ起票し、
+指示を受けたら、追加の質問をせずに `ai_status.py` の出力に従って進めること。
+仕様に疑問が出たら `OPEN_QUESTIONS.md` へ起票し、
 避けて進められるなら続行、進められないなら止めて報告する。
 ```
 
@@ -51,18 +52,19 @@ Codex の新しいチャットで、AGENTS.md を自動で読まない場合の�
 ここに書くのは、リポジトリを読んでも分からない環境の話だけ。
 
 ```
-このリポジトリの作業手順は AGENTS.md と Docs/ai/RUNBOOK.md にある。
-まずこの2つを読み、続けて Docs/ai/CURRENT_STATE.md と
-Docs/ai/REVIEW_INBOX.md を読むこと。リポジトリ全体は読まない。
+このリポジトリの恒久ルールは AGENTS.md にあり、動的な作業手順は
+`python scripts/ai_status.py <role>` の出力で決まる。
+まず AGENTS.md を読み、指示に応じて `python scripts/ai_status.py implement`
+または `python scripts/ai_status.py fix` を実行すること。リポジトリ全体は読まない。
 
 あなたは Implementer（Codex）。私が打つ指示は次の2つだけ。
 
-- 「Phase X.Y を実装して」「次のフェーズを実装して」 → RUNBOOK §1
-- 「レビュー内容を確認して修正して」            → RUNBOOK §3
+- 「Phase X.Y を実装して」「次のフェーズを実装して」 → `python scripts/ai_status.py implement`
+- 「レビュー内容を確認して修正して」            → `python scripts/ai_status.py fix`
 
 「レビューして」は別のエージェント（Claude）が担当する。あなたは実行しない。
-指示を受けたら追加の質問をせず、RUNBOOK の手順どおり進めること。
-仕様に疑問が出たら Docs/ai/OPEN_QUESTIONS.md へ起票し、
+指示を受けたら追加の質問をせず、`ai_status.py` の出力どおり進めること。
+仕様に疑問が出たら `OPEN_QUESTIONS.md` へ起票し、
 避けて進められるなら続行、進められないなら止めて報告する。
 
 リポジトリを読んでも分からない環境の話:
@@ -74,5 +76,5 @@ Docs/ai/REVIEW_INBOX.md を読むこと。リポジトリ全体は読まない�
 - git の index.lock が残って操作が止まることがある。対処は F003
 - push は私が行う。あなたはコミットまで
 
-まず Docs/ai/CURRENT_STATE.md の Next Task を確認して。
+指示に対応する `ai_status.py` の出力を確認してから作業を始めること。
 ```

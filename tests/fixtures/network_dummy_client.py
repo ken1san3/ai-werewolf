@@ -38,12 +38,45 @@ def write_json(path: Path, value: dict[str, object]) -> None:
     temporary.replace(path)
 
 
-async def send_available_action(socket, game_id: str, payload: dict[str, object]) -> None:
+async def send_available_action(
+    socket,
+    game_id: str,
+    payload: dict[str, object],
+    sent_day_actions: set[tuple[int, str]],
+) -> None:
     actions = payload.get("actions")
     if not isinstance(actions, list):
         return
+    phase = payload.get("phase")
+    day = payload.get("day")
+    daytime = phase == "day" and isinstance(day, int)
     for action in actions:
         if not isinstance(action, dict):
+            continue
+        if daytime and action.get("type") == "chat":
+            channel_id = action.get("channel")
+            key = (day, "chat")
+            if isinstance(channel_id, str) and key not in sent_day_actions:
+                await socket.send(request("chat.send", game_id, {
+                    "channel_id": channel_id,
+                    "message": "The discussion is open.",
+                }))
+                sent_day_actions.add(key)
+            continue
+        if daytime and action.get("type") == "co_declare":
+            claimed_role_ids = action.get("claimed_role_ids")
+            key = (day, "co_declare")
+            if (
+                isinstance(claimed_role_ids, list)
+                and claimed_role_ids
+                and isinstance(claimed_role_ids[0], str)
+                and key not in sent_day_actions
+            ):
+                await socket.send(request("co.declare", game_id, {
+                    "claimed_role_id": claimed_role_ids[0],
+                    "comment": "I claim this role.",
+                }))
+                sent_day_actions.add(key)
             continue
         if action.get("type") == "vote":
             targets = action.get("valid_targets")
@@ -76,6 +109,8 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
     resumed = credentials is not None
     last_seq = int(credentials["last_seq"]) if credentials is not None else 0
     connection_token = str(credentials["connection_token"]) if credentials is not None else ""
+    sent_day_actions: set[tuple[int, str]] = set()
+    co_declared = False
     async with connect(uri) as socket:
         if resumed:
             await socket.send(request("session.resume", game_id, {
@@ -98,9 +133,16 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                     "last_seq": last_seq,
                 })
             if message.get("type") == "game.state_sync":
-                await send_available_action(socket, game_id, message["payload"]["action_state"])
+                await send_available_action(
+                    socket, game_id, message["payload"]["action_state"], sent_day_actions
+                )
             elif message.get("type") == "player.action_state":
-                await send_available_action(socket, game_id, message["payload"])
+                await send_available_action(socket, game_id, message["payload"], sent_day_actions)
+            elif (
+                message.get("type") == "game.event"
+                and message["payload"].get("event_type") == "CO_DECLARED"
+            ):
+                co_declared = True
             elif (
                 message.get("type") == "game.event"
                 and message["payload"].get("event_type") == "GAME_ENDED"
@@ -110,6 +152,7 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                     "pid": os.getpid(),
                     "resumed": resumed,
                     "last_seq": last_seq,
+                    "co_declared": co_declared,
                 })
                 return
 

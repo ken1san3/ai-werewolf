@@ -79,7 +79,7 @@ def active_review_blocks(inbox: str) -> list[str]:
     active: list[tuple[int, str]] = []
     pattern = re.compile(
         r"(?ms)^## R-\d{8}-\d+ \[(OPEN|IN_PROGRESS)\] "
-        r"(\w+)\s*\n.*?(?=^## R-|\Z)"
+        r"(\w+)\s*\n.*?(?=^## |\Z)"
     )
     for match in pattern.finditer(inbox):
         severity = match.group(2)

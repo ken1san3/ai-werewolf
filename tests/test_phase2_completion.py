@@ -116,6 +116,7 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                     for player_id in game.players
                 }
                 self.assertTrue(all(status["game_end"] for status in statuses.values()))
+                self.assertTrue(any(status["co_declared"] for status in statuses.values()))
                 self.assertTrue(statuses[restarted_player]["resumed"])
                 self.assertEqual(len(observed_pids), len(game.players) + 1)
                 self.assertNotIn(os.getpid(), observed_pids)
@@ -124,6 +125,7 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                     len([event for event in game.event_bus.events if event.type == "GAME_ENDED"]),
                     1,
                 )
+                self.assertTrue(any(event.type == "CO_DECLARED" for event in game.event_bus.events))
                 manual_advance.assert_not_called()
                 manual_votes.assert_not_called()
             finally:
