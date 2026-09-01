@@ -3,18 +3,20 @@
 ユーザーが打つ言葉は3つだけ。各セッションは
 `python scripts/ai_status.py <role>` が出力する対応節で手順を決める。
 
-| ユーザーの指示 | 担当 | 手順 |
+| ユーザーの指示 | 送る先 | 手順 |
 |---|---|---|
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Codex | `implement` / §1 |
-| 「レビューして」 | Claude (Cowork) | `review` / §2 |
-| 「レビュー内容を確認して修正して」 | Codex | `fix` / §3 |
+| 「レビューして」 | Reviewer | `review` / §2 |
+| 「Phase X.Y を詳細設計して」 | Detailed Design | `design` / §4 |
+| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer | `implement` / §1 |
+| 「レビュー内容を確認して修正して」 | Implementer | `fix` / §3 |
 
 フェーズ番号が指定されなかった場合は `CURRENT_STATE.md` の Next Task に従う。
-方向性の変更や新しい仕様判断は、この3つのどれでもない。ユーザーが別途指示する。
+**次にどれを送るかは Reviewer が決め、Next Task に名指しで書く**（D051）。
+方向性の変更や新しい仕様判断は、この4つのどれでもない。ユーザーが別途指示する。
 
 ---
 
-## 1. 実装セッション（Codex / `implement`）
+## 1. 実装セッション（Implementer / `implement`）
 
 ### 1.1 開始時
 
@@ -36,6 +38,10 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 
 ### 1.2 着手前の確認
 
+- **Design Gate を通ったか確認する**（D051 / §2.5）。対象サブPhaseが
+  `DESIGN: REQUIRED` と判定されている場合、`Docs/ai/design/` に該当する詳細設計があり、
+  Reviewer の `DESIGN REVIEW: APPROVED` を受けているときだけ実装へ入る。
+  判定が無い、または設計が未承認なら、**実装せずユーザーへ報告して止まる**
 - `REVIEW_INBOX.md` に `[OPEN]` の Critical / High があれば、**新機能より先に対応する**
 - 未コミットの変更があれば先にコミットする
 - ROADMAP の「含まない」に書かれたものは実装しない
@@ -74,7 +80,7 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 
 ---
 
-## 2. レビューセッション（Claude / `review`）
+## 2. レビューセッション（Reviewer / `review`）
 
 実装は行わない。指摘を `REVIEW_INBOX.md` へ残す。
 
@@ -145,7 +151,29 @@ Verification:
   書き換えたら必ず走らせる。** 実装より先に書いたルールは DESIGN §5 の該当行へ
   「未実装（Phase X.Y）」と注記すれば検査を通る
 
-### 2.4 Implementation Design Gate（D051）
+### 2.4 報告の最後に「次に誰へ何を送るか」を書く
+
+**レビュー報告は必ずこれで締める。** ユーザーが判断せずに済む形で、
+そのまま送れる文面を1つ名指しする。省略しない。
+
+```
+## 次に送る指示
+
+→ <役割> / <model> へ「<そのまま打つ文面>」
+
+理由: 1〜2行
+並行して送れるもの: あれば1行（無ければ書かない）
+先に潰すべきもの: あれば1行
+```
+
+対応表は `AGENTS.md` の「このリポジトリの動かし方」にある。ここへ複製しない。
+同じ内容を `CURRENT_STATE.md` の Next Task にも残す。
+**チャットだけに書かない。**
+
+複数を並行して送れるときも、**最初に送る1つを先頭に置く。**
+「どれでもよい」と書かない。順序に理由があるならそれを書く。
+
+### 2.5 Implementation Design Gate（D051）
 
 **新しい実装タスクへ進む前に、Reviewer が2値で判定する。**
 判定リストに当たれば必要、当たらなければ不要。迷いを理由に必要へ倒さない。
@@ -185,7 +213,7 @@ canonical design / accepted decision / protocol・schema と矛盾しないこ�
 
 ---
 
-## 3. レビュー修正セッション（Codex / `fix`）
+## 3. レビュー修正セッション（Implementer / `fix`）
 
 新機能は実装しない。
 
@@ -225,3 +253,50 @@ Critical → High → Medium → Low。
 
 報告は「対応した指摘ID / 変更したファイル / テスト結果 / 未対応と理由」を各数行。
 加えて**ローカルLLMを何に使ったか**を1〜2行（使わなかったならその理由）。D034。
+
+---
+
+## 4. 詳細設計セッション（Detailed Design / `design`）
+
+**実装しない。テストも書かない。** 成果物は `Docs/ai/design/` の Markdown 1枚。
+
+### 4.1 開始時
+
+```
+python scripts/ai_status.py design
+Docs/ai/design/<対象>_REQUEST.md  ← Reviewer が出した依頼書。これが入力
+Docs/ai/ROADMAP.md                ← 対象サブPhaseの 含む / 含まない / 完了条件
+依頼書の Relevant canonical sources が名指しした節とファイルだけ
+```
+
+依頼書が Out of scope に置いたものは設計しない。
+`ROADMAP.md` のスコープを設計側で広げない。広げたくなったら
+**設計へ書かず Reviewer へ報告する。**
+
+### 4.2 書く
+
+Purpose / Files・modules / Responsibilities / Public interfaces / Data flow /
+State・lifecycle / Main control flow / Failure handling /
+Concurrency assumptions / Explicitly out of scope / Acceptance criteria /
+Required tests。
+
+- **完成コードを書かない。関数内部を1行ずつ指定しない。**
+  シグネチャは公開 API に限る。内部ヘルパーは列挙しない
+- 依頼書の Questions must resolve には全部答える。
+  **採らなかった案と、採らなかった理由を1〜2行ずつ**添える
+- どちらでもよいと判断した点は「決めない」と明示する。
+  Implementer に暗黙の設計判断を残さない
+- canonical（`spec/DESIGN.md` / `ROADMAP.md` / schema / `decisions/`）と
+  矛盾したら設計を曲げる。canonical のほうを直したくなったら Reviewer へ報告する
+
+### 4.3 終了時
+
+```
+[ ] `Docs/ai/design/<対象>_DESIGN.md` を作成
+[ ] 先頭に `Status:` 行を置く（承認は Reviewer が書き換える）
+[ ] 依頼書の Questions must resolve に全部答えたか確認
+[ ] `python scripts/check_docs.py` を実行
+[ ] 実装へ渡さない。Reviewer の `DESIGN REVIEW: APPROVED` を待つ
+```
+
+報告は「決めたこと / 決めなかったこと / 依頼書から外れた点と理由」を各数行。

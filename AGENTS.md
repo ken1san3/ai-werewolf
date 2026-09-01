@@ -2,16 +2,23 @@
 
 ## このリポジトリの動かし方
 
-ユーザーが打つ指示は原則3つだけ。**指示を受けたら対応する
+ユーザーが打つ指示は原則4つだけ。**指示を受けたら対応する
 `python scripts/ai_status.py <role>` を実行し、出力された RUNBOOK 節に従う。
 ユーザーへ追加の指示を求めない。**
 
-| 指示 | 担当 | 手順 |
+| 指示 | 送る先（役割 / model） | 手順 |
 |---|---|---|
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer | `python scripts/ai_status.py implement` |
-| 「レビューして」 | Reviewer | `python scripts/ai_status.py review` |
-| 「レビュー内容を確認して修正して」 | Implementer | `python scripts/ai_status.py fix` |
+| 「レビューして」 | Reviewer / Claude | `python scripts/ai_status.py review` |
+| 「Phase X.Y を詳細設計して」 | Detailed Design / Sol | `python scripts/ai_status.py design` |
+| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer / Luna | `python scripts/ai_status.py implement` |
+| 「レビュー内容を確認して修正して」 | Implementer / Luna | `python scripts/ai_status.py fix` |
 
+**どれを送るかは Reviewer が決める。** 迷ったら「レビューして」を Reviewer へ送る。
+Reviewer が Design Gate（D051）で次の1手を名指しし、`CURRENT_STATE.md` の
+Next Task に残す。ユーザーはそれをそのまま送ればよい。
+
+- **実装の指示は、まず Design Gate を通る**（D051 / RUNBOOK §1.2 / §2.5）。
+  `DESIGN: REQUIRED` と判定されたサブPhaseは、承認済み詳細設計が無いかぎり実装しない
 - フェーズ番号の指定が無ければ `ai_status.py` が出力する Next Task に従う
 - スコープ（含む / 含まない / 完了条件）は `Docs/ai/ROADMAP.md` の該当サブPhaseにある
 - 判断に迷ったら `Docs/ai/OPEN_QUESTIONS.md` へ起票し、避けて進められるなら続行する
@@ -28,7 +35,7 @@
 | Detailed Design | Sol | Reviewer が必要と判定したタスクの詳細設計（D051） |
 | Reviewer / Design Gate | Claude | 詳細設計の要否判定 / 詳細設計レビュー / 仕様整合レビュー / REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備 |
 
-- **新しい実装タスクは Reviewer の Implementation Design Gate を通る**（D051 / RUNBOOK §2.4）。
+- **新しい実装タスクは Reviewer の Implementation Design Gate を通る**（D051 / RUNBOOK §2.5）。
   不要と判定すれば Implementer へ直行、必要なら Detailed Design → Reviewer 承認 → Implementer。
 - Reviewer は原則コードを書かない。指摘は `Docs/ai/REVIEW_INBOX.md` へ残し、修正は Implementer が行う。
 - Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。

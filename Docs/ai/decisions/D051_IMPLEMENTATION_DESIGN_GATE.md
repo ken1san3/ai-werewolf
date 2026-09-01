@@ -45,7 +45,11 @@ timeout・reconnect / network protocol との複雑な相互作用 / public API 
 変更影響が複数モジュールへ広がる / 実装方法が複数あり選択を誤ると手戻りが大きい /
 canonical design が目的だけを定め実装構造を定めていない / Phase の中核となる新機能。
 
-出力の形は `RUNBOOK.md` §4 に置く。
+出力の形は `RUNBOOK.md` のレビュー節に置く。
+
+**レビュー報告は必ず「次に誰へ何を送るか」で締める**（ユーザー決定 2026-09-01）。
+そのまま送れる文面を1つ名指しし、同じ内容を `CURRENT_STATE.md` の Next Task へ残す。
+ユーザーが送り先を判断しなくてよい状態にすることが、この門の出口である。
 
 **詳細設計の粒度。** 完成コードを書かせない。関数内部を1行ずつ指定しない。
 必要なのは Purpose / Files / Responsibilities / Public interfaces / Data flow /
