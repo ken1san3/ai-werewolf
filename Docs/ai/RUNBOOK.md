@@ -289,11 +289,35 @@ Required tests。
 - canonical（`spec/DESIGN.md` / `ROADMAP.md` / schema / `decisions/`）と
   矛盾したら設計を曲げる。canonical のほうを直したくなったら Reviewer へ報告する
 
-### 4.3 終了時
+### 4.3 ファイルと Status の約束
+
+`Docs/ai/design/` には対象サブPhaseごとに2枚だけ置く。
+
+| ファイル | 誰が書くか | 何のためか |
+|---|---|---|
+| `PHASE<N>_<M>_<名前>_REQUEST.md` | Reviewer | 依頼。`DESIGN: REQUIRED` の宣言 |
+| `PHASE<N>_<M>_<名前>_DESIGN.md` | Detailed Design | 成果物 |
+
+**`Status:` 行は先頭に1行、値は次の語のいずれか1つで始める。**
+そのあとに ` — 一言` を足してよいが、**語の前に何も置かない。**
+散文で「APPROVED 待ち」などと書かない（機械が承認済みと読む）。
+
+```
+REQUESTED   依頼を出した（REQUEST の既定値）
+DRAFT       設計を書いている途中
+IN_REVIEW   Reviewer のレビュー待ち
+APPROVED    Reviewer が承認した。実装へ渡してよい
+SUPERSEDED  作り直した。後継を1行で指す
+```
+
+**承認は `_DESIGN.md` の `Status:` に書く。** `_REQUEST.md` は `REQUESTED`
+のまま置く。Design Gate が実装可否を見るのは `_DESIGN.md` の側である。
+
+### 4.4 終了時
 
 ```
 [ ] `Docs/ai/design/<対象>_DESIGN.md` を作成
-[ ] 先頭に `Status:` 行を置く（承認は Reviewer が書き換える）
+[ ] 先頭に `Status: IN_REVIEW` を置く（`APPROVED` へ変えるのは Reviewer）
 [ ] 依頼書の Questions must resolve に全部答えたか確認
 [ ] `python scripts/check_docs.py` を実行
 [ ] 実装へ渡さない。Reviewer の `DESIGN REVIEW: APPROVED` を待つ

@@ -120,13 +120,37 @@ def check_runbook_sections() -> None:
             fail("runbook-section", f"role '{role}' の RUNBOOK §{number} が無い")
 
 
-# --- 5b. Design Gate の必須文書に機械判定用 Status があるか -------------
+# --- 5b. Design Gate の対象と Status 語彙が機械判定できるか ---------------
+def check_design_target() -> None:
+    target = ai_status.target_subphase(read(CURRENT_STATE))
+    if target is None:
+        fail("design-target", "CURRENT_STATE.md に Target subphase: 行が無い")
+        return
+    if not re.search(
+        rf"(?m)^## {re.escape(target)}(?:\s|$)",
+        read(DOCS / "ROADMAP.md"),
+    ):
+        fail("design-target", f"Target subphase {target} の ROADMAP 節が無い")
+    if len(ai_status.design_gate_documents(target)) != 1:
+        fail(
+            "design-target",
+            f"Target subphase {target} に DESIGN: REQUIRED の REQUEST が1件無い",
+        )
+
+
 def check_design_gate_status() -> None:
-    for path in ai_status.design_gate_documents():
-        if not re.search(r"(?m)^Status:\s*\S", read(path)):
+    design_dir = DOCS / "design"
+    if not design_dir.is_dir():
+        fail("design-status", "Docs/ai/design/ が見つからない")
+        return
+    for path in sorted(design_dir.glob("*.md")):
+        status, valid = ai_status.design_status(path)
+        if status.startswith("(missing") or status.startswith("(empty"):
+            fail("design-status", f"{path.relative_to(ROOT)} に Status: 行が無い")
+        elif valid is None:
             fail(
                 "design-status",
-                f"{path.relative_to(ROOT)} は DESIGN: REQUIRED だが Status: 行が無い",
+                f"{path.relative_to(ROOT)} の Status: '{status}' は許可語彙外",
             )
 
 
@@ -360,6 +384,7 @@ def main() -> int:
         check_open_questions,
         check_review_inbox,
         check_runbook_sections,
+        check_design_target,
         check_design_gate_status,
         check_next_task_file,
         check_event_names,

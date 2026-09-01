@@ -2,7 +2,8 @@
 
 Issued by: Reviewer / Design Gate（2026-09-01、D051）
 For: Detailed Design
-Status: 未着手。成果物は Reviewer の `DESIGN REVIEW: APPROVED` を経るまで実装へ渡らない。
+Status: REQUESTED — 成果物 `PHASE3_1_NETWORK_CLIENT_DESIGN.md` が
+Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RUNBOOK §4.3）。
 
 ```
 DESIGN: REQUIRED

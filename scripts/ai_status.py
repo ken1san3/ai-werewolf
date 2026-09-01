@@ -30,6 +30,10 @@ AI = ROOT / "Docs" / "ai"
 ROLE_SECTIONS = {"implement": "1", "review": "2", "fix": "3", "design": "4"}
 DESIGN_REQUIRED_MARKER = re.compile(r"(?m)^DESIGN: REQUIRED\s*$")
 STATUS_LINE = re.compile(r"(?m)^Status:\s*(.*?)\s*$")
+STATUS_VALUE = re.compile(
+    r"^(REQUESTED|DRAFT|IN_REVIEW|APPROVED|SUPERSEDED)(?:\s+—(?:\s.*)?)?$"
+)
+TARGET_SUBPHASE_LINE = re.compile(r"(?m)^Target subphase:\s*([0-9]+(?:\.[0-9]+)*)\s*$")
 
 
 def section(text: str, heading: str) -> str:
@@ -95,51 +99,106 @@ def active_review_blocks(inbox: str) -> list[str]:
     return [block for _, block in active]
 
 
-def design_gate_documents() -> list[Path]:
-    """Return design documents that declare a required Design Gate."""
+def target_subphase(state: str | None = None) -> str | None:
+    """Return the single subphase selected by CURRENT_STATE."""
+
+    if state is None:
+        state = read(AI / "CURRENT_STATE.md")
+    match = TARGET_SUBPHASE_LINE.search(state)
+    return match.group(1) if match else None
+
+
+def design_phase_key(path: Path) -> str | None:
+    match = re.match(r"^PHASE(\d+(?:_\d+)*)_", path.stem, flags=re.IGNORECASE)
+    return match.group(1).replace("_", ".") if match else None
+
+
+def design_request_documents() -> list[Path]:
+    """Return all request files which explicitly require a Design Gate."""
 
     design_dir = AI / "design"
     if not design_dir.is_dir():
         return []
     return sorted(
         path
-        for path in design_dir.glob("*.md")
+        for path in design_dir.glob("*_REQUEST.md")
         if DESIGN_REQUIRED_MARKER.search(read(path))
     )
 
 
-def design_phase_label(path: Path) -> str:
-    match = re.search(r"PHASE(\d+(?:_\d+)*)", path.stem, flags=re.IGNORECASE)
-    return f"Phase {match.group(1).replace('_', '.')}" if match else path.stem
+def design_gate_documents(target: str | None = None) -> list[Path]:
+    """Return required request files for exactly one target subphase."""
+
+    target = target if target is not None else target_subphase()
+    if target is None:
+        return []
+    return [
+        path for path in design_request_documents() if design_phase_key(path) == target
+    ]
 
 
-def design_status(path: Path) -> tuple[str, bool]:
+def design_output_path(request: Path) -> Path:
+    suffix = "_REQUEST.md"
+    return request.with_name(request.name[:-len(suffix)] + "_DESIGN.md")
+
+
+def display_path(path: Path) -> str:
+    candidate = path if path.is_absolute() else ROOT / path
+    try:
+        return candidate.resolve().relative_to(ROOT).as_posix()
+    except (OSError, ValueError):
+        return path.as_posix()
+
+
+def design_status(path: Path) -> tuple[str, bool | None]:
     match = STATUS_LINE.search(read(path))
-    value = match.group(1).strip() if match else "(missing Status: line)"
-    approved = bool(
-        re.match(
-            r"^(?:DESIGN REVIEW:\s*)?APPROVED(?:\s|$)",
-            value,
-            flags=re.IGNORECASE,
-        )
-    )
-    return value, approved
+    if match is None:
+        return "(missing Status: line)", None
+    value = match.group(1).strip()
+    status_match = STATUS_VALUE.fullmatch(value)
+    if status_match is None:
+        return value or "(empty Status: line)", None
+    return value, status_match.group(1) == "APPROVED"
 
 
-def print_design_gate() -> None:
+def print_design_gate(state: str) -> None:
     print("=" * 60)
     print("DESIGN GATE")
     print("=" * 60)
-    documents = design_gate_documents()
-    if not documents:
-        print("target subphase: DESIGN: NOT REQUIRED (no declarative design marker)")
+    target = target_subphase(state)
+    if target is None:
+        print("target subphase: UNKNOWN — CURRENT_STATE に Target subphase が無い")
+        print("implementation: blocked")
         return
-    for path in documents:
-        status, approved = design_status(path)
-        print(f"target subphase: {design_phase_label(path)}: DESIGN: REQUIRED")
-        print(f"design document: {path.relative_to(ROOT).as_posix()}")
-        print(f"Status: {status}")
-        print(f"approved: {'yes' if approved else 'no'}")
+    requests = design_gate_documents(target)
+    if len(requests) != 1:
+        print(f"target subphase: Phase {target}: UNKNOWN — DESIGN: REQUIRED の依頼書を一意に決められない")
+        print("implementation: blocked")
+        return
+
+    request = requests[0]
+    design = design_output_path(request)
+    print(f"target subphase: Phase {target}: DESIGN: REQUIRED")
+    print(f"request document: {display_path(request)}")
+    if not design.is_file():
+        print(f"design document: {display_path(design)}")
+        print("Status: UNKNOWN — _DESIGN.md が無い")
+        print("approved: unknown")
+        print("implementation: blocked")
+        return
+
+    status, approved = design_status(design)
+    print(f"design document: {display_path(design)}")
+    print(f"Status: {status}")
+    if approved is True:
+        print("approved: yes")
+        print("implementation: allowed")
+    elif approved is False:
+        print("approved: no")
+        print("implementation: blocked")
+    else:
+        print("approved: unknown")
+        print("implementation: blocked")
 
 
 def parse_args() -> argparse.Namespace:
@@ -174,7 +233,7 @@ def main() -> int:
 
     if args.role == "implement":
         print()
-        print_design_gate()
+        print_design_gate(state)
 
     print()
     print("=" * 60)
