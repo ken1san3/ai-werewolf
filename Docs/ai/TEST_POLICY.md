@@ -146,6 +146,16 @@ ROADMAP の「TEST_POLICY 全項目」は、**その Phase が担当する節**�
 - [ ] `self_vote: false` で自分が候補に含まれない
 - [ ] `no_selection` の2値がそれぞれ正しく動く
 
+## ネットワーク Phase の検証の所在
+
+Phase 2.1〜2.3 / 2.5 / 2.6 には、この文書の項目単位の節を置かない。
+**検証の所在は ROADMAP の各サブPhaseの「完了条件」と、それを固定した名前付きテストである。**
+一覧は `handoffs/PHASE2_HANDOFF.md` の Completion Evidence にある。
+
+項目単位の節を持つのは §12（CO）だけで、これはルールの分岐が content 側にあり、
+振る舞いを列挙する価値があるため。ネットワークの他の節を後から作らない。
+**「TEST_POLICY に節が無い＝未検証」ではない。**
+
 ## 12. CO［Phase 2.4］
 
 - [ ] 回数制限を超えた `co.declare` が拒否される
