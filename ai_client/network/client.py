@@ -150,6 +150,7 @@ class NetworkClient:
         self._join_request_sent = False
         self._resume_request_sent = False
         self._join_retry_after_ambiguous = False
+        self._resume_sync_required = False
         self._background_failure: _FatalFailure | _TransientFailure | None = None
 
     @property
@@ -347,6 +348,7 @@ class NetworkClient:
         self._connected_once_in_generation = False
         self._join_request_sent = False
         self._resume_request_sent = False
+        self._resume_sync_required = False
         self._background_failure = None
         await self._set_lifecycle(
             ClientLifecycle.RESUMING if self._checkpoint is not None else ClientLifecycle.JOINING
@@ -453,6 +455,31 @@ class NetworkClient:
         previous_seq = self._state.last_seq
         message_type = message["type"]
         is_sync_barrier = message_type == "game.state_sync" and self._awaiting_sync
+
+        if (
+            self._resume_request_sent
+            and self._awaiting_sync
+            and message_type == "session.resumed"
+            and sequence > previous_seq + 1
+        ):
+            await self._publish(
+                SequenceGapDetected(
+                    expected_seq=previous_seq + 1,
+                    received_seq=sequence,
+                    connection_generation=self._connection_generation,
+                )
+            )
+            self._resume_sync_required = True
+            self._authenticated = True
+            self._state.apply_server_event(message)
+            await self._publish(self._server_event(message))
+            return
+
+        if self._resume_sync_required and not is_sync_barrier:
+            # Replay is outside the server's retention window. Do not apply
+            # an incremental event until the authoritative sync barrier arrives.
+            return
+
         if sequence <= previous_seq:
             return
         if not is_sync_barrier and sequence != previous_seq + 1:
@@ -489,15 +516,7 @@ class NetworkClient:
         self._checkpoint = checkpoint
         self._state.set_last_seq(sequence)
 
-        event = ServerEvent(
-            type=message["type"],
-            protocol_version=message["protocol_version"],
-            event_id=message["event_id"],
-            game_id=message["game_id"],
-            seq=sequence,
-            timestamp=message["timestamp"],
-            payload=immutable_mapping(message["payload"]),
-        )
+        event = self._server_event(message)
         await self._publish(event)
         if message_type == "action.rejected":
             payload = message["payload"]
@@ -522,6 +541,7 @@ class NetworkClient:
                     )
                 )
             self._awaiting_sync = False
+            self._resume_sync_required = False
             self._connected_once_in_generation = True
             await self._set_lifecycle(ClientLifecycle.CONNECTED)
 
@@ -531,6 +551,17 @@ class NetworkClient:
         ):
             await self._publish(GameEnded(event))
             raise _GameEndedSignal()
+
+    def _server_event(self, message: Mapping[str, Any]) -> ServerEvent:
+        return ServerEvent(
+            type=message["type"],
+            protocol_version=message["protocol_version"],
+            event_id=message["event_id"],
+            game_id=message["game_id"],
+            seq=message["seq"],
+            timestamp=message["timestamp"],
+            payload=immutable_mapping(message["payload"]),
+        )
 
     async def _send_request(
         self, message_type: str, payload: Mapping[str, Any], generation: int
