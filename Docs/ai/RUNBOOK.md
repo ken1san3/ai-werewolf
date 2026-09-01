@@ -170,6 +170,22 @@ Verification:
 同じ内容を `CURRENT_STATE.md` の Next Task にも残す。
 **チャットだけに書かない。**
 
+**Next Task には機械が読む宣言を2行入れる**（D052）。書き忘れると
+`check_docs.py` が落ち、`ai_status.py implement` が `blocked` を出す。
+
+```
+Target subphase: 3.1     ← 行頭に1回。ROADMAP に `## 3.1` 節が実在すること
+Design gate: REQUIRED    ← REQUIRED / NOT REQUIRED のどちらか。行頭に1回だけ
+```
+
+`REQUIRED` なら `design/PHASE<N>_<M>_<名前>_REQUEST.md` を1枚置く。
+`NOT REQUIRED` なら依頼書を作らない。**宣言と依頼書が食い違うと門が止まる。**
+散文中で行頭から `Design gate:` と書き始めない（2件目の宣言として数えられる）。
+
+**対象を次のサブPhaseへ進める前に、そのサブPhaseの ROADMAP 節を書く。**
+`## 3.2`〜`## 3.5` はまだ無い（R-20260901-82）。節が無いまま
+`Target subphase` を進めると `check_docs.py` が落ちる。
+
 複数を並行して送れるときも、**最初に送る1つを先頭に置く。**
 「どれでもよい」と書かない。順序に理由があるならそれを書く。
 
