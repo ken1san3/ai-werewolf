@@ -7,6 +7,7 @@ Read-only: this script never modifies the repository.
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -26,6 +27,8 @@ for _stream in (sys.stdout, sys.stderr):
 ROOT = Path(__file__).resolve().parent.parent
 AI = ROOT / "Docs" / "ai"
 
+ROLE_SECTIONS = {"implement": "1", "review": "2", "fix": "3"}
+
 
 def section(text: str, heading: str) -> str:
     pattern = rf"^## {re.escape(heading)}\s*$"
@@ -39,6 +42,13 @@ def section(text: str, heading: str) -> str:
                 body.append(following)
             return "\n".join(body).strip()
     return ""
+
+
+def runbook_section(text: str, number: str) -> str:
+    match = re.search(
+        rf"(?ms)^## {re.escape(number)}\. .*?(?=^## \d+\.|\Z)", text
+    )
+    return match.group(0).strip() if match else ""
 
 
 def read(path: Path) -> str:
@@ -58,7 +68,46 @@ def git(*args: str) -> str:
     return result.stdout.strip()
 
 
+def active_review_blocks(inbox: str) -> list[str]:
+    """Return complete actionable review blocks in severity order.
+
+    Python's sort is stable, so reviews with the same severity retain their
+    order in REVIEW_INBOX.md.
+    """
+
+    severity_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+    active: list[tuple[int, str]] = []
+    pattern = re.compile(
+        r"(?ms)^## R-\d{8}-\d+ \[(OPEN|IN_PROGRESS)\] "
+        r"(\w+)\s*\n.*?(?=^## R-|\Z)"
+    )
+    for match in pattern.finditer(inbox):
+        severity = match.group(2)
+        active.append(
+            (
+                severity_order.get(severity, len(severity_order)),
+                match.group(0).rstrip(),
+            )
+        )
+    active.sort(key=lambda item: item[0])
+    return [block for _, block in active]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Print the project's dynamic AI session context."
+    )
+    parser.add_argument(
+        "role",
+        nargs="?",
+        choices=tuple(ROLE_SECTIONS),
+        help="append only the matching RUNBOOK section",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
     state = read(AI / "CURRENT_STATE.md")
     inbox = read(AI / "REVIEW_INBOX.md")
     questions = read(AI / "OPEN_QUESTIONS.md")
@@ -78,17 +127,9 @@ def main() -> int:
     print("=" * 60)
     print("OPEN REVIEWS")
     print("=" * 60)
-    open_items = re.findall(r"^## (R-\S+) \[OPEN\] (\w+)", inbox, flags=re.MULTILINE)
-    if open_items:
-        by_severity: dict[str, list[str]] = {}
-        for identifier, severity in open_items:
-            by_severity.setdefault(severity, []).append(identifier)
-        for severity in ("Critical", "High", "Medium", "Low"):
-            if severity in by_severity:
-                print(f"{severity}: {', '.join(by_severity[severity])}")
-        for severity, ids in by_severity.items():
-            if severity not in ("Critical", "High", "Medium", "Low"):
-                print(f"{severity}: {', '.join(ids)}")
+    active_reviews = active_review_blocks(inbox)
+    if active_reviews:
+        print("\n\n".join(active_reviews))
     else:
         print("none")
 
@@ -115,6 +156,14 @@ def main() -> int:
     print()
     print("dirty files:")
     print("\n".join(dirty_lines) if dirty_lines else "(clean)")
+
+    if args.role:
+        print()
+        print("=" * 60)
+        print(f"RUNBOOK: {args.role}")
+        print("=" * 60)
+        selected = runbook_section(read(AI / "RUNBOOK.md"), ROLE_SECTIONS[args.role])
+        print(selected or "(RUNBOOK section not found)")
     return 0
 
 

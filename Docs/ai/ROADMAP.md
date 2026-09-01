@@ -197,10 +197,64 @@
 
 # Phase 3 — AI Client Skeleton
 
-3.1 Network Client / 3.2 World State・Memory / 3.3 Brain Interface と Dummy Brain /
-3.4 Reaction・Chat Controller / 3.5 Vote・Ability Controller
+Phase 3 全体の完了条件: RuleBased AI 9人でゲーム完走
 
-完了条件: RuleBased AI 9人でゲーム完走
+3.2 World State・Memory / 3.3 Brain Interface と Dummy Brain /
+3.4 Reaction・Chat Controller / 3.5 Vote・Ability Controller の
+含む / 含まない / 完了条件は未確定（R-20260901-82）。3.1 の完了後に書く。
+
+## 3.1 Network Client
+
+サーバの WebSocket プロトコルだけで席に着き、切断をまたいで
+本人視点の状態を保ち続ける単独プロセスのクライアント基盤を作る。
+**このサブPhaseは「繋がり続けて、受け取って、送れる」までを担当し、
+何を送るかは決めない。**
+
+含む:
+- 入室トークンによる Join と、private に受け取る接続トークンの保持
+- 接続トークンと受信済み `last_seq` による Resume
+- 受信ループと、封筒（`type` / `protocol_version` / `event_id` / `game_id` /
+  `seq` / `timestamp` / `payload`）の検証
+- `protocol_version` のメジャー不一致で接続を打ち切る
+- プレイヤー単位 `seq` の欠番検出と、そこからの状態回復
+- `game.state_sync` / `player.list` / `player.deaths` / `player.action_state` の
+  受信と、本人視点の最新状態としての保持。**保持するだけで解釈しない**
+- `phase_ends_at` からクライアント側の締切タイマーを起こす
+- 上位（Brain / Controller）が使う送信 API。組み立ての入力は
+  受信した `player.action_state` の列挙だけ
+- `action.rejected` の受理
+- 切断検知と再接続。諦めるときはプロセスとして明示的に終わる
+- LLM を使わずに動く Dummy 操作での結合テスト
+
+含まない:
+- World State の構造化と記憶（3.2）
+- Brain interface、Dummy Brain（3.3）
+- 発言内容・反応制御（3.4）、投票や能力の選択方針（3.5）
+- ゲームコアの import、および可否判定のクライアント側での再実装
+- 役職名・チャネルIDのクライアントへの直書き
+- 再接続 UI、観戦（将来候補）
+
+完了条件:
+- 別プロセスの Network Client 9個が、サーバ tick だけで `GAME_ENDED` へ到達する。
+  行動の選択は Dummy でよいが、**選択肢は受信した列挙からのみ導く**
+- 1個を任意のタイミングで落として再起動しても、保存済み接続トークンで
+  同じ席へ Resume し、取りこぼした範囲を回復して完走する
+- 受信列に欠番が生じたことをクライアントが検出したと、テストから観測できる
+- `protocol_version` のメジャーが異なるサーバへは接続しない
+- `action.rejected` を受け取ったことがテストから観測でき、握り潰されない
+- `server.aiwolf_core` と `server.network` を import していない
+- LLM 無しでテストが完走する
+
+**Phase 3.1 の詳細設計で決定する事項。ROADMAP では決めない（D051）:**
+- `seq` 欠番時の回復方式
+- 接続トークンの保存責務
+- receive / send の asyncio 構造
+- `action.rejected` の責務境界
+- reconnect backoff と終了条件
+
+参照: DESIGN.md §2 §9.1 §9.2 §9.3 §9.4
+参照: D048 / D049 / D050 / D051、`handoffs/PHASE2_HANDOFF.md`
+参照: TEST_POLICY「ネットワーク Phase の検証の所在」（節番号は持たない）
 
 # Phase 4 — Local LLM
 

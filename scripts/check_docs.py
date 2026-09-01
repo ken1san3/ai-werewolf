@@ -25,6 +25,7 @@ for _stream in (sys.stdout, sys.stderr):
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "Docs" / "ai"
 DESIGN = DOCS / "spec" / "DESIGN.md"
+CURRENT_STATE = DOCS / "CURRENT_STATE.md"
 CORE = ROOT / "server" / "aiwolf_core"
 
 problems: list[str] = []
@@ -97,15 +98,49 @@ def check_review_inbox() -> None:
     for rid in sorted({i for i in ids if ids.count(i) > 1}):
         fail("review-inbox", f"{rid} が重複している")
     states = set(re.findall(r"(?m)^## R-\d{8}-\d+ \[(\w+)\]", text))
-    for state in sorted(states - {"OPEN", "FIXED", "REJECTED", "DEFERRED"}):
+    for state in sorted(states - {"OPEN", "IN_PROGRESS", "FIXED", "REJECTED", "DEFERRED"}):
         fail("review-inbox", f"未定義の状態 [{state}] がある")
+    severities = set(re.findall(r"(?m)^## R-\d{8}-\d+ \[\w+\] (\w+)", text))
+    for severity in sorted(severities - {"Critical", "High", "Medium", "Low"}):
+        fail("review-inbox", f"未定義の重要度 {severity} がある")
     for block in re.split(r"(?m)^(?=## R-)", text):
         m = re.match(r"## (R-\d{8}-\d+) \[FIXED\]", block)
         if m and "\nFix:" not in block:
             fail("review-inbox", f"{m.group(1)} が FIXED なのに Fix: 行が無い")
 
 
-# --- 5. DESIGN が挙げるイベント名が実装に存在するか ---------------------------
+# --- 5. CURRENT_STATE の Next Task が実在ファイルを指すか -----------------
+def check_next_task_file() -> None:
+    text = read(CURRENT_STATE)
+    section = re.search(r"(?ms)^## Next Task\s*\n(.*?)(?=^## |\Z)", text)
+    if section is None:
+        fail("next-task-file", "CURRENT_STATE.md に ## Next Task 節が無い")
+        return
+
+    references = re.findall(r"`([^`\r\n]+)`", section.group(1))
+    for reference in references:
+        if re.match(r"^[a-z][a-z0-9+.-]*://", reference, re.IGNORECASE):
+            continue
+        relative = Path(reference)
+        # CURRENT_STATE 内の参照は、リポジトリルート基準と Docs/ai
+        # 基準の両方を許容する。いずれも ROOT 外は対象外にする。
+        for base in (ROOT, CURRENT_STATE.parent):
+            try:
+                candidate = (base / relative).resolve()
+                candidate.relative_to(ROOT)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if candidate.is_file():
+                return
+
+    fail(
+        "next-task-file",
+        "CURRENT_STATE.md の ## Next Task に、バッククォートで囲まれた"
+        "リポジトリ内の実在ファイルパスが無い",
+    )
+
+
+# --- 6. DESIGN が挙げるイベント名が実装に存在するか ---------------------------
 def check_event_names() -> None:
     core_events = set()
     for path in CORE.glob("*.py"):
@@ -142,7 +177,7 @@ def rule_key_paths(block: str) -> set[str]:
     return paths
 
 
-# --- 6. DESIGN §5 のルールキーが RulesConfig と一致するか ---------------------
+# --- 7. DESIGN §5 のルールキーが RulesConfig と一致するか ---------------------
 def check_rule_keys() -> None:
     design = read(DESIGN)
     block = re.search(r"# content/presets/standard_9\.yaml\nrules:\n(.*?)\n\nroles:", design, re.S)
@@ -163,7 +198,7 @@ def check_rule_keys() -> None:
         fail("rule-keys", f"standard_9.yaml に `{key}` があるが DESIGN §5 に無い")
 
 
-# --- 7. DESIGN §11 の役職一覧が content と一致するか --------------------------
+# --- 8. DESIGN §11 の役職一覧が content と一致するか --------------------------
 def check_role_table() -> None:
     design = read(DESIGN)
     table = re.search(r"(?ms)^## 11\. 初期実装役職.*?^\n(\| id \|.*?)\n\n", design)
@@ -178,7 +213,7 @@ def check_role_table() -> None:
         fail("role-table", f"content/roles に `{role}` があるが DESIGN §11 に無い")
 
 
-# --- 8. DESIGN が挙げるチャネル / 死因が content registry にあるか ------------
+# --- 9. DESIGN が挙げるチャネル / 死因が content registry にあるか ------------
 def check_registry_ids() -> None:
     design = read(DESIGN)
     channels = set(re.findall(r"(?m)^  - id: (\w+)", read(ROOT / "content" / "chat_channels.yaml")))
@@ -199,14 +234,14 @@ def check_registry_ids() -> None:
                 fail("death-cause", f"DESIGN §7.2 の `{name}` が death_causes.yaml に無い")
 
 
-# --- 9. TEST_POLICY の節が担当 Phase を宣言しているか -------------------------
+# --- 10. TEST_POLICY の節が担当 Phase を宣言しているか ------------------------
 def check_test_policy_phases() -> None:
     for line in read(DOCS / "TEST_POLICY.md").splitlines():
         if line.startswith("## ") and re.match(r"## \d+\.", line) and "［" not in line:
             fail("test-policy", f"担当 Phase の表記が無い: {line}")
 
 
-# --- 10. 文書が挙げる rules.<path> が RulesConfig に存在するか ----------------
+# --- 11. 文書が挙げる rules.<path> が RulesConfig に存在するか ----------------
 def future_rule_keys() -> set[str]:
     """DESIGN §5 で「未実装」と注記されたルールキー。実装より先に書いてよい。"""
 
@@ -234,7 +269,7 @@ def check_rule_paths() -> None:
                 fail("rule-path", f"{path.relative_to(ROOT)} の rules.{ref} に無い項目 `{unknown[0]}`")
 
 
-# --- 11. 実装の乱数イベントが DESIGN §10 の表にあるか -------------------------
+# --- 12. 実装の乱数イベントが DESIGN §10 の表にあるか -------------------------
 def check_random_event_table() -> None:
     design = read(DESIGN)
     table = re.search(r"(?ms)^\| ランダム要素 \| イベント \|\n(.*?)\n\n", design)
@@ -250,7 +285,7 @@ def check_random_event_table() -> None:
             fail("random-table", f"乱数イベント `{name}` が DESIGN §10 の表に無い")
 
 
-# --- 12. ROADMAP が参照する TEST_POLICY 節が存在するか ------------------------
+# --- 13. ROADMAP が参照する TEST_POLICY 節が存在するか ------------------------
 def check_test_policy_refs() -> None:
     sections = set(re.findall(r"(?m)^## (\d+)\.", read(DOCS / "TEST_POLICY.md")))
     roadmap = read(DOCS / "ROADMAP.md")
@@ -262,21 +297,19 @@ def check_test_policy_refs() -> None:
                 fail("test-policy-ref", f"ROADMAP が TEST_POLICY §{ref} を参照するが節が無い")
 
 
-# --- 13. 常時参照する文書のサイズ上限 -----------------------------------------
-# RUNBOOK §1.1 / INDEX の「Always read」は毎セッション必ず文脈へ入る。ここが伸びると、
-# 全セッションのコストが恒久的に上がる。伸びた分は review_archive/ へ退避する。
-# 上限は「現状の約2倍」で置いてある。引き上げるのではなく、まず退避すること。
-ALWAYS_READ_LIMITS = {
+# --- 14. セッション入口を構成する文書のサイズ上限 ---------------------
+# AGENTS.md と ai_status.py の出力元が伸びると、全セッションのコストが
+# 恒久的に上がる。上限は引き上げず、古い記録を review_archive/ へ退避する。
+SESSION_CONTEXT_LIMITS = {
     ROOT / "AGENTS.md": 8000,
     DOCS / "CURRENT_STATE.md": 12000,
     DOCS / "REVIEW_INBOX.md": 24000,
-    DOCS / "ROADMAP.md": 10000,
-    DOCS / "INDEX.md": 6000,
+    DOCS / "RUNBOOK.md": 16000,
 }
 
 
-def check_always_read_size() -> None:
-    for path, limit in sorted(ALWAYS_READ_LIMITS.items()):
+def check_session_context_size() -> None:
+    for path, limit in sorted(SESSION_CONTEXT_LIMITS.items()):
         if not path.exists():
             fail("doc-size", f"{path.name} が見つからない")
             continue
@@ -285,7 +318,7 @@ def check_always_read_size() -> None:
             fail(
                 "doc-size",
                 f"{path.name} が {size} 文字（上限 {limit}）。"
-                "毎セッション読む文書なので、古い記録を review_archive/ へ退避する",
+                "セッション入口の出力元なので、古い記録を review_archive/ へ退避する",
             )
 
 
@@ -295,6 +328,7 @@ def main() -> int:
         check_decision_refs,
         check_open_questions,
         check_review_inbox,
+        check_next_task_file,
         check_event_names,
         check_rule_keys,
         check_role_table,
@@ -303,7 +337,7 @@ def main() -> int:
         check_rule_paths,
         check_random_event_table,
         check_test_policy_refs,
-        check_always_read_size,
+        check_session_context_size,
     ):
         check()
     if problems:

@@ -1,14 +1,16 @@
 # AI Documentation Index
 
-AIエージェントが「どのファイルを読むか」だけを決めるためのファイル。
-内容そのものはここに書かない。
+AIエージェントが「どのファイルを読むか」だけを決める詳細索引。
+内容そのものはここに書かない。セッションの動的入口は必ず
+`python scripts/ai_status.py <role>` を使い、この索引を毎回は読まない。
 
-## Always read
+## Session entry
 
-- `RUNBOOK.md` — 指示に対応する手順。**まずこれ**
-- `ROADMAP.md` — 対象サブPhaseのスコープ
-- `CURRENT_STATE.md`
-- `REVIEW_INBOX.md`（OPEN の Critical / High があれば新機能より先に対応）
+- bootstrap / 恒久ルール: `../../AGENTS.md`
+- 動的状態と役割別手順: `../../scripts/ai_status.py`
+
+`ai_status.py` が `CURRENT_STATE.md` / `REVIEW_INBOX.md` / `OPEN_QUESTIONS.md` の
+必要部分と、指定roleの `RUNBOOK.md` 節を直接出力する。
 
 ## 実装に入る前に読む
 
@@ -41,32 +43,15 @@ AIエージェントが「どのファイルを読むか」だけを決めるた
 | 元仕様への指摘 | `SPEC_REVIEW.md` |
 | 元仕様の原文 | `spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
 | 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
+| 詳細設計と DESIGN REQUEST（canonical ではない） | `design/` |
+| ロードマップ全体 | `ROADMAP.md` |
+| 文書と実装の不整合検査 | `../../scripts/check_docs.py` |
+| Phase引継ぎ | `handoffs/` |
+| 過去の失敗 | `failures/` |
 
 `review_archive/` は**過去の記録**であり、当時の節番号・ファイル構成・ルール名を
 そのまま保存する。現在の文書との一致は求めず、`check_docs.py` も検査しない。
 **追記しない。** 現在の状態は `CURRENT_STATE.md` にだけ置く。
-
-## 文書のサイズ
-
-`Always read` の文書は毎セッション必ず文脈へ入る。伸びると全セッションの
-コストが恒久的に上がるため、`check_docs.py` が上限を検査する。
-上限に当たったら**上限を上げるのではなく、古い記録を `review_archive/` へ退避する。**
-| ロードマップ全体 | `ROADMAP.md` |
-| 文書と実装の不整合検査 | `scripts/check_docs.py` |
-| Phase引継ぎ | `handoffs/` |
-| 過去の失敗 | `failures/` |
-
-## Not needed in the current phase
-
-Phase 1（ゲームコア）では以下を読まない。
-
-```
-AI Client 仕様          spec master §12〜§21, §33〜§36
-LLM / 人格 / typing演出  spec master §16〜§21
-ネットワーク詳細         spec master §4（プロトコル境界の把握のみで可）
-Web UI                  spec master §Phase 7
-MOD                     spec master §23
-```
 
 ## Phaseごとの主読込範囲
 

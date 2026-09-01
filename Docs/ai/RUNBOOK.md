@@ -1,37 +1,33 @@
 # Runbook
 
-ユーザーが打つ言葉は3つだけ。各セッションはここを読んで手順を決める。
+ユーザーが打つ言葉は3つだけ。各セッションは
+`python scripts/ai_status.py <role>` が出力する対応節で手順を決める。
 
 | ユーザーの指示 | 担当 | 手順 |
 |---|---|---|
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Codex | §1 |
-| 「レビューして」 | Claude (Cowork) | §2 |
-| 「レビュー内容を確認して修正して」 | Codex | §3 |
+| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Codex | `implement` / §1 |
+| 「レビューして」 | Claude (Cowork) | `review` / §2 |
+| 「レビュー内容を確認して修正して」 | Codex | `fix` / §3 |
 
 フェーズ番号が指定されなかった場合は `CURRENT_STATE.md` の Next Task に従う。
 方向性の変更や新しい仕様判断は、この3つのどれでもない。ユーザーが別途指示する。
 
 ---
 
-## 1. 実装セッション（Codex）
+## 1. 実装セッション（Codex / `implement`）
 
-### 1.1 開始時に読む
+### 1.1 開始時
 
 ```
-AGENTS.md
-Docs/ai/CURRENT_STATE.md
-Docs/ai/REVIEW_INBOX.md
+python scripts/ai_status.py implement
 Docs/ai/ROADMAP.md      ← 対象サブPhaseの「含む / 含まない / 完了条件」
 Docs/ai/spec/DESIGN.md  ← ROADMAP が指定した節のみ
 Docs/ai/TEST_POLICY.md  ← 対象サブPhaseに関係するカテゴリのみ
 ```
 
-これ以外は必要になってから読む。リポジトリ全体を読まない。
-
-**この5つは毎回読むため、伸びると全セッションのコストが恒久的に上がる。**
-`check_docs.py` がサイズ上限を検査する。上限に当たったら上限を上げず、
-古い記録を `review_archive/` へ退避する。`review_archive/` は追記専用の
-過去記録であり、通常のセッションでは読まない。
+`AGENTS.md` はセッション開始時に既に読み込む。`ai_status.py` の出力と
+そこが指定した範囲以外は、必要になってから読む。リポジトリ全体を読まない。
+`review_archive/` は追記専用の過去記録であり、通常のセッションでは読まない。
 
 `Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` は元になった旧仕様であり、
 DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先する。**
@@ -77,15 +73,14 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 
 ---
 
-## 2. レビューセッション（Claude）
+## 2. レビューセッション（Claude / `review`）
 
 実装は行わない。指摘を `REVIEW_INBOX.md` へ残す。
 
-### 2.1 読む順
+### 2.1 開始時と読む順
 
 ```
-Docs/ai/CURRENT_STATE.md
-Docs/ai/REVIEW_INBOX.md      ← 既存 OPEN との重複を避ける
+python scripts/ai_status.py review
 git log / git diff            ← 前回レビュー以降の差分に限定
 Docs/ai/spec/DESIGN.md        ← 差分が触れている節
 Docs/ai/TEST_POLICY.md
@@ -97,10 +92,19 @@ Docs/ai/TEST_POLICY.md
 **差分に含まれるファイルは減らさず全部開く**（D034）。
 
 **Reviewer 環境からローカルLLMへは到達できない。** Reviewer が動く Linux VM は
-ネットワークを持たず（`Network is unreachable`）、llama-server は Windows 側の
-`127.0.0.1:8080` に bind している。したがって Reviewer の報告では
+Windows とは別ホストであり、llama-server が bind している Windows 側の
+`127.0.0.1:8080` は VM からは別物である（`Network is unreachable`）。
+したがって Reviewer の報告では
 ローカルLLMは常に「環境から到達不可のため未使用」であり、
 **サーバが起動しているかどうかとは無関係である。**
+ただし **VM から PyPI へは出られる。「ネットワークが無い」ではない。**
+
+**Reviewer VM には実行時依存が入っていないことがある。** 素の状態では
+`websockets` が無く `jsonschema` が古いため、ネットワーク系の5モジュールが
+import に失敗し、収集が 179 から 132 へ落ちる。エラーは出るので緑にはならないが、
+環境ノイズとして流すと**網羅が落ちたまま報告することになる。**
+テスト前に `python -m pip install -e ".[dev]"` を実行し、
+**収集数が `CURRENT_STATE.md` の Test Status と一致することを確認する**（D034）。
 
 同じ理由で、`usage.jsonl` の `outcome: unreachable` が Reviewer の実行によるものなら、
 それはサーバ停止を意味しない。`tool` 欄で実行元を確認すること。
@@ -140,22 +144,59 @@ Verification:
   書き換えたら必ず走らせる。** 実装より先に書いたルールは DESIGN §5 の該当行へ
   「未実装（Phase X.Y）」と注記すれば検査を通る
 
+### 2.4 Implementation Design Gate（D051）
+
+**新しい実装タスクへ進む前に、Reviewer が2値で判定する。**
+判定リストに当たれば必要、当たらなければ不要。迷いを理由に必要へ倒さない。
+
+不要（Implementer へ直行）: 局所的な bug fix / Reviewer 指摘への明確な修正 /
+validation 追加 / テスト追加 / 既存 pattern に従う実装 /
+canonical design から実装方法がほぼ一意 / public API と state 構造を新設しない /
+component 間の責務変更が無い / 小規模な既存機能拡張。
+
+必要（Detailed Design へ）: 新しい subsystem・module / 複数 component の責務分担 /
+新しい state machine / lifecycle / async・concurrency / queue /
+timeout・reconnect / protocol との複雑な相互作用 / public API の新設 /
+影響が複数モジュールへ広がる / 実装方法が複数あり選択を誤ると手戻りが大きい /
+canonical design が目的だけを定め実装構造を定めていない / Phase の中核となる新機能。
+
+```
+DESIGN: NOT REQUIRED          DESIGN: REQUIRED
+
+Reason:                       Reason:
+Implementation scope:         Design scope:
+Files to read:                Relevant canonical sources:
+Acceptance criteria:          Constraints:
+                              Out of scope:
+                              Questions Sol must resolve:
+```
+
+Detailed Design の成果物は**実装開始前に必ず Reviewer が読む。** 確認するのは、
+canonical design / accepted decision / protocol・schema と矛盾しないこと、
+責務分離・state・lifecycle・failure handling・concurrency 前提が明確なこと、
+将来 Phase を先取りしていないこと、Implementer が追加の重要設計判断をせず書けること、
+そして**詳細すぎてコードの二重管理になっていないこと。**
+問題が無ければ `DESIGN REVIEW: APPROVED` とし、Implementer 向けの実装入口を明示する。
+
+実装後のレビューでは、詳細設計を正しい前提として扱わない。確認は
+**canonical source → 実コード → schema → tests → approved detailed design** の順。
+**設計どおりでも canonical specification に反していれば指摘する。**
+
 ---
 
-## 3. レビュー修正セッション（Codex）
+## 3. レビュー修正セッション（Codex / `fix`）
 
 新機能は実装しない。
 
-### 3.1 読む
+### 3.1 開始時
 
 ```
-AGENTS.md
-Docs/ai/CURRENT_STATE.md
-Docs/ai/REVIEW_INBOX.md   ← 対応対象。SPEC_REVIEW.md ではない
+python scripts/ai_status.py fix
 Docs/ai/spec/DESIGN.md    ← 指摘が参照している節だけ
 指摘された実装ファイル
 ```
 
+`ai_status.py` が `REVIEW_INBOX.md` の OPEN / IN_PROGRESS 指摘を本文ごと出力する。
 `Docs/ai/SPEC_REVIEW.md` は元仕様への指摘履歴であり、修正対象ではない。
 
 ### 3.2 対応順

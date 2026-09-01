@@ -2,64 +2,49 @@
 
 ## このリポジトリの動かし方
 
-ユーザーが打つ指示は原則3つだけ。**指示を受けたら `Docs/ai/RUNBOOK.md` の該当節を読み、
-そこに書かれた手順に従う。ユーザーへ追加の指示を求めない。**
+ユーザーが打つ指示は原則3つだけ。**指示を受けたら対応する
+`python scripts/ai_status.py <role>` を実行し、出力された RUNBOOK 節に従う。
+ユーザーへ追加の指示を求めない。**
 
 | 指示 | 担当 | 手順 |
 |---|---|---|
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Codex | RUNBOOK §1 |
-| 「レビューして」 | Claude (Cowork) | RUNBOOK §2 |
-| 「レビュー内容を確認して修正して」 | Codex | RUNBOOK §3 |
+| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer | `python scripts/ai_status.py implement` |
+| 「レビューして」 | Reviewer | `python scripts/ai_status.py review` |
+| 「レビュー内容を確認して修正して」 | Implementer | `python scripts/ai_status.py fix` |
 
-- フェーズ番号の指定が無ければ `Docs/ai/CURRENT_STATE.md` の Next Task に従う
+- フェーズ番号の指定が無ければ `ai_status.py` が出力する Next Task に従う
 - スコープ（含む / 含まない / 完了条件）は `Docs/ai/ROADMAP.md` の該当サブPhaseにある
 - 判断に迷ったら `Docs/ai/OPEN_QUESTIONS.md` へ起票し、避けて進められるなら続行する
 - 現状の要約は `python scripts/ai_status.py` で取得できる
 
 ## Roles
 
-| 役割 | 担当 | やること |
-|---|---|---|
-| Implementer | **Codex** | 実装 / テスト / CURRENT_STATE・handoff・decision・failure の更新 |
-| Reviewer | **Claude (Cowork)** | 仕様整合レビュー / 指摘の REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備 |
+**役割と、その役割に現在割り当てているモデルは別物である。**
+モデルの変更は役割の定義を変えない。
 
+| 役割 | default model | やること |
+|---|---|---|
+| Implementer / Local-LLM Orchestrator | Luna | 実装 / テスト / ローカルLLMの運用 / CURRENT_STATE・handoff・decision・failure の更新 |
+| Detailed Design | Sol | Reviewer が必要と判定したタスクの詳細設計（D051） |
+| Reviewer / Design Gate | Claude | 詳細設計の要否判定 / 詳細設計レビュー / 仕様整合レビュー / REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備 |
+
+- **新しい実装タスクは Reviewer の Implementation Design Gate を通る**（D051 / RUNBOOK §2.4）。
+  不要と判定すれば Implementer へ直行、必要なら Detailed Design → Reviewer 承認 → Implementer。
 - Reviewer は原則コードを書かない。指摘は `Docs/ai/REVIEW_INBOX.md` へ残し、修正は Implementer が行う。
 - Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。
-- 仕様・ルールの最終決定権はユーザーにある。両者とも決定を `Docs/ai/decisions/` へ記録する。
+- 仕様・ルールの最終決定権はユーザーにある。各役割とも決定を `Docs/ai/decisions/` へ記録する。
 
 ## Start of session
 
-1. Read `Docs/ai/INDEX.md`
-2. Read `Docs/ai/CURRENT_STATE.md`
-3. Read `Docs/ai/REVIEW_INBOX.md`
-4. Read only the documents INDEX lists for the current phase.
+`AGENTS.md` を bootstrap / 恒久ルールとして毎セッション読む。次に作業役割の
+`python scripts/ai_status.py <role>` を実行する。`ai_status.py` は動的コンテキストの
+**唯一の入口**である。引数なしは状態確認専用で、RUNBOOK を出力しない。
+
+`CURRENT_STATE.md` / `REVIEW_INBOX.md` / `RUNBOOK.md` を開始時に別途開かない。
+`ai_status.py` の出力が追加で名指したファイルだけを読む。必要な文書の
+詳細索引は `Docs/ai/INDEX.md` だけに置き、ここに複製しない。
 
 Do not scan the whole repository unless necessary.
-
-## Where information lives
-
-| 種類 | 置き場所 |
-|---|---|
-| 恒久ルール | `AGENTS.md`（このファイル） |
-| 読む場所の地図 | `Docs/ai/INDEX.md` |
-| 現在地 | `Docs/ai/CURRENT_STATE.md` |
-| 作業手順 | `Docs/ai/RUNBOOK.md` |
-| フェーズのスコープ | `Docs/ai/ROADMAP.md` |
-| 設計書（結論） | `Docs/ai/spec/DESIGN.md` |
-| 検証項目 | `Docs/ai/TEST_POLICY.md` |
-| マスター仕様 | `Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
-| 参照実装の事実 | `Docs/ai/spec/JUDGMENT_REFERENCE.md` |
-| 運用ガイド | `Docs/ai/spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
-| 開発補助のローカルLLM | `Docs/ai/decisions/D034_LOCAL_LLM_DEV_ASSIST.md` |
-| ローカルLLM環境の構成 | `Docs/ai/spec/LOCAL_LLM_SETUP.md` |
-| Phase間引継ぎ | `Docs/ai/handoffs/` |
-| 設計判断 | `Docs/ai/decisions/` |
-| 失敗記録 | `Docs/ai/failures/` |
-| レビュー指摘 | `Docs/ai/REVIEW_INBOX.md` |
-| 未決事項 | `Docs/ai/OPEN_QUESTIONS.md` |
-| 初回セットアップ用の文面 | `Docs/ai/PROMPTS.md` |
-
-同じ内容を複数ファイルへ複製しない。
 
 ## Design invariants
 
@@ -127,7 +112,7 @@ read, never reduce it. See D034.
 [ ] new decision -> Docs/ai/decisions/
 [ ] repeatable failure -> Docs/ai/failures/
 [ ] phase finished -> Docs/ai/handoffs/PHASE<N>_HANDOFF.md
-[ ] list the files the next agent should read
+[ ] Next Task に次のエージェントが読む実在ファイルパスを書いた
 ```
 
 ## Commit convention
