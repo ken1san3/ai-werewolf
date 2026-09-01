@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from server.aiwolf_core import (
+    GamePhase,
     GameState,
     InMemoryEventSink,
     PlayerConfig,
@@ -82,7 +83,9 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             except TimeoutError as error:
                 raise AssertionError(f"timed out waiting for {description}") from error
 
-        with TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory, \
+             patch.object(game, "advance_phase", side_effect=AssertionError("manual advance_phase")) as manual_advance, \
+             patch.object(game, "resolve_votes", side_effect=AssertionError("manual resolve_votes")) as manual_votes:
             root = Path(directory)
             try:
                 for player_id in game.players:
@@ -113,6 +116,31 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                 }
                 self.assertTrue(all(status["game_end"] for status in statuses.values()), statuses)
                 self.assertTrue(statuses[restarted_player]["resumed"], statuses)
+                self.assertTrue(
+                    all(
+                        not status["resumed"]
+                        for player_id, status in statuses.items()
+                        if player_id != restarted_player
+                    ),
+                    statuses,
+                )
+                self.assertEqual(
+                    sum(len(status["action_rejections"]) for status in statuses.values()),
+                    0,
+                    statuses,
+                )
+                self.assertEqual(
+                    sum(len(status["send_errors"]) for status in statuses.values()),
+                    0,
+                    statuses,
+                )
+                event_types = [event.type for event in game.event_bus.events]
+                for event_type in ("CO_DECLARED", "VOTE_SUBMITTED", "ACTION_SUBMITTED"):
+                    self.assertIn(event_type, event_types, event_types)
+                self.assertIn("GAME_ENDED", event_types, event_types)
+                self.assertIs(GamePhase.GAME_END, game.phase)
+                manual_advance.assert_not_called()
+                manual_votes.assert_not_called()
                 self.assertTrue(
                     all(isinstance(status["action_rejections"], list) for status in statuses.values()),
                     statuses,

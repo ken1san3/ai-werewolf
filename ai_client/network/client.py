@@ -150,7 +150,7 @@ class NetworkClient:
         self._join_request_sent = False
         self._resume_request_sent = False
         self._join_retry_after_ambiguous = False
-        self._fatal_from_background: _FatalFailure | None = None
+        self._background_failure: _FatalFailure | _TransientFailure | None = None
 
     @property
     def lifecycle(self) -> ClientLifecycle:
@@ -347,7 +347,7 @@ class NetworkClient:
         self._connected_once_in_generation = False
         self._join_request_sent = False
         self._resume_request_sent = False
-        self._fatal_from_background = None
+        self._background_failure = None
         await self._set_lifecycle(
             ClientLifecycle.RESUMING if self._checkpoint is not None else ClientLifecycle.JOINING
         )
@@ -386,8 +386,8 @@ class NetworkClient:
             await self._send_request("session.ready", {}, generation)
 
             while True:
-                if self._fatal_from_background is not None:
-                    raise self._fatal_from_background
+                if self._background_failure is not None:
+                    raise self._background_failure
                 try:
                     raw_message = await self._receive(socket)
                 except asyncio.TimeoutError as error:
@@ -464,8 +464,6 @@ class NetworkClient:
                 )
             )
             raise _TransientFailure("sequence_gap")
-        if is_sync_barrier and sequence < previous_seq + 1:
-            return
 
         self._state.apply_server_event(message)
         token = self._checkpoint.connection_token if self._checkpoint is not None else None
@@ -591,9 +589,9 @@ class NetworkClient:
                 if command.started:
                     await self._complete_delivery_unknown(command, "sender_cancelled")
                 raise
-            except Exception as error:
+            except Exception:
                 await self._complete_delivery_unknown(command, "send_failed")
-                self._fatal_from_background = _TransientFailure("send_failed")
+                self._background_failure = _TransientFailure("send_failed")
                 await self._close_socket()
                 return
             if not command.future.done():
@@ -607,12 +605,16 @@ class NetworkClient:
     async def _complete_not_delivered(self, command: _Command, reason: str) -> None:
         if not command.future.done():
             command.future.set_exception(NotDeliveredError(reason))
+        # Client notices are best-effort during shutdown; server events are
+        # never suppressed because they are the authoritative event stream.
         with suppress(_FatalFailure):
             await self._publish(NotDelivered(command.action, reason, command.generation))
 
     async def _complete_delivery_unknown(self, command: _Command, reason: str) -> None:
         if not command.future.done():
             command.future.set_exception(DeliveryUnknownError(reason))
+        # Client notices are best-effort during shutdown; server events are
+        # never suppressed because they are the authoritative event stream.
         with suppress(_FatalFailure):
             await self._publish(DeliveryUnknown(command.action, reason, command.generation))
 
@@ -664,7 +666,7 @@ class NetworkClient:
         except asyncio.CancelledError:
             raise
         except _FatalFailure as error:
-            self._fatal_from_background = error
+            self._background_failure = error
             await self._close_socket()
 
     async def _cancel_deadline(self) -> None:

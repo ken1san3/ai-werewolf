@@ -16,7 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from ai_client.network import (
     AbilityAction,
     ActionRejected,
-    ChatAction,
     ClientExitReason,
     CoDeclareAction,
     FileCredentialStore,
@@ -25,6 +24,7 @@ from ai_client.network import (
     NetworkClientConfig,
     ReconnectPolicy,
     ServerEvent,
+    StaleActionError,
     VoteAction,
 )
 
@@ -43,8 +43,9 @@ async def run_driver(
     )
     sent_action_generations: set[tuple[int, str]] = set()
     rejections: list[dict[str, str]] = []
-    resumed = credentials_path.exists()
+    resumed = False
     game_ended = False
+    send_errors: list[dict[str, str]] = []
 
     async def run_client() -> object:
         return await client.run()
@@ -57,6 +58,8 @@ async def run_driver(
         if isinstance(event, GameEnded):
             game_ended = True
             continue
+        if isinstance(event, ServerEvent) and event.type == "session.resumed":
+            resumed = True
         if not isinstance(event, ServerEvent) or event.type not in {
             "game.state_sync",
             "player.action_state",
@@ -68,25 +71,28 @@ async def run_driver(
             if key in sent_action_generations:
                 continue
             try:
-                if isinstance(action, ChatAction):
-                    await client.send_chat(action, "The discussion is open.")
-                elif isinstance(action, CoDeclareAction) and action.claimed_role_ids:
+                if isinstance(action, CoDeclareAction) and action.claimed_role_ids:
                     await client.send_co_declare(
                         action, action.claimed_role_ids[0], "I claim this role."
                     )
                 elif isinstance(action, VoteAction) and action.valid_targets:
                     await client.send_vote(action, action.valid_targets[0])
                 elif isinstance(action, AbilityAction):
-                    if action.uses_remaining == 0:
+                    if action.uses_remaining == 0 or len(action.valid_targets) < action.target_count:
                         continue
                     await client.send_ability(
                         action, list(action.valid_targets[: action.target_count])
                     )
                 else:
                     continue
-            except Exception:
+            except StaleActionError:
                 # A phase transition can make a handle stale between snapshot
                 # and send. The next action-state event supplies a new handle.
+                continue
+            except Exception as error:
+                send_errors.append(
+                    {"type": type(error).__name__, "message": str(error)}
+                )
                 continue
             sent_action_generations.add(key)
             if isinstance(action, (VoteAction, AbilityAction)):
@@ -102,6 +108,7 @@ async def run_driver(
                 "game_end": game_ended or result_reason == ClientExitReason.GAME_ENDED,
                 "last_seq": client.snapshot().last_seq,
                 "action_rejections": rejections,
+                "send_errors": send_errors,
                 "exit_reason": getattr(result_reason, "value", result_reason),
             },
             ensure_ascii=False,
