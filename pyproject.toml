@@ -23,4 +23,4 @@ dev = [
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["server*"]
+include = ["server*", "ai_client*"]
