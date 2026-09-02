@@ -109,3 +109,72 @@ D051 の判定条件のうち、次に当たる。
 - 責務分離、state / lifecycle、failure handling、concurrency 前提のいずれかが曖昧
 - Phase 6 の推論、または 3.3〜3.5 を先取りしている
 - 関数内部まで書いてある（コードの二重管理）
+
+---
+
+## Addendum A — 開示済み role の public representation（2026-09-02、R-20260902-124）
+
+Issued by: Reviewer / Claude。**この Addendum は本 REQUEST の一部である。**
+`PHASE3_2_WORLD_STATE_MEMORY_DESIGN.md` は `DRAFT` へ戻した。
+Sol はここに答えて同じ `_DESIGN.md` を改訂する（新しいファイルを作らない）。
+改訂後の `Status: APPROVED` は Claude が付ける（D053）。
+
+### 何が起きているか（Reviewer が実コードで再現した）
+
+`ai_client/world/reducer.py` の `_apply_state_sync()` は
+`revealed_roles = payload.get("revealed_roles")` を取得し、
+`_valid_state_sync_shape()` は `revealed_roles` を必須 field として shape 検証する。
+**しかしその値はどこにも保存されない。**
+
+```
+  入力: revealed_roles = [{"player_id": "p1", "role_id": "werewolf"}]
+  結果: PlayerView      の field = player_id / display_name / alive / death
+        WorldSnapshot   の field = version / freshness / is_caught_up / last_applied_seq /
+                                   players / alive_player_ids / deaths / phase / self_view /
+                                   history_retention / unknown_event_count /
+                                   known_unmodeled_event_count / malformed_event_count
+        reducer の属性に reveal を含むものは無い
+```
+
+`model.py` の `AbilityResultRecord.revealed_role_id` は占い・霊能の結果であって、
+`graveyard.reveal_roles` による墓場開示とは別物である。混同しないこと。
+
+これは**未許可情報の追加ではない。** `server/aiwolf_core/views.py` は
+`not player.alive and self.game.rules.graveyard.reveal_roles` のときにだけ
+全員の role ID を本人へ送る。D047 は state sync の6要素に `revealed_roles` を含める。
+protocol schema も `game.state_sync` の必須 field として検証する。
+**サーバが開示を許可した本人視点の事実を、World State 境界で失っている。**
+ROADMAP §3.2 は上位層に raw payload を触らせないと定めているので、3.3〜3.5 から回避できない。
+
+### Addendum A で決めること
+
+**それぞれ、採らなかった案と、採らなかった理由を1〜2行で書くこと。**
+
+A1. **置き場所。** `PlayerView` の optional field、独立した immutable な
+    view / map、履歴 record のどれにするか。
+    3.3〜3.5 が「p1 の開示された役職は何か」を引く形を示すこと
+
+A2. **sync の置換規則。** 全量 sync は再基準化である。
+    - 次の sync が `revealed_roles: []` を運んできたとき、以前の開示値は消えるか残るか
+    - 同じ sync が同じ player を2回運んだときはどうするか
+    - `players` に居ない player ID が `revealed_roles` に現れたときはどうするか
+    - 増分イベントで開示が増えることはあるか。無いなら「無い」と明記する
+
+A3. **不変性と読み取り API。** 返した値を外から書き換えても内部が変わらないこと。
+    `WorldSnapshot.version` 契約との関係（開示の変化は version を進めるか）
+
+A4. **役職名を直書きしないこと。** role ID は受信値をそのまま持つ。
+    クライアント側で役職の意味を解釈しない（Design invariant 4）
+
+A5. **Required tests。** 最低限、次を名前付きで固定する。
+    - 非空 `revealed_roles` を含む sync から、raw payload を読まずに
+      player ID と role ID を取得できる
+    - 続く非開示 sync で以前の開示値が残らない
+    - 返却値が immutable である
+
+### Addendum A の Out of scope
+
+- サーバ・protocol schema・`server/aiwolf_core/views.py` の変更
+- 開示条件そのもの（`graveyard.reveal_roles` の意味）の再定義
+- 開示された役職からの推論（Phase 6）
+- Phase 3.2 の他の設計判断の見直し。**A1〜A5 以外は既存の承認内容を維持する**

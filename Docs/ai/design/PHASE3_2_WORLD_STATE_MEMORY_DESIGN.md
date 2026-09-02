@@ -1,4 +1,4 @@
-Status: APPROVED — Reviewer / Claude 承認（2026-09-02）。PUBLIC event 13種の分類、各 payload の field、`current_actions` の分離を実コードと突き合わせて確認した。
+Status: APPROVED — Reviewer / Claude 承認（2026-09-02、Addendum A 反映後の再承認）。A1〜A5 の回答を canonical と突き合わせて確認した: `views.py` の `player_list()` と `revealed_roles` はどちらも `game.players.values()` を辿るので A1 の順序は決定的、protocol schema の `revealed_roles` は `uniqueItems` も `players` との相互検査も持たないので A2 の重複・players外の判定は World State が持つべき責務、A4 は Design invariant 4 に一致する。A1〜A5 以外の変更は無い。実装レビューでの確認事項: recovery sync を malformed として不受理にし続けた場合、freshness が `STALE` のまま留まることが上位から観測でき、沈黙したハングにならないこと。
 
 # Phase 3.2 World State・Memory — Detailed Design
 
@@ -57,6 +57,7 @@ World Stateをimportしない。`server.aiwolf_core` / `server.network` はimpor
 ### Current world view
 
 - player一覧、death全量、phase / day / phase end、自分のrole ID / modifier IDsを保持する。
+- state syncで本人へ開示された他playerのrole IDを、独立したrevealed-role viewとして保持する。
 - 生存者はcanonical DESIGN §9.4どおり player一覧からdeathのplayer IDを引いて導出する。
 - current actionはNetwork Clientのaction handleをそのまま参照し、World Stateで再構築しない。
 - self role、modifier、public cause、channel、ability resultなどのIDは受信値をopaqueに保持する。
@@ -101,6 +102,7 @@ class WorldState:
     async def stop(self) -> None: ...
     def snapshot(self) -> WorldSnapshot: ...
     def current_actions(self) -> CurrentActionsView: ...
+    def revealed_role(self, player_id: str) -> RevealedRoleView | None: ...
     def history(self, query: HistoryQuery = HistoryQuery()) -> HistoryView: ...
     def co_for_day(self, day: int) -> CoView: ...
     def ability_results(self) -> AbilityResultView: ...
@@ -119,6 +121,7 @@ class WorldState:
 - `deaths: tuple[DeathView, ...]`
 - `phase: PhaseView | None`
 - `self_view: SelfView | None`
+- `revealed_roles: tuple[RevealedRoleView, ...]`
 - `history_retention: HistoryRetention`
 - `unknown_event_count` / `known_unmodeled_event_count` / `malformed_event_count`
 
@@ -126,6 +129,9 @@ class WorldState:
 `DeathView`は`player_id`、day、受信した`public_cause | None`を持つ。
 `PhaseView`はphase、day、`phase_ends_at`を持つ。
 `SelfView`はplayer ID、role ID、modifier IDsを持つ。
+`RevealedRoleView`はplayer IDと、serverから受け取ったrole IDだけを持つ。
+`revealed_roles`はsyncの`players`順で決定的に並べ、`revealed_role(player_id)`は
+対応するimmutable viewを返し、開示されていなければ`None`を返す。
 全modelはfrozenかつdeep immutableとし、返却値の変更で内部状態が変化しない。
 
 `current_actions`は`WorldSnapshot`から外し、別の`current_actions()` APIで返す。
@@ -222,12 +228,19 @@ raw `ServerEvent`、raw state sync、mutable mappingをpublic APIから返さな
 ### Full state sync
 
 1. `game.state_sync`受信でWorld Stateを新しいbaseline epochへ切り替える。
-2. players、deaths、action state、selfをincrementalと共通のreplace mutationへ変換する。
+2. players、deaths、action state、self、revealed rolesを共通のreplace mutationへ変換する。
 3. historyを先頭から、live eventと共通のhistory normalizer / append mutationへ通す。
 4. history内の`PHASE_STARTED`を文脈として、dayを持たないchat / CO / ability resultへ
    受信時点のday / phaseを付ける。文脈が無ければ`None`としmalformed扱いにはしない。
 5. 明示されたaction stateをcurrent phaseの最終authorityとしてcommitする。
-6. reset前のhistory、category index、unknown / malformed countを残さない。
+6. reset前のhistory、category index、revealed roles、unknown / malformed countを残さない。
+
+`revealed_roles`は全量sync専用のauthoritative stateである。受理したsyncごとに全置換し、
+空配列なら以前の開示をすべて消す。増分server eventから追加・推測・維持しない。
+同じplayer IDが2回現れる場合はrole IDが同一でもsync全体をmalformedとし、
+`players`に存在しないplayer IDが現れる場合もsync全体をmalformedとする。
+いずれもbaselineを部分適用せずlast good viewを保持してfreshnessを`STALE`にする。
+subsetは受理し、含まれないplayerは未開示として扱う。
 
 sync historyをすべて適用しても、windowは各append時に上限を守る。
 一度全件を無制限に保持してからtrimしてはならない。
@@ -292,6 +305,8 @@ incremental経路を通り、最終`game.state_sync`でbaselineを再構築す�
   unknown / malformed completeness warningを立てない。
 - 既知event typeなのにWorld Stateが必要とするfield / typeを満たさない場合は
   `MalformedEventRecord`として記録し、そのtyped index更新だけを行わない。
+- state sync内のrevealed-role player重複またはplayers外参照はhistory recordではなく
+  malformed syncとして数え、syncの他fieldを含めてatomicに適用しない。
 - 未知の非Server `ClientEvent` noticeもconsumerを止めずcountへ記録するが、historyには入れない。
 - unknown / malformedがあればsnapshotのcompleteness warningで観測できる。
   protocol major mismatchはNetwork ClientがWorld Stateより前でfatalにする。
@@ -324,6 +339,7 @@ incremental経路を通り、最終`game.state_sync`でbaselineを再構築す�
 
 - disconnect / gap中はlast good viewを保持し`STALE`を返す。推測でstateを進めない。
 - gap後に届く保持外recovery syncはold state / history / indexをatomicに置換する。
+- recovery syncの`revealed_roles`も同じ全置換規則に従い、以前の開示をmergeしない。
 - World StateがNetwork Clientより遅れている間は`is_caught_up=False`かつactions空とする。
 - `DAY_EXTENDED` / `DAY_SHORTENED`のpayloadがcurrent `PhaseView`と同じday / phaseなら、
   更新後の`phase_ends_at`をcurrent viewへ反映する。不一致ならhistoryだけに記録し、stale eventで
@@ -392,6 +408,58 @@ unknown countを汚さない。既知shape不正もmalformed recordへdowngrade�
 - 不採用: 完全にsilent ignore。世界像が情報を落とした事実を上位が判断できない。
 - 不採用: raw payloadを上位へ公開する。World State境界を迂回しschema依存を拡散する。
 
+## Addendum A Resolutions — Revealed Roles
+
+### A1. Public representationと置き場所
+
+**Decision:** `RevealedRoleView(player_id, role_id)`のimmutable tupleを`WorldSnapshot`へ独立して置き、
+`WorldState.revealed_role(player_id)`を頻出lookup APIとする。player順はsyncの`players`順に合わせる。
+
+- 不採用: `PlayerView.revealed_role_id`。player identity / deathの現在像と、本人に許可された
+  knowledgeを同じmodelへ混ぜ、未開示とrole無しの意味が近くなる。
+- 不採用: history recordだけ。開示は発生eventではなくsync時点のauthoritative viewであり、
+  `p1`の現在の開示値を毎回history走査しなければならない。
+- 不採用: mutable mapをpublicに返す。外部変更から内部stateを保護できない。
+
+### A2. Full syncの置換・整合規則
+
+**Decision:** 受理した`game.state_sync.revealed_roles`で毎回完全置換する。空配列は消去、
+同一player IDの重複と`players`外playerはsync全体をmalformedとしてatomicに不受理、subsetは許容する。
+開示を増やすincremental messageは現行protocolに無く、World Stateも増分追加経路を持たない。
+
+- 不採用: 以前の開示とのmerge。後続の非開示syncでも秘密情報が残り、serverの現在の開示判断を覆す。
+- 不採用: duplicateのfirst-wins / last-wins。同じauthoritative sync内の矛盾を順序で隠す。
+- 不採用: unknown playerだけを無視して残りを適用。全量baselineを部分適用し、server snapshotとの
+  対応関係が不明になる。
+
+### A3. Immutabilityとversion契約
+
+**Decision:** `RevealedRoleView`はfrozen value、collectionはtupleとし、内部mutable indexを返さない。
+受理したstate syncはrevealed rolesが同値でも1回のatomic commitとして`WorldSnapshot.version`を1進める。
+開示の変更は同じcommitに含まれ、同じversionのsnapshot内では値が変化しない。
+
+- 不採用: 開示だけをversion外でlive合成する。以前解消したcurrent actionsと同じく、同一versionの
+  snapshot内容が変わりうる。
+- 不採用: contentが同じsyncではversionを進めない。history / freshnessなど同時に再基準化した事実を
+  update waiterが観測できない。
+
+### A4. Role IDの扱い
+
+**Decision:** role IDはserverから受け取った非空文字列をそのまま保持・返却する。
+role名、team、ability、真偽、勝敗上の意味をclient literalや分岐で解釈しない。
+ability resultの`revealed_role_id`とは別collection・別APIのままにする。
+
+- 不採用: client側role catalogへの変換。role追加時にPython変更が必要になり、content authorityを複製する。
+- 不採用: ability resultと統合。墓場の全量開示と個別ability resultはscope・更新規則が異なる。
+
+### A5. Required test contract
+
+**Decision:** public APIによる非空開示取得、次の空syncによる消去、nested immutabilityを必須testにする。
+加えてduplicate / unknown playerのatomic rejectionとrepeated syncのversion進行を固定する。
+
+- 不採用: reducer private fieldだけをassertする。3.3〜3.5が利用するpublic contractを保証しない。
+- 不採用: 非空syncのpositive caseだけ。stale secretの消去と外部mutation耐性が未検証になる。
+
 ## Explicitly Out of Scope
 
 - Brain interface / Dummy Brain（3.3）
@@ -411,6 +479,8 @@ unknown countを汚さない。既知shape不正もmalformed recordへdowngrade�
   Brainの遅延と独立してqueueをdrainする。
 - 初回`game.state_sync`だけからplayer、alive / death、phase / day、self、historyを構築でき、
   caught-up後は別APIの`CurrentActionsView`からcurrent action handleを取得できる。
+- 非空`revealed_roles`を含むsyncからraw payloadを読まずplayer IDとrole IDを取得でき、
+  後続の空配列syncで以前の開示が消える。
 - 同じ事実列をsync historyとlive incrementalで与えた結果が、transport metadataを除いて一致する。
 - 保持内replay適用後と、保持外gap後のauthoritative sync適用後が、継続接続時の世界像と一致する。
 - chat、CO、vote、random tie result、death、phase transition / timing change、game lifecycle、
@@ -420,6 +490,7 @@ unknown countを汚さない。既知shape不正もmalformed recordへdowngrade�
 - 1024 records / 2 MiBを超えず、eviction範囲・件数・query不完全性を観測できる。
 - unknown / malformed eventでconsumerが停止せず、state非変更とwarningが観測できる。
 - public APIがraw network payloadやmutable内部参照を返さない。
+- role IDを受信値のまま保持し、role固有分岐やability resultとの混同が無い。
 - `WorldSnapshot.version`の同値性はsnapshot内だけで完結し、dynamicなaction handleは
   `CurrentActionsView`へ分離される。追いついていない間はstale handleを公開しない。
 - World State停止後は残りnetwork queue容量だけが猶予であり、drainを再開しなければ
@@ -437,6 +508,15 @@ unknown countを汚さない。既知shape不正もmalformed recordへdowngrade�
 - `WorldSnapshot`を同じversionで2回読んだ内容が同じであり、actionはsnapshot外の
   `CurrentActionsView`から取得する。
 - caught-up時だけNetwork Clientのcurrent action handleを公開し、seq先行・disconnect・generation更新時は空。
+- `test_state_sync_exposes_revealed_roles_through_public_api`: 非空syncから
+  `revealed_role(player_id)`とsnapshot tupleだけで受信role IDを取得できる。
+- `test_later_empty_sync_clears_revealed_roles`: 後続`revealed_roles: []`で以前の値が残らない。
+- `test_revealed_roles_are_deeply_immutable`: tuple / viewを外から変更できず内部snapshotが変わらない。
+- `test_revealed_role_duplicate_rejects_entire_sync`: 同一playerの同値・異値重複をatomicに不受理とする。
+- `test_revealed_role_for_unknown_player_rejects_entire_sync`: players外参照で部分適用しない。
+- `test_repeated_sync_advances_version_with_revealed_roles_in_same_commit`: repeated syncごとにversionが1進み、
+  同じversionのsnapshot内容は不変である。
+- ability resultのrevealed roleを墓場開示collectionへ混入させず、受信role IDを意味解釈しない。
 
 ### History normalization and query
 
