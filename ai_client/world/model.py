@@ -65,6 +65,12 @@ class PlayerView:
 
 
 @dataclass(frozen=True)
+class RevealedRoleView:
+    player_id: str
+    role_id: str
+
+
+@dataclass(frozen=True)
 class DeathView:
     player_id: str
     day: int | None
@@ -429,6 +435,7 @@ class WorldSnapshot:
     deaths: tuple[DeathView, ...] = ()
     phase: PhaseView | None = None
     self_view: SelfView | None = None
+    revealed_roles: tuple[RevealedRoleView, ...] = ()
     history_retention: HistoryRetention = field(
         default_factory=lambda: HistoryRetention(
             total_seen=0,

@@ -29,6 +29,7 @@ from .model import (
     PhaseView,
     PlayerView,
     PublicNotifyRecord,
+    RevealedRoleView,
     SelfView,
     TieResolvedRandomRecord,
     UnknownEventRecord,
@@ -175,6 +176,7 @@ class WorldReducer:
         self.deaths: dict[str, DeathView] = {}
         self.phase: PhaseView | None = None
         self.self_view: SelfView | None = None
+        self.revealed_roles: tuple[RevealedRoleView, ...] = ()
         self.last_applied_seq = 0
         self.unknown_event_count = 0
         self.known_unmodeled_event_count = 0
@@ -187,7 +189,8 @@ class WorldReducer:
             if not self._valid_state_sync_shape(event.payload):
                 self._append_malformed("game.state_sync")
                 return ReductionResult()
-            self._apply_state_sync(event.payload)
+            if not self._apply_state_sync(event.payload):
+                return ReductionResult()
             return ReductionResult(state_sync=True)
         if event.type == "game.event":
             return ReductionResult(changed=self._apply_game_event_container(event.payload))
@@ -217,31 +220,38 @@ class WorldReducer:
         self.deaths.clear()
         self.phase = None
         self.self_view = None
+        self.revealed_roles = ()
         self.memory.reset()
         self.unknown_event_count = 0
         self.known_unmodeled_event_count = 0
         self.malformed_event_count = 0
         self._next_order = 1
 
-    def _apply_state_sync(self, payload: Mapping[str, Any]) -> None:
-        self.reset_for_sync()
+    def _apply_state_sync(self, payload: Mapping[str, Any]) -> bool:
         players = payload.get("players")
+        revealed_roles = payload.get("revealed_roles")
+        parsed_revealed_roles = self._parse_revealed_roles(players, revealed_roles)
+        if parsed_revealed_roles is None:
+            self._append_malformed("game.state_sync")
+            return False
+
+        self.reset_for_sync()
         deaths = payload.get("deaths")
         action_state = payload.get("action_state")
         own = payload.get("self")
-        revealed_roles = payload.get("revealed_roles")
         history = payload.get("history")
         if not isinstance(players, (list, tuple)):
-            return
+            return False
         if not isinstance(deaths, (list, tuple)):
-            return
+            return False
         if not isinstance(action_state, Mapping):
-            return
+            return False
         if not isinstance(own, Mapping):
-            return
+            return False
         self._apply_player_list({"players": players})
         self._apply_deaths({"deaths": deaths})
         self._apply_action_state(action_state)
+        self.revealed_roles = parsed_revealed_roles
         authoritative_players = dict(self.players)
         authoritative_deaths = dict(self.deaths)
         # ``action_state`` is the final current phase, not the context of the
@@ -266,6 +276,42 @@ class WorldReducer:
         self.deaths = authoritative_deaths
         self._rebuild_players()
         self.phase = sync_phase
+        return True
+
+    @staticmethod
+    def _parse_revealed_roles(
+        players: Any, revealed_roles: Any
+    ) -> tuple[RevealedRoleView, ...] | None:
+        if not isinstance(players, (list, tuple)) or not isinstance(
+            revealed_roles, (list, tuple)
+        ):
+            return None
+
+        player_ids: list[str] = []
+        for raw_player in players:
+            if not isinstance(raw_player, Mapping):
+                return None
+            player_id = _required_string(raw_player, "player_id")
+            if player_id is None or player_id in player_ids:
+                return None
+            player_ids.append(player_id)
+
+        parsed: dict[str, RevealedRoleView] = {}
+        for raw_revealed in revealed_roles:
+            if not isinstance(raw_revealed, Mapping):
+                return None
+            player_id = _required_string(raw_revealed, "player_id")
+            role_id = _required_string(raw_revealed, "role_id")
+            if (
+                player_id is None
+                or role_id is None
+                or player_id not in player_ids
+                or player_id in parsed
+            ):
+                return None
+            parsed[player_id] = RevealedRoleView(player_id, role_id)
+
+        return tuple(parsed[player_id] for player_id in player_ids if player_id in parsed)
 
     @staticmethod
     def _valid_state_sync_shape(payload: Mapping[str, Any]) -> bool:

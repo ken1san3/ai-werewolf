@@ -30,6 +30,7 @@ from ai_client.world import (
     MalformedEventRecord,
     PhaseTimingChangedRecord,
     PhaseTransitionRecord,
+    RevealedRoleView,
     TieResolvedRandomRecord,
     UnknownEventRecord,
     VoteRevealRecord,
@@ -145,6 +146,120 @@ async def test_sync_builds_current_view_and_history_without_raw_payloads() -> No
     assert snapshot.self_view is not None and snapshot.self_view.role_id == "seer"
     assert [type(record) for record in world.history().records] == [PhaseTransitionRecord, ChatRecord]
     assert not hasattr(world.history().records[0], "payload")
+
+
+@async_test
+async def test_state_sync_exposes_revealed_roles_through_public_api() -> None:
+    payload = sync_payload()
+    payload["revealed_roles"] = [{"player_id": "p1", "role_id": "opaque_role"}]
+    world = WorldState(
+        ListSource(
+            [event("game.state_sync", 1, payload)],
+            last_seq=1,
+            lifecycle=ClientLifecycle.ENDED,
+        )
+    )
+
+    await world.run()
+
+    expected = RevealedRoleView("p1", "opaque_role")
+    assert world.snapshot().revealed_roles == (expected,)
+    assert world.revealed_role("p1") == expected
+    assert world.revealed_role("p0") is None
+
+
+@async_test
+async def test_later_empty_sync_clears_revealed_roles() -> None:
+    first = sync_payload()
+    first["revealed_roles"] = [{"player_id": "p1", "role_id": "opaque_role"}]
+    source = ListSource([], last_seq=2, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source)
+
+    world._consume(event("game.state_sync", 1, first))
+    assert world.revealed_role("p1") == RevealedRoleView("p1", "opaque_role")
+
+    world._consume(event("game.state_sync", 2, sync_payload()))
+
+    assert world.snapshot().revealed_roles == ()
+    assert world.revealed_role("p1") is None
+
+
+@async_test
+async def test_revealed_roles_are_deeply_immutable() -> None:
+    payload = sync_payload()
+    payload["revealed_roles"] = [{"player_id": "p1", "role_id": "opaque_role"}]
+    world = WorldState(ListSource([], last_seq=1, lifecycle=ClientLifecycle.CONNECTED))
+    world._consume(event("game.state_sync", 1, payload))
+
+    snapshot = world.snapshot()
+    with pytest.raises(FrozenInstanceError):
+        snapshot.revealed_roles[0].role_id = "changed"  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        snapshot.revealed_roles += (RevealedRoleView("p0", "other"),)  # type: ignore[misc]
+    assert world.revealed_role("p1") == RevealedRoleView("p1", "opaque_role")
+
+
+@async_test
+async def test_revealed_role_duplicate_rejects_entire_sync() -> None:
+    first = sync_payload()
+    first["revealed_roles"] = [{"player_id": "p1", "role_id": "opaque_role"}]
+    invalid = sync_payload()
+    invalid["revealed_roles"] = [
+        {"player_id": "p0", "role_id": "first"},
+        {"player_id": "p0", "role_id": "duplicate"},
+    ]
+    world = WorldState(ListSource([], last_seq=2, lifecycle=ClientLifecycle.CONNECTED))
+    world._consume(event("game.state_sync", 1, first))
+    before = world.snapshot()
+    before_records = world.history().records
+
+    world._consume(event("game.state_sync", 2, invalid))
+
+    after = world.snapshot()
+    assert after.players == before.players
+    assert after.revealed_roles == before.revealed_roles
+    assert world.history().records[: len(before_records)] == before_records
+    assert isinstance(world.history().records[-1], MalformedEventRecord)
+    assert after.malformed_event_count == before.malformed_event_count + 1
+    assert after.freshness is Freshness.STALE
+
+
+@async_test
+async def test_revealed_role_for_unknown_player_rejects_entire_sync() -> None:
+    first = sync_payload()
+    first["revealed_roles"] = [{"player_id": "p1", "role_id": "opaque_role"}]
+    invalid = sync_payload()
+    invalid["revealed_roles"] = [{"player_id": "p9", "role_id": "unknown_target"}]
+    world = WorldState(ListSource([], last_seq=2, lifecycle=ClientLifecycle.CONNECTED))
+    world._consume(event("game.state_sync", 1, first))
+    before = world.snapshot()
+    before_records = world.history().records
+
+    world._consume(event("game.state_sync", 2, invalid))
+
+    after = world.snapshot()
+    assert after.players == before.players
+    assert after.revealed_roles == before.revealed_roles
+    assert world.history().records[: len(before_records)] == before_records
+    assert isinstance(world.history().records[-1], MalformedEventRecord)
+    assert after.malformed_event_count == before.malformed_event_count + 1
+    assert after.freshness is Freshness.STALE
+
+
+@async_test
+async def test_repeated_sync_advances_version_with_revealed_roles_in_same_commit() -> None:
+    payload = sync_payload()
+    payload["revealed_roles"] = [{"player_id": "p1", "role_id": "opaque_role"}]
+    world = WorldState(ListSource([], last_seq=2, lifecycle=ClientLifecycle.CONNECTED))
+
+    world._consume(event("game.state_sync", 1, payload))
+    first = world.snapshot()
+    world._consume(event("game.state_sync", 2, payload))
+    second = world.snapshot()
+
+    assert second.version == first.version + 1
+    assert second.revealed_roles == first.revealed_roles
+    assert first is not second
 
 
 @async_test
@@ -391,6 +506,35 @@ async def test_sync_and_incremental_history_normalize_to_the_same_records() -> N
         from_live._consume(event(entry["type"], seq, entry["payload"]))
 
     assert from_sync.history().records == from_live.history().records
+
+
+@async_test
+async def test_replay_and_full_sync_recovery_matches_uninterrupted_world() -> None:
+    live_chat = {
+        "channel": "public",
+        "message": {"player_id": "p0", "display_name": "Alice", "message": "after reconnect"},
+    }
+    uninterrupted = WorldState(ListSource([], last_seq=2, lifecycle=ClientLifecycle.CONNECTED))
+    uninterrupted._consume(event("game.state_sync", 1, sync_payload()))
+    uninterrupted._consume(event("chat.message", 2, live_chat))
+
+    recovered_sync = sync_payload()
+    recovered_sync["history"].append({"type": "chat.message", "payload": live_chat})
+    recovered = WorldState(ListSource([], last_seq=4, lifecycle=ClientLifecycle.CONNECTED))
+    recovered._consume(event("game.state_sync", 1, sync_payload()))
+    recovered._consume(SequenceGapDetected(expected_seq=2, received_seq=4, connection_generation=1))
+    recovered._consume(event("game.state_sync", 4, recovered_sync))
+
+    uninterrupted_snapshot = uninterrupted.snapshot()
+    recovered_snapshot = recovered.snapshot()
+    assert recovered_snapshot.players == uninterrupted_snapshot.players
+    assert recovered_snapshot.alive_player_ids == uninterrupted_snapshot.alive_player_ids
+    assert recovered_snapshot.deaths == uninterrupted_snapshot.deaths
+    assert recovered_snapshot.phase == uninterrupted_snapshot.phase
+    assert recovered_snapshot.self_view == uninterrupted_snapshot.self_view
+    assert recovered_snapshot.revealed_roles == uninterrupted_snapshot.revealed_roles
+    assert recovered.history().records == uninterrupted.history().records
+    assert recovered.history().retention == uninterrupted.history().retention
 
 
 @async_test

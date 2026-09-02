@@ -30,6 +30,7 @@ from .model import (
     Freshness,
     HistoryQuery,
     HistoryView,
+    RevealedRoleView,
     WorldSnapshot,
     WorldStateConfig,
     WorldStateExit,
@@ -146,6 +147,12 @@ class WorldState:
             actions=actions,
         )
 
+    def revealed_role(self, player_id: str) -> RevealedRoleView | None:
+        for revealed_role in self._snapshot.revealed_roles:
+            if revealed_role.player_id == player_id:
+                return revealed_role
+        return None
+
     def history(self, query: HistoryQuery = HistoryQuery()) -> HistoryView:
         records = self._reducer.memory.query(query)
         retention = self._reducer.memory.retention()
@@ -188,6 +195,12 @@ class WorldState:
                     if self._network_lifecycle() is ClientLifecycle.CONNECTED
                     else Freshness.STALE
                 )
+            elif (
+                event.type == "game.state_sync"
+                and self._has_sync
+                and self._freshness not in {Freshness.ENDED, Freshness.FAILED}
+            ):
+                self._freshness = Freshness.STALE
             if (
                 event.type == "game.event"
                 and isinstance(event.payload.get("event_type"), str)
@@ -273,6 +286,7 @@ class WorldState:
             deaths=tuple(self._reducer.deaths.values()),
             phase=self._reducer.phase,
             self_view=self._reducer.self_view,
+            revealed_roles=tuple(self._reducer.revealed_roles),
             history_retention=self._reducer.memory.retention(),
             unknown_event_count=self._reducer.unknown_event_count,
             known_unmodeled_event_count=self._reducer.known_unmodeled_event_count,

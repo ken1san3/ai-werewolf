@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import os
 from dataclasses import replace
@@ -11,6 +12,10 @@ import unittest
 
 from server.aiwolf_core import GameState, InMemoryEventSink, PlayerConfig, load_content, load_preset
 from server.network import GameRegistry, SessionManager, WebSocketGameServer, monotonic_seconds
+from ai_client.network import ClientLifecycle, ClientSnapshot, ServerEvent
+from ai_client.network.types import immutable_mapping
+from ai_client.world import WorldState
+from tests.fixtures.phase3_2_world_client_process import semantic_snapshot
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +23,65 @@ CLIENT = PROJECT_ROOT / "tests" / "fixtures" / "phase3_2_world_client_process.py
 GAME_ID = "123e4567-e89b-12d3-a456-426614174262"
 
 
+class _AuthoritativeSyncSource:
+    def __init__(self) -> None:
+        self._snapshot = ClientSnapshot(
+            lifecycle=ClientLifecycle.ENDED,
+            last_seq=1,
+        )
+
+    def snapshot(self) -> ClientSnapshot:
+        return self._snapshot
+
+    async def events(self):
+        if False:
+            yield None
+
+
+def _semantic_world_from_sync(payload: dict[str, object]) -> dict[str, object]:
+    world = WorldState(_AuthoritativeSyncSource())
+    world._consume(
+        ServerEvent(
+            type="game.state_sync",
+            protocol_version="1.0",
+            event_id="authoritative-sync",
+            game_id=GAME_ID,
+            seq=1,
+            timestamp=1,
+            payload=immutable_mapping(payload),
+        )
+    )
+    return semantic_snapshot(world.snapshot(), world.history())
+
+
+def _client_visible_sync(payload: dict[str, object]) -> dict[str, object]:
+    """Match the wire-visible terminal stream, which omits game_end phase start."""
+
+    visible = deepcopy(payload)
+    visible["history"] = [
+        entry
+        for entry in visible["history"]
+        if not (
+            entry.get("type") == "game.event"
+            and entry.get("payload", {}).get("event_type") == "PHASE_STARTED"
+            and entry.get("payload", {}).get("event_payload", {}).get("phase") == "game_end"
+        )
+    ]
+    return visible
+
+
 class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
+    def test_semantic_completion_guard_rejects_dropped_history_record(self) -> None:
+        expected = {
+            "history": [{"record_type": "ChatRecord", "order": 1}],
+            "history_retention": {"retained_count": 1},
+        }
+        mutated = deepcopy(expected)
+        mutated["history"].pop()
+
+        with self.assertRaises(AssertionError):
+            self.assertEqual(mutated, expected)
+
     async def test_nine_world_clients_recover_from_in_retention_replay(self) -> None:
         await self._complete_after_restart(replay_history_limit=128, restart_delay=0.0)
 
@@ -34,10 +97,10 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
             preset,
             rules=replace(
                 preset.rules,
-                night_seconds=1,
+                night_seconds=2,
                 silence_after_dawn_seconds=0,
-                day_seconds=1,
-                vote_seconds=1,
+                day_seconds=2,
+                vote_seconds=2,
             ),
         )
         players = tuple(
@@ -73,6 +136,7 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                     "--entry-token", registry.entry_tokens_for(GAME_ID)[player_id],
                     "--credentials", str(root / f"{player_id}.credentials.json"),
                     "--status", str(root / f"{player_id}.status.json"),
+                    "--ready", str(root / f"{player_id}.ready"),
                     cwd=str(PROJECT_ROOT),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -91,14 +155,59 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                     10,
                     "all clients to store their connection tokens",
                 )
+                await self._wait_for(
+                    lambda: all((root / f"{player_id}.ready").exists() for player_id in game.players),
+                    15,
+                    "all clients to consume their initial state sync",
+                )
 
-                restarted_player = next(iter(game.players))
+                # Keep the restarted seat alive long enough to observe both
+                # replay and the authoritative sync after the interruption.
+                restarted_player = tuple(game.players)[-1]
+                session = sessions.session_for(GAME_ID)
+                checkpoint_seq = self._checkpoint_seq(root, restarted_player)
+                checkpoint_seq = await self._queue_recovery_event_until_unread(
+                    server,
+                    session,
+                    root,
+                    restarted_player,
+                    checkpoint_seq,
+                    replay_history_limit,
+                )
                 first_process = processes[restarted_player]
                 first_pid = first_process.pid
                 first_process.kill()
                 await first_process.wait()
                 if restart_delay:
                     await asyncio.sleep(restart_delay)
+                if replay_history_limit == 128:
+                    await self._wait_for(
+                        lambda: any(
+                            reply.seq > checkpoint_seq
+                            for reply in session._history_by_player.get(restarted_player, ())
+                        ),
+                        10,
+                        "an in-retention replay event",
+                    )
+                else:
+                    await self._wait_for(
+                        lambda: session._replay_floor_by_player.get(restarted_player, 0) > checkpoint_seq,
+                        10,
+                        "the replay floor to pass the checkpoint",
+                    )
+                replay_floor_at_restart = session._replay_floor_by_player.get(restarted_player, 0)
+                history_sequences_at_restart = [
+                    reply.seq
+                    for reply in session._history_by_player.get(restarted_player, ())
+                ]
+                if replay_history_limit == 128:
+                    self.assertGreaterEqual(checkpoint_seq, replay_floor_at_restart)
+                    self.assertTrue(
+                        any(seq > checkpoint_seq for seq in history_sequences_at_restart),
+                        (checkpoint_seq, replay_floor_at_restart, history_sequences_at_restart),
+                    )
+                else:
+                    self.assertLess(checkpoint_seq, replay_floor_at_restart)
                 processes[restarted_player] = await start_client(restarted_player)
                 self.assertNotEqual(first_pid, processes[restarted_player].pid)
 
@@ -122,14 +231,45 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(status["malformed_event_count"] == 0 for status in statuses.values()), statuses)
                 self.assertTrue(all(status["history_records"] > 0 for status in statuses.values()), statuses)
                 self.assertTrue(all(status["production_import_guard"] for status in statuses.values()), statuses)
-                reference_player = next(
-                    player_id for player_id in game.players if player_id != restarted_player
+                self.assertEqual(statuses[restarted_player]["recovery"]["session_resumed_count"], 1, statuses)
+                recovery = statuses[restarted_player]["recovery"]
+                self.assertEqual(recovery["resume_checkpoints"], [checkpoint_seq], statuses)
+                self.assertGreater(
+                    recovery["resume_event_sequences"][0],
+                    recovery["resume_checkpoints"][0],
+                    statuses,
                 )
-                for field in ("freshness", "players", "alive", "unknown_event_count", "malformed_event_count"):
+                self.assertEqual(len(recovery["state_sync_sequences"]), 1, statuses)
+                self.assertGreater(
+                    recovery["state_sync_sequences"][0],
+                    recovery["resume_event_sequences"][0],
+                    statuses,
+                )
+                if replay_history_limit == 128:
+                    self.assertTrue(recovery["replay_event_sequences"], statuses)
+                    self.assertEqual(recovery["gaps_detected"], [], statuses)
+                    self.assertEqual(recovery["gaps_recovered"], [], statuses)
+                else:
+                    self.assertEqual(recovery["replay_event_sequences"], [], statuses)
+                    self.assertEqual(len(recovery["gaps_detected"]), 1, statuses)
+                    self.assertEqual(len(recovery["gaps_recovered"]), 1, statuses)
                     self.assertEqual(
-                        statuses[restarted_player][field],
-                        statuses[reference_player][field],
+                        recovery["gaps_recovered"][0]["recovered_seq"],
+                        recovery["state_sync_sequences"][-1],
                         statuses,
+                    )
+                for player_id in game.players:
+                    expected_semantic = _semantic_world_from_sync(
+                        _client_visible_sync(game.get_state_sync(player_id))
+                    )
+                    # GAME_ENDED terminates the transport without a final
+                    # state-sync phase update; preserve the last client-visible
+                    # phase while comparing the remaining typed world facts.
+                    expected_semantic["phase"] = statuses[player_id]["semantic_world"]["phase"]
+                    self.assertEqual(
+                        statuses[player_id]["semantic_world"],
+                        expected_semantic,
+                        (player_id, statuses[player_id]),
                     )
                 self.assertEqual(len(observed_pids), len(game.players) + 1)
             finally:
@@ -151,6 +291,46 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(poll(), timeout)
         except TimeoutError as error:
             raise AssertionError(f"timed out waiting for {description}") from error
+
+    def _checkpoint_seq(self, root: Path, player_id: str) -> int:
+        return int(
+            json.loads(
+                (root / f"{player_id}.credentials.json").read_text(encoding="utf-8")
+            )["last_seq"]
+        )
+
+    async def _queue_recovery_event_until_unread(
+        self,
+        server: WebSocketGameServer,
+        session,
+        root: Path,
+        player_id: str,
+        checkpoint_seq: int,
+        replay_history_limit: int,
+    ) -> int:
+        """Put a deterministic event after the checkpoint before interruption."""
+
+        for index in range(6):
+            await server.publish_channel_message(
+                GAME_ID,
+                "public",
+                {
+                    "player_id": player_id,
+                    "display_name": f"Player {player_id.rsplit('-', 1)[-1]}",
+                    "message": f"recovery-fixture-{index}",
+                },
+            )
+            latest_checkpoint = self._checkpoint_seq(root, player_id)
+            if latest_checkpoint != checkpoint_seq:
+                checkpoint_seq = latest_checkpoint
+            history = session._history_by_player.get(player_id, ())
+            if replay_history_limit == 1:
+                ready = session._replay_floor_by_player.get(player_id, 0) > checkpoint_seq
+            else:
+                ready = any(reply.seq > checkpoint_seq for reply in history)
+            if ready:
+                return checkpoint_seq
+        raise AssertionError("recovery fixture events were consumed before interruption")
 
     async def _finish_process(self, process: asyncio.subprocess.Process) -> None:
         try:
