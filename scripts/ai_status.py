@@ -33,6 +33,8 @@ STATUS_LINE = re.compile(r"(?m)^Status:\s*(.*?)\s*$")
 STATUS_VALUE = re.compile(
     r"^(REQUESTED|DRAFT|IN_REVIEW|APPROVED|SUPERSEDED)(?:\s+—(?:\s.*)?)?$"
 )
+REQUEST_STATUS_LINE = re.compile(r"(?m)^Request status:\s*(.*?)\s*$")
+REQUEST_STATUS_VALUE = re.compile(r"^(OPEN|CLOSED)(?:\s+—(?:\s.*)?)?$")
 TARGET_SUBPHASE_LINE = re.compile(r"(?m)^Target subphase:\s*([0-9]+(?:\.[0-9]+)*)\s*$")
 DESIGN_GATE_LINE = re.compile(r"(?m)^Design gate:\s*(.*?)\s*$")
 DESIGN_GATE_VALUES = {"REQUIRED", "NOT REQUIRED"}
@@ -127,8 +129,26 @@ def design_phase_key(path: Path) -> str | None:
     return match.group(1).replace("_", ".") if match else None
 
 
+def request_status(path: Path) -> tuple[str, bool | None]:
+    """Return the request lifecycle marker and whether it is open.
+
+    Older request files have no marker and remain open for compatibility.  An
+    invalid explicit marker is kept in the gate so the documentation checker
+    can report it instead of silently dropping a design request.
+    """
+
+    match = REQUEST_STATUS_LINE.search(read(path))
+    if match is None:
+        return "OPEN (implicit)", True
+    value = match.group(1).strip()
+    status_match = REQUEST_STATUS_VALUE.fullmatch(value)
+    if status_match is None:
+        return value or "(empty Request status: line)", None
+    return value, status_match.group(1) == "OPEN"
+
+
 def design_request_documents() -> list[Path]:
-    """Return all request files which explicitly require a Design Gate."""
+    """Return open request files which explicitly require a Design Gate."""
 
     design_dir = AI / "design"
     if not design_dir.is_dir():
@@ -136,12 +156,12 @@ def design_request_documents() -> list[Path]:
     return sorted(
         path
         for path in design_dir.glob("*_REQUEST.md")
-        if DESIGN_REQUIRED_MARKER.search(read(path))
+        if DESIGN_REQUIRED_MARKER.search(read(path)) and request_is_open(path)
     )
 
 
 def design_gate_documents(target: str | None = None) -> list[Path]:
-    """Return required request files for exactly one target subphase."""
+    """Return open required request files for exactly one target subphase."""
 
     target = target if target is not None else target_subphase()
     if target is None:
@@ -175,6 +195,24 @@ def design_status(path: Path) -> tuple[str, bool | None]:
     return value, status_match.group(1) == "APPROVED"
 
 
+def request_is_open(path: Path) -> bool:
+    """Return whether a request still contributes an open Design Gate item.
+
+    CLOSED is effective only when its paired design is present and approved.
+    This prevents a prematurely closed or malformed design from disappearing
+    from the gate.
+    """
+
+    _, is_open = request_status(path)
+    if is_open is not False:
+        return True
+    design = design_output_path(path)
+    if not design.is_file():
+        return True
+    _, approved = design_status(design)
+    return approved is not True
+
+
 def print_design_gate(state: str) -> None:
     print("=" * 60)
     print("DESIGN GATE")
@@ -205,7 +243,10 @@ def print_design_gate(state: str) -> None:
         print("implementation: allowed")
         return
     if len(requests) != 1:
-        print(f"target subphase: Phase {target}: UNKNOWN — DESIGN: REQUIRED の依頼書を一意に決められない")
+        print(
+            f"target subphase: Phase {target}: UNKNOWN — "
+            "開いている DESIGN: REQUIRED の依頼書を一意に決められない"
+        )
         print("implementation: blocked")
         return
 

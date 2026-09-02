@@ -32,6 +32,38 @@ class DesignGateTests(unittest.TestCase):
         ):
             self.assertEqual(ai_status.design_gate_documents("3.1"), [phase_31])
 
+    def test_closed_approved_request_is_excluded_and_reopening_overflows(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            design_dir = Path(temporary_directory) / "design"
+            design_dir.mkdir()
+            network_request = design_dir / "PHASE3_1_NETWORK_CLIENT_REQUEST.md"
+            completion_request = design_dir / "PHASE3_1_COMPLETION_EVIDENCE_REQUEST.md"
+            network_design = design_dir / "PHASE3_1_NETWORK_CLIENT_DESIGN.md"
+            completion_design = design_dir / "PHASE3_1_COMPLETION_EVIDENCE_DESIGN.md"
+            network_request.write_text(
+                "Status: REQUESTED\nRequest status: CLOSED\nDESIGN: REQUIRED\n",
+                encoding="utf-8",
+            )
+            completion_request.write_text(
+                "Status: REQUESTED\nDESIGN: REQUIRED\n",
+                encoding="utf-8",
+            )
+            network_design.write_text("Status: APPROVED\n", encoding="utf-8")
+            completion_design.write_text("Status: IN_REVIEW\n", encoding="utf-8")
+
+            with patch.object(ai_status, "AI", Path(temporary_directory)):
+                self.assertEqual(
+                    ai_status.design_gate_documents("3.1"), [completion_request]
+                )
+                network_request.write_text(
+                    "Status: REQUESTED\nRequest status: OPEN\nDESIGN: REQUIRED\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(
+                    ai_status.design_gate_documents("3.1"),
+                    [completion_request, network_request],
+                )
+
     def test_missing_target_is_unknown_and_blocked(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
@@ -131,6 +163,54 @@ class DesignGateTests(unittest.TestCase):
         ):
             check_docs.check_design_target()
         self.assertTrue(any("NOT REQUIRED" in problem for problem in check_docs.problems))
+
+    def test_docs_checker_accepts_multiple_requests_when_only_one_is_open(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            docs = root / "Docs" / "ai"
+            design_dir = docs / "design"
+            design_dir.mkdir(parents=True)
+            state = docs / "CURRENT_STATE.md"
+            roadmap = docs / "ROADMAP.md"
+            network_request = design_dir / "PHASE3_1_NETWORK_CLIENT_REQUEST.md"
+            completion_request = design_dir / "PHASE3_1_COMPLETION_EVIDENCE_REQUEST.md"
+            network_request.write_text(
+                "Status: REQUESTED\nRequest status: CLOSED\nDESIGN: REQUIRED\n",
+                encoding="utf-8",
+            )
+            completion_request.write_text(
+                "Status: REQUESTED\nDESIGN: REQUIRED\n",
+                encoding="utf-8",
+            )
+            (design_dir / "PHASE3_1_NETWORK_CLIENT_DESIGN.md").write_text(
+                "Status: APPROVED\n", encoding="utf-8"
+            )
+            (design_dir / "PHASE3_1_COMPLETION_EVIDENCE_DESIGN.md").write_text(
+                "Status: IN_REVIEW\n", encoding="utf-8"
+            )
+            state.write_text(
+                "Target subphase: 3.1\nDesign gate: REQUIRED\n", encoding="utf-8"
+            )
+            roadmap.write_text("## 3.1\n", encoding="utf-8")
+
+            with (
+                patch.object(check_docs, "CURRENT_STATE", state),
+                patch.object(check_docs, "DOCS", docs),
+                patch.object(ai_status, "AI", docs),
+            ):
+                check_docs.problems.clear()
+                check_docs.check_design_target()
+                self.assertEqual(check_docs.problems, [])
+
+                network_request.write_text(
+                    "Status: REQUESTED\nRequest status: OPEN\nDESIGN: REQUIRED\n",
+                    encoding="utf-8",
+                )
+                check_docs.problems.clear()
+                check_docs.check_design_target()
+                self.assertTrue(
+                    any("現在2件" in problem for problem in check_docs.problems)
+                )
 
     def test_docs_checker_rejects_review_id_reused_in_archive(self) -> None:
         check_docs.problems.clear()

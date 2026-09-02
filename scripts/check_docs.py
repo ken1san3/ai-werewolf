@@ -183,7 +183,7 @@ def check_design_target() -> None:
     elif decision == "REQUIRED" and len(requests) != 1:
         fail(
             "design-target",
-            f"Target subphase {target} に DESIGN: REQUIRED の REQUEST が1件無い",
+            f"Target subphase {target} に開いている DESIGN: REQUIRED の REQUEST が1件無い（現在{len(requests)}件）",
         )
 
 
@@ -201,6 +201,34 @@ def check_design_gate_status() -> None:
                 "design-status",
                 f"{path.relative_to(ROOT)} の Status: '{status}' は許可語彙外",
             )
+
+
+def check_design_request_status() -> None:
+    design_dir = DOCS / "design"
+    if not design_dir.is_dir():
+        return
+    for path in sorted(design_dir.glob("*_REQUEST.md")):
+        status, is_open = ai_status.request_status(path)
+        if is_open is None:
+            fail(
+                "design-request-status",
+                f"{path.relative_to(ROOT)} の Request status: '{status}' は OPEN / CLOSED の許可語彙外",
+            )
+            continue
+        if is_open is False:
+            design = ai_status.design_output_path(path)
+            if not design.is_file():
+                fail(
+                    "design-request-status",
+                    f"{path.relative_to(ROOT)} は CLOSED だが対応する _DESIGN.md が無い",
+                )
+                continue
+            _, approved = ai_status.design_status(design)
+            if approved is not True:
+                fail(
+                    "design-request-status",
+                    f"{path.relative_to(ROOT)} は CLOSED だが対応する _DESIGN.md が APPROVED ではない",
+                )
 
 
 # --- 6. CURRENT_STATE の Next Task が実在ファイルを指すか -----------------
@@ -466,6 +494,7 @@ def main() -> int:
         check_runbook_sections,
         check_design_target,
         check_design_gate_status,
+        check_design_request_status,
         check_next_task_file,
         check_event_names,
         check_world_core_event_catalog,

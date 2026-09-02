@@ -321,11 +321,20 @@ Required tests。
 
 ### 4.3 ファイルと Status の約束
 
-`Docs/ai/design/` には対象サブPhaseごとに2枚だけ置く。
+`Docs/ai/design/` には対象サブPhaseごとに、設計単位の REQUEST / DESIGN の対を置く。
+同じサブPhaseに複数の設計単位が並んでもよく、ファイル名の stem で対応付ける。
+同じ設計の改訂は既存の `_DESIGN.md` を `DRAFT` へ戻し REQUEST に Addendum を足す。
+別の設計を追加するときは、新しい stem の REQUEST / DESIGN の対を作る。
+
+各 REQUEST の `Request status:` は `OPEN` または `CLOSED` を取る。
+未記載の既存 REQUEST は `OPEN` とみなす。`CLOSED` は対応する `_DESIGN.md` が
+`Status: APPROVED` で、実装と検証まで完了したときだけ設定する。Design Gate が数えるのは
+開いている REQUEST だけであり、`CLOSED` の要求は除外する。対応設計が未承認・欠落の
+`CLOSED` は除外せず、`check_docs.py` で不整合として報告する。
 
 | ファイル | 誰が書くか | 何のためか |
 |---|---|---|
-| `PHASE<N>_<M>_<名前>_REQUEST.md` | Reviewer | 依頼。`DESIGN: REQUIRED` の宣言 |
+| `PHASE<N>_<M>_<名前>_REQUEST.md` | Reviewer / Implementer | 依頼。`DESIGN: REQUIRED` と `Request status:` の宣言 |
 | `PHASE<N>_<M>_<名前>_DESIGN.md` | Detailed Design | 成果物 |
 
 **`Status:` 行は先頭に1行、値は次の語のいずれか1つで始める。**
@@ -342,8 +351,10 @@ APPROVED    Reviewer が承認した。実装へ渡してよい
 SUPERSEDED  作り直した。後継を1行で指す
 ```
 
-**承認は `_DESIGN.md` の `Status:` に書く。** `_REQUEST.md` は `REQUESTED`
-のまま置く。Design Gate が実装可否を見るのは `_DESIGN.md` の側である。
+**設計作業の承認は `_DESIGN.md` の `Status:` に書く。** `_REQUEST.md` の
+`Status:` は依頼の作業状態として `REQUESTED` のまま置いてよい。
+実装と検証まで終えたときだけ、別行の `Request status: CLOSED` へ更新する。
+Design Gate は `_DESIGN.md` の承認状態と、REQUEST の open / closed の両方を見る。
 
 ### 4.4 終了時
 

@@ -4,6 +4,7 @@ Issued by: Reviewer / Design Gate（2026-09-01、D051）
 For: Detailed Design
 Status: REQUESTED — 成果物 `PHASE3_1_NETWORK_CLIENT_DESIGN.md` が
 Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RUNBOOK §4.3）。
+Request status: CLOSED — 対応設計の承認、実装、検証が完了。
 
 ```
 DESIGN: REQUIRED
