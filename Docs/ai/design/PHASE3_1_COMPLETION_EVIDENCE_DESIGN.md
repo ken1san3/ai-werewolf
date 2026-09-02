@@ -1,4 +1,4 @@
-Status: DRAFT — Reviewer / Claude が差し戻した（2026-09-02、R-20260902-128 / 129）。拒否理由の分類は実コードの `PLAYER_ACTION_REJECTION_REASONS` 20語 + session 3語を過不足なく分割しており、`VOTE_RESOLVED.tallies` を生存者集合とする前提も `vote_tallies(final_votes, alive_player_ids)` と一致することを確認した。ただし vote の送信義務（全生存席が各 round で `sent`）と、1席を意図的に落とす lifecycle が両立しない。R-128 / R-129 に答えて改訂すること。
+Status: APPROVED — Reviewer / Claude 承認（2026-09-02、R-20260902-128 / 129 反映後）。R-128 の除外は `stop_marker.last_seq < round_start_seq <= resume_state_sync.seq` の player-local seq 半開区間として機械的に定義され、0件・全件を禁じる下限と、非再起動席の厳密一致・受理クォーラムの維持まで書かれている。R-129 は書き戻しの理由と**証明しなくなるもの**を明記し、書き戻し前に client-written `last_seq` を assert する判断まで決めた。参照された4つのテスト名は `tests/test_phase3_1_network_client.py` に実在することを確認した（`test_join_sync_and_game_end_persist_every_server_event` / `test_file_store_round_trips_and_replaces_atomically` / `test_resume_uses_checkpoint_and_accepts_sync_barrier_seq_jump` / `test_protocol_major_mismatch_fails_before_state_or_checkpoint_update`）。R-128 / 129 以外の変更は無い。実装レビューでの確認事項: 再起動席が3 round 以上生存する席であること（下限3条件を満たせない席を選ぶと scenario setup failure になる）。
 
 # Phase 3.1 完走テスト検証コントラクト 詳細設計
 
@@ -44,7 +44,11 @@ Phase 3.1 の別プロセス完走テストが、単に9席を無言で `GAME_EN
 - subprocess、credential、停止マーカー、status、サーバ、タイムアウト、cleanup を所有する。
 - server event bus を authoritative な受理証拠として使う。サーバの可否判定は再実装しない。
 - `VOTE_RESOLVED.tallies` の key 集合を、その vote / runoff round の authoritative な生存者集合として使う。
+- 再起動席向けに生成された protocol reply を受動記録し、各 vote / runoff round で最初の
+  `player.action_state` が持つ player-local `seq` を round 開始境界として保持する。
 - driver の送信試行集合とサーバの受理集合を突き合わせ、動的下限を満たすか判定する。
+- 停止境界から Resume sync 完了までに開始した round だけを、再起動席の送信義務から除外する。
+  他席の送信義務とサーバ受理クォーラムは除外しない。
 - 意図的な拒否観測テストと、通常完走の拒否分類テストを混同しない。
 
 ### Shared evidence module
@@ -52,6 +56,8 @@ Phase 3.1 の別プロセス完走テストが、単に9席を無言で `GAME_EN
 - 拒否理由を `boundary` / `defect` の二値に閉じ、未知理由は `defect` として fail closed にする。
 - status schema の必須 field、型、非負値、seq の整合を検査する。
 - `ceil(expected / 2)` の受理クォーラムと、action 種別ごとの coverage を計算する。
+- 再起動席の停止 / Resume seq と protocol reply ledger から、送信義務を除外する round 集合を
+  一意に導出する。除外規則を driver や親テストへ複製しない。
 - Phase 固有の action 選択、サーバ起動、subprocess 起動は持たない。
 
 ## Public Interfaces
@@ -102,6 +108,33 @@ phase の意味的 key へ畳み込む。
 
 停止マーカーは status と同じ version、`pid`、`player_id`、`kind`、`last_seq`、その時点までの
 `action_evidence` を持つ。再起動前プロセスを強制終了しても、停止点までの送信証拠が失われない。
+
+### Parent-side interruption evidence
+
+親テストは再起動席宛てに生成された protocol reply を、少なくとも
+`{seq, type, action_state.day, action_state.phase}` の形で受動記録する。秘密 payload と token は
+記録しない。`player.action_state` が vote / runoff を列挙したとき、同じ `(day, phase)` の最小 `seq` を
+その round の `round_start_seq` とする。`game.state_sync` は既存 round の途中にも届くため、round 開始の
+代用にはしない。
+
+再起動席の送信義務から除外する round は、次の式で一意に定める。
+
+```text
+interrupted_rounds = {
+  round |
+  stop_marker.last_seq < round.round_start_seq <= resume_state_sync.seq
+}
+```
+
+`stop_marker.last_seq` は controller が停止して送信不能になった論理境界、`resume_state_sync.seq` は
+Resume 認証後の全量 sync を client が受理し、再び送信可能になった境界である。OS の `kill()` 呼出し
+時刻ではなく、この player-local seq の半開区間を使う。停止マーカー後は receiver が checkpoint可能でも
+controller は停止しているため、送信義務上は interruption 中として扱う。
+
+共通検証部品は `interrupted_rounds` が1件以上で、かつ再起動席が生存していた completed round の
+全件未満であることを要求する。さらに `round_start_seq <= stop_marker.last_seq` の送信済み round と、
+`round_start_seq > resume_state_sync.seq` の送信必須 round が各1件以上必要である。これにより除外集合が
+0件または全件となって coverage を無効化することを防ぐ。
 
 ### Rejection classification
 
@@ -154,10 +187,12 @@ rejection の `seq` 重複は status 不整合として失敗させる。
    opportunity の送信可否には使わない。
 4. `action.rejected`、`session.resumed`、gap notice、sync、chat message を各観測配列へ追記する。
 5. driver 終了時に status を atomic に書き、親テストが全席分を schema 検証する。
-6. 親テストが server event bus から `VOTE_SUBMITTED`、`VOTE_RESOLVED`、
+6. 親テストの passive recorder が再起動席向け protocol reply の seq と action-state round を保持し、
+   stop / Resume sync 境界から `interrupted_rounds` を共通検証部品で導出する。
+7. 親テストが server event bus から `VOTE_SUBMITTED`、`VOTE_RESOLVED`、
    `ACTION_SUBMITTED`、`CO_DECLARED`、`GAME_ENDED` を抽出する。
-7. status の opportunity / attempt と server の受理を action 種別・day・phase・player で照合する。
-8. 拒否分類、coverage、Resume、gap、import guard、exit、cleanup の全条件が満たされた場合だけ成功とする。
+8. status の opportunity / attempt と server の受理を action 種別・day・phase・player で照合する。
+9. 拒否分類、coverage、Resume、gap、import guard、exit、cleanup の全条件が満たされた場合だけ成功とする。
 
 投票 round の期待生存者は `VOTE_RESOLVED.payload.tallies.keys()` から取る。死亡イベントから生存状態を
 再計算したり、vote rules をテストへ複製したりしない。
@@ -184,9 +219,10 @@ OBSERVED
 ```text
 first PID sends at fixed stop point
   -> marker/checkpoint seq fixed
-  -> server creates at least one later per-player seq
+  -> controller remains stopped while receiver persists a later vote-round seq
+  -> client-written checkpoint is verified beyond marker seq
   -> first PID is killed and reaped
-  -> checkpoint is restored to marker seq
+  -> only checkpoint last_seq is intentionally restored to marker seq
   -> different PID starts with same credential file
   -> session.resumed accepted for same player_id and requested_last_seq
   -> replay, or SequenceGapDetected -> game.state_sync -> SequenceGapRecovered
@@ -198,6 +234,20 @@ first PID sends at fixed stop point
 gap notice は0件とする。保持外では `SequenceGapDetected` と `SequenceGapRecovered` を各1組要求し、
 `received_seq > expected_seq`、`recovered_seq >= received_seq`、`after_gap` の state sync を要求する。
 
+checkpoint の書き戻しは、停止マーカー後も receiver が保存を続ける現行テスト構造で、再起動時の
+起点と欠落範囲を決定的に固定するために行う。書き戻すのは `last_seq` だけで、client が Join 時に保存した
+connection token は変更しない。書き戻し前に、production の `FileCredentialStore` が保存した
+`last_seq` が、親テストの受動記録で確認した次 round の action-state seq 以上、かつ marker seq より
+大きいことを必ず assert する。
+
+したがってこの完走シナリオは「client が自ら保存した最新 `last_seq` を無変更のまま crash 後に読み、
+その厳密な位置から Resume すること」は証明しない。証明するのは、production が保存した token を使い、
+テストが意図的に古くした有効 checkpoint から replay / sync 回復して完走できることまでである。
+各 server event の checkpoint 保存は
+`tests/test_phase3_1_network_client.py::test_join_sync_and_game_end_persist_every_server_event`、
+atomic な file round-trip は `test_file_store_round_trips_and_replaces_atomically`、保存 checkpoint を使う
+Resume と sync barrier は `test_resume_uses_checkpoint_and_accepts_sync_barrier_seq_jump` が担保する。
+
 ## Main Control Flow
 
 通常完走 driver は全席で同じ規則を使う。vote は全生存席が各 round 1回、ability は利用可能な各
@@ -205,16 +255,22 @@ ability opportunity 1回、CO と chat は各席・各日1回を試す。主送�
 flag は設けない。target は handle の列挙から決定論的に選び、必要数だけ使う。
 
 再起動位置は乱数にしない。保持内ケースを通常9席完走ケースと統合し、再起動対象が最初の vote
-送信を完了して停止マーカーを書いた位置を固定点とする。親テストは checkpoint より後の server seq が
-存在することを確認してから kill する。保持外ケースは同じ barrier 制御を使い、replay history limit を
-1にして replay floor が checkpoint を越えたことを確認してから kill する。wall-clock sleep の長さで
+送信を完了して停止マーカーを書いた位置を固定点とする。controller はそこで停止するが receiver は
+動かし、親テストは再起動席向けの次の vote / runoff action-state と、それ以上の client-written
+checkpoint を確認してから kill する。保持外ケースは同じ barrier 制御を使い、replay history limit を
+1にして replay floor が marker seq を越えたことも確認してから kill する。wall-clock sleep の長さで
 欠落範囲を推測しない。
+
+再起動席は、Resume 後に開始する少なくとも1つの completed vote / runoff round まで生存させる。
+Dummy target 選択では、受信した `valid_targets` に代替候補がある間だけ再起動席を対象から外す。
+これは親から渡した player ID と受信列挙だけで行い、role、team、固定 player ID は使わない。必要な
+post-Resume round を完了した後は全席と同じ決定論的選択へ戻してよい。
 
 通常完走における各 action 種別の合否は次のとおり。
 
 | Kind | Send-attempt requirement | Authoritative acceptance requirement |
 |---|---|---|
-| vote | 各 completed vote / runoff round で期待生存者集合と `sent` 席集合が一致する。 | 各 round で distinct `VOTE_SUBMITTED.voter_player_id` が `ceil(living / 2)` 以上。全 game の下限は各 round の下限の和。 |
+| vote | 非再起動席は各 completed vote / runoff round で期待生存者集合との厳密一致を維持する。再起動席だけは `interrupted_rounds` を期待集合から除き、それ以外の生存 round すべてで `sent` を要求する。 | 除外に関係なく、各 round で distinct `VOTE_SUBMITTED.voter_player_id` が `ceil(living / 2)` 以上。全 game の下限は各 round の下限の和。 |
 | ability | 全 eligible ability opportunity が `sent`。 | game 全体で distinct `(day, phase, actor, ability)` が `max(2, ceil(eligible / 2))` 以上。fixture 自体も eligible が2以上でなければ失敗。 |
 | CO | 全 `CoDeclareAction` opportunity が席・日ごとに `sent`。 | day ごとに distinct `(day, player)` が `ceil(eligible / 2)` 以上、game 全体で2件以上。 |
 | chat | 全 `ChatAction` opportunity が席・日ごとに `sent`。 | status 群で受信した distinct sender が、game 全体の eligible distinct sender の `ceil(eligible / 2)` 以上かつ2送信者以上。 |
@@ -239,6 +295,8 @@ flag は設けない。target は handle の列挙から決定論的に選び、
 - disconnect: 計画した1プロセス以外の切断、Resume 失敗、違う席への Resume は失敗する。
 - exception: `send_errors`、driver exception、`GAME_ENDED` 以外の client exit は失敗する。
 - partial failure: 9席のうち1席でも status、game end、coverage、import guard を欠けば全体を失敗させる。
+- interruption evidence: round reply、client-written checkpoint 前進、Resume sync、interruption 前後の
+  必須 round のいずれかが無い場合は、除外を推測せず scenario setup failure とする。
 - stale work: stale outcome を記録し、同じ handle を再送しない。新 generation の同じ意味的 keyも
   game-wide の1回義務を既に満たしたなら再送しない。ただし再起動 incarnation の復帰後送信証明は別枠。
 - cleanup: expected kill 以外の非0 return、未回収 PID、status 書込み失敗を失敗させる。全 subprocess を
@@ -339,6 +397,29 @@ record を出せるが、各 Phase 固有の完了条件と action 選択は自�
 - 不採用: 共有しない。同じ rejection 0、固定件数、Resume bool だけの漂流を繰り返す。
 - 不採用: production package に evidence helper を置く。テスト契約を製品 API に混入させる。
 
+### 7. R-20260902-128 — interruption 中の vote 送信義務
+
+**Decision:** 再起動席だけ、`stop_marker.last_seq < round_start_seq <= resume_state_sync.seq` の
+round を送信義務から除外する。除外集合は共通検証部品が protocol reply ledger から導出し、0件・
+全件を禁止する。非再起動席、サーバ受理クォーラム、interruption 外の再起動席には例外を設けない。
+
+- 不採用: 再起動を含む scenario の全 round を coverage 対象外にする。切断を口実に送信証拠全体が消える。
+- 不採用: kill が発生した day 全体を除外する。実際の送信不能区間より広く、Resume 後の欠落も隠す。
+- 不採用: status に opportunity が無い round を自動除外する。driver の観測漏れと正当な切断を区別できない。
+- 不採用: OS の kill / process start 時刻で比較する。server action-state と時計空間が異なり、境界が再現不能になる。
+
+### 8. R-20260902-129 — checkpoint 書き戻しの証明範囲
+
+**Decision:** token を保持したまま `last_seq` だけを marker へ戻し、決定的な stale checkpoint を作る。
+書き戻し前に client-written `last_seq` が次 round seq 以上かつ marker より大きいことを必須 assert にする。
+最新 checkpoint の無変更 crash-restart は、この完走シナリオの証明範囲外と明記する。
+
+- 不採用: 書き戻しをせず receiver の最終 checkpoint を使う。欠落量が kill scheduling に依存し、保持内 /
+  保持外 recovery を決定的に踏めない。
+- 不採用: 書き戻し前の値を検査しない。production save が進んでいなくても、テストが作った値だけで Resume
+  証拠を成立させてしまう。
+- 不採用: token もテストで再生成・書換えする。保存済み connection token による同一席 Resume の証拠を失う。
+
 ## Explicitly Out of Scope
 
 - `ai_client.network` / `ai_client.world` の実装変更
@@ -357,7 +438,7 @@ ROADMAP §3.1 の7項目へ次の証拠を割り当てる。
 | Completion condition | Required evidence |
 |---|---|
 | 9別プロセスが tick のみで完走 | 9つの異なる child PID、全 final status の `GAME_ENDED`、server `GAME_ENDED`、manual `advance_phase` / `resolve_votes` 未呼出し、4種 action coverage。 |
-| 同じ席へ Resume し取りこぼし回復 | fixed stop marker、別PID、同じ credential path / `player_id`、一致する `requested_last_seq`、保持内 replay または保持外 sync、seq 前進、Resume 後 action `sent`、全員完走。 |
+| 同じ席へ Resume し取りこぼし回復 | fixed stop marker、書き戻し前の client checkpoint 前進、別PID、同じ credential path / token / `player_id`、一致する `requested_last_seq`、保持内 replay または保持外 sync、seq 前進、Resume 後 action `sent`、全員完走。 |
 | seq 欠番検出が観測可能 | 保持外 scenario の対応する `gap_events` 1組と `after_gap` sync。expected / received / recovered の大小関係も成立。 |
 | major mismatch を拒否 | `test_protocol_major_mismatch_fails_before_state_or_checkpoint_update` が state / checkpoint 更新前の failure を固定。 |
 | `action.rejected` を握り潰さない | 実サーバの意図的 `co_limit_reached` が status に action/reason/seq 付きで現れる。通常 validator では同理由が defect として失敗する。 |
@@ -368,6 +449,9 @@ ROADMAP §3.1 の7項目へ次の証拠を割り当てる。
 
 - `VOTE_SUBMITTED` 1件だけでは、最初の9席 vote round の `ceil(9/2)` 下限を満たせず失敗する。
 - 再起動席の Resume 後 `sent` action が0件なら失敗する。
+- interruption により除外する round が0件または再起動席の全 completed round なら失敗する。
+- 再起動席以外は全 round で厳密な送信集合一致を満たし、再起動席も interruption 前後の必須 round で
+  `sent` を満たす。
 - defect 理由または未知理由を通常 status に1件注入すると失敗する。
 - boundary rejection が存在しても、全送信義務と受理クォーラムを満たせば成功する。
 - status に token、role 固有分岐、固定 channel ID、内部死因、chat 本文を含めない。
@@ -382,20 +466,29 @@ ROADMAP §3.1 の7項目へ次の証拠を割り当てる。
 - defect を1件混ぜた status、重複 rejection seq、不正 schema version、未知 outcome が失敗する。
 - `ceil(expected / 2)` の境界、distinct player 集計、重複 server event が水増しにならないこと。
 - 9席の round に `VOTE_SUBMITTED` 1件だけを与えると失敗する。
+- protocol reply ledger と stop / resume seq から interruption round が一意に導出され、区間端の
+  `round_start_seq == stop_seq` は含まず、`round_start_seq == resume_sync_seq` は含む。
+- interruption round が0件、全件、または ledger に無い round を caller が任意指定すると失敗する。
 
 ### Separate-process completion
 
 - 9 child PID、全席 GAME_ENDED、server tick only、import guard、LLM 無し。
-- 各 vote / runoff round で全生存席が `sent` を記録し、server accepted distinct voter が動的下限以上。
+- 非再起動席は各 vote / runoff round、再起動席は interruption 外の各生存 round で `sent` を記録し、
+  server accepted distinct voter は除外に関係なく全 round で動的下限以上。
+- interruption round が1件以上・全件未満で、interruption 前後に再起動席の必須 round が各1件ある。
+- 再起動席が1 round をまたいでも成功し、同じ欠落を interruption 外へ移すと席・round 付きで失敗する。
 - ability / CO / chat の eligible、attempt、accepted が各動的下限を満たし、各 aggregate が2件以上。
 - boundary rejection を含む synthetic completion evidence が coverage を満たす場合は成功する。
 - `deadline_suppressed` または `stale_before_send` で送信義務が欠けると、席・day・phase を示して失敗する。
 
 ### Resume and recovery
 
-- 保持内: fixed vote stop、missed retained seq、別PID Resume、gap 0、seq 前進、Resume 後送信、完走。
-- 保持外: replay floor 超過、GapDetected / sync / GapRecovered の1組、Resume 後送信、完走。
+- 保持内: fixed vote stop、次 vote round の reply と client checkpoint 前進、marker への `last_seq` 書き戻し、
+  missed retained seq、別PID Resume、gap 0、seq 前進、Resume 後の必須 vote round 送信、完走。
+- 保持外: 次 vote round と client checkpoint 前進、replay floor 超過、`last_seq` 書き戻し、GapDetected /
+  sync / GapRecovered の1組、Resume 後の必須 vote round 送信、完走。
 - `resumed == true` でも Resume 後送信0、requested checkpoint 不一致、別 player_id、未回復 gap は失敗する。
+- 書き戻し前の credential が marker seq 以下、次 round seq 未満、または token が書き戻し前後で変われば失敗する。
 
 ### Rejection observability and diagnostics
 
@@ -418,3 +511,5 @@ ROADMAP §3.1 の7項目へ次の証拠を割り当てる。
 - 有効 target が複数ある場合の先頭選択と seeded deterministic 選択のどちらを使うかは、受信列挙だけを
   使い全5回で再現可能なら決めない。module-level random は使わない。
 - 診断メッセージの文章表現と field の表示順は、最小診断セットを失わない限り決めない。
+- protocol reply の受動 recorder を mock、wrapper、test-only sink のどれで構成するかは、server の挙動を
+  変えず全 reply を欠落なく記録できる限り決めない。除外式と記録 field は変更してはならない。

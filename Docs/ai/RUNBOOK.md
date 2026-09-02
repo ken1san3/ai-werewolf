@@ -122,6 +122,24 @@ import に失敗し、収集が 179 から 132 へ落ちる。エラーは出る
 テスト前に `python -m pip install -e ".[dev]"` を実行し、
 **収集数が `CURRENT_STATE.md` の Test Status と一致することを確認する**（D034）。
 
+**Reviewer VM のマウント上では `__pycache__` が無効化されないことがある。**
+Reviewer がコードを一時的に書き換えて（ミューテーション検証など）元へ戻すと、
+`cp` で復元したファイルが**書き換え前と同じ mtime と同じサイズ**になることがあり、
+Python の mtime + size による bytecode 無効化がすり抜ける。
+その結果、**ソースは HEAD と一致しているのに、実行されるのは書き換え後の bytecode** になる。
+2026-09-02 に実際に発生し、`git diff --quiet ai_client/` が clean を返す状態で
+`ai_client/world` の2テストが落ち続けた。
+
+対策は次のどちらか。
+
+```
+PYTHONPYCACHEPREFIX=/tmp/pyc_$RANDOM python -m pytest ...   ← 実行ごとに別キャッシュ
+mv <pkg>/__pycache__ _to_delete/...                         ← 復元後に退避（rm は権限が無い）
+```
+
+**ソースを一時変更したあとのテスト結果は、この対策を取ってから読むこと。**
+取らずに得た「赤」「緑」はどちらも信用してはならない。
+
 同じ理由で、`usage.jsonl` の `outcome: unreachable` が Reviewer の実行によるものなら、
 それはサーバ停止を意味しない。`tool` 欄で実行元を確認すること。
 入力長やトークン数の Verification のように**サーバが必要な確認は Implementer が行う。**

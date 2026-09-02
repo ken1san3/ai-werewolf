@@ -70,6 +70,38 @@ def _client_visible_sync(payload: dict[str, object]) -> dict[str, object]:
     return visible
 
 
+def _client_visible_terminal_phase(expected: dict[str, object]) -> dict[str, object]:
+    """Derive the last phase that the terminal wire stream exposes."""
+
+    for record in reversed(expected["history"]):
+        if record.get("record_type") == "PhaseTransitionRecord":
+            return {
+                "phase": record["phase"],
+                "day": record["day"],
+                "phase_ends_at": record["phase_ends_at"],
+                "record_type": "PhaseView",
+            }
+    raise AssertionError("authoritative semantic history has no visible phase transition")
+
+
+def _assert_semantic_world_matches(
+    testcase: unittest.TestCase,
+    actual: dict[str, object],
+    expected: dict[str, object],
+    *,
+    ignored_fields: frozenset[str] = frozenset(),
+) -> None:
+    """Compare client and authoritative semantic facts without weakening expected data."""
+
+    compared_actual = {
+        key: value for key, value in actual.items() if key not in ignored_fields
+    }
+    compared_expected = {
+        key: value for key, value in expected.items() if key not in ignored_fields
+    }
+    testcase.assertEqual(compared_actual, compared_expected)
+
+
 class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
     def test_semantic_completion_guard_rejects_dropped_history_record(self) -> None:
         expected = {
@@ -80,7 +112,7 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
         mutated["history"].pop()
 
         with self.assertRaises(AssertionError):
-            self.assertEqual(mutated, expected)
+            _assert_semantic_world_matches(self, mutated, expected)
 
     async def test_nine_world_clients_recover_from_in_retention_replay(self) -> None:
         await self._complete_after_restart(replay_history_limit=128, restart_delay=0.0)
@@ -263,13 +295,16 @@ class PhaseThreeTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                         _client_visible_sync(game.get_state_sync(player_id))
                     )
                     # GAME_ENDED terminates the transport without a final
-                    # state-sync phase update; preserve the last client-visible
-                    # phase while comparing the remaining typed world facts.
-                    expected_semantic["phase"] = statuses[player_id]["semantic_world"]["phase"]
-                    self.assertEqual(
+                    # state-sync phase update. Derive the expected phase from
+                    # the last client-visible transition, never from `actual`.
+                    expected_wire_semantic = {
+                        **expected_semantic,
+                        "phase": _client_visible_terminal_phase(expected_semantic),
+                    }
+                    _assert_semantic_world_matches(
+                        self,
                         statuses[player_id]["semantic_world"],
-                        expected_semantic,
-                        (player_id, statuses[player_id]),
+                        expected_wire_semantic,
                     )
                 self.assertEqual(len(observed_pids), len(game.players) + 1)
             finally:
