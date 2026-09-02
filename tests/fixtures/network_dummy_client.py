@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import time
 from uuid import uuid4
 
 from websockets.asyncio.client import connect
@@ -43,6 +44,7 @@ async def send_available_action(
     game_id: str,
     payload: dict[str, object],
     sent_day_actions: set[tuple[int, str]],
+    server_timestamp: object = None,
 ) -> None:
     actions = payload.get("actions")
     if not isinstance(actions, list):
@@ -50,6 +52,17 @@ async def send_available_action(
     phase = payload.get("phase")
     day = payload.get("day")
     daytime = phase == "day" and isinstance(day, int)
+    phase_ends_at = payload.get("phase_ends_at")
+    if (
+        daytime
+        and isinstance(phase_ends_at, int)
+        and isinstance(server_timestamp, int)
+        and phase_ends_at <= int(time.monotonic())
+    ):
+        # The state push may have sat in the subprocess pipe until the
+        # authoritative deadline.  Do not deliberately send a known-stale
+        # daytime action and turn a harmless race into a completion failure.
+        return
     for action in actions:
         if not isinstance(action, dict):
             continue
@@ -136,10 +149,20 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                 })
             if message.get("type") == "game.state_sync":
                 await send_available_action(
-                    socket, game_id, message["payload"]["action_state"], sent_day_actions
+                    socket,
+                    game_id,
+                    message["payload"]["action_state"],
+                    sent_day_actions,
+                    message.get("timestamp"),
                 )
             elif message.get("type") == "player.action_state":
-                await send_available_action(socket, game_id, message["payload"], sent_day_actions)
+                await send_available_action(
+                    socket,
+                    game_id,
+                    message["payload"],
+                    sent_day_actions,
+                    message.get("timestamp"),
+                )
             elif message.get("type") == "action.rejected":
                 payload = message.get("payload")
                 action_rejections.append(

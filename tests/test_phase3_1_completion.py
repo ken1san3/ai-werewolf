@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from dataclasses import replace
 from pathlib import Path
 from random import Random
@@ -102,7 +103,10 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                 await first.wait()
                 processes[restarted_player] = await start_client(restarted_player, root)
 
+                game_end_started = time.perf_counter()
                 await wait_for(lambda: game.game_result is not None, 45, "game end")
+                game_end_elapsed = time.perf_counter() - game_end_started
+                print(f"PHASE3_1_GAME_END_SECONDS={game_end_elapsed:.3f}", flush=True)
                 await wait_for(
                     lambda: all((root / f"{player_id}.status.json").exists() for player_id in game.players),
                     15,
