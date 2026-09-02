@@ -1010,6 +1010,90 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(socket.closed)
         self.assertIsNone(client._sender_task)  # noqa: SLF001
 
+    async def test_stop_interrupts_reconnect_backoff_without_releasing_sleep(self) -> None:
+        class ClosingAfterSyncSocket(FakeSocket):
+            async def recv(self) -> str | None:
+                if not self.incoming.empty():
+                    return await self.incoming.get()
+                raise ConnectionClosed(Close(1013, "try again"), None)
+
+        socket = ClosingAfterSyncSocket([
+            server_event("session.joined", "game-1", 1, {
+                "player_id": "p0",
+                "connection_token": "connection-token",
+            }),
+            server_event("session.ready", "game-1", 2, {
+                "player_id": "p0",
+                "ready": True,
+            }),
+            server_event("game.state_sync", "game-1", 3, state_sync_payload()),
+        ])
+        backoff = GateSleep()
+        client = NetworkClient(
+            NetworkClientConfig("ws://fake", "game-1", "entry-token"),
+            MemoryStore(),
+            connector=lambda _uri: socket,
+            sleep=backoff,
+            reconnect_policy=ReconnectPolicy(
+                initial_delay_seconds=5,
+                max_delay_seconds=5,
+                jitter_ratio=0,
+                max_disconnected_seconds=10,
+            ),
+        )
+        run_task = asyncio.create_task(client.run())
+        for _ in range(100):
+            if backoff.calls:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            self.fail("client did not enter reconnect backoff")
+
+        await client.stop()
+        result = await asyncio.wait_for(run_task, timeout=1)
+
+        self.assertEqual(result.reason, ClientExitReason.STOPPED)
+        self.assertEqual(result.lifecycle, ClientLifecycle.ENDED)
+        self.assertEqual(backoff.cancelled, [5])
+        self.assertTrue(socket.closed)
+        self.assertIsNone(client._sender_task)  # noqa: SLF001
+        self.assertIsNone(client._deadline_task)  # noqa: SLF001
+
+    async def test_run_cancellation_finishes_lifecycle_after_cleanup(self) -> None:
+        socket = FakeSocket([
+            server_event("session.joined", "game-1", 1, {
+                "player_id": "p0",
+                "connection_token": "connection-token",
+            }),
+            server_event("session.ready", "game-1", 2, {
+                "player_id": "p0",
+                "ready": True,
+            }),
+            server_event("game.state_sync", "game-1", 3, state_sync_payload()),
+        ])
+        client = NetworkClient(
+            NetworkClientConfig("ws://fake", "game-1", "entry-token"),
+            MemoryStore(),
+            connector=lambda _uri: socket,
+        )
+        run_task = asyncio.create_task(client.run())
+        for _ in range(100):
+            if client.lifecycle is ClientLifecycle.CONNECTED:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            self.fail("client did not synchronize")
+
+        run_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await run_task
+
+        self.assertEqual(client.lifecycle, ClientLifecycle.ENDED)
+        self.assertTrue(socket.closed)
+        self.assertIsNone(client._socket)  # noqa: SLF001
+        self.assertIsNone(client._sender_task)  # noqa: SLF001
+        self.assertIsNone(client._deadline_task)  # noqa: SLF001
+
     async def test_sync_timeout_is_a_generation_deadline_not_an_idle_recv_timeout(self) -> None:
         class DripSocket(FakeSocket):
             def __init__(self, initial_messages: list[str], next_seq: int) -> None:

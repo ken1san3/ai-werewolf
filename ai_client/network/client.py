@@ -246,15 +246,22 @@ class NetworkClient:
                 await self._set_lifecycle(ClientLifecycle.RECONNECT_WAIT)
                 delay = self._retry_delay(retry_number)
                 remaining = self.reconnect_policy.max_disconnected_seconds - elapsed
-                await self._sleep(min(delay, max(0.0, remaining)))
+                await self._sleep_or_stop(min(delay, max(0.0, remaining)))
                 retry_number += 1
         except _FatalFailure as failure:
             return await self._finish(failure.reason, success=False, detail=failure.detail)
         except asyncio.CancelledError:
             self._stop_requested = True
+            self._stop_event.set()
+            with suppress(_FatalFailure):
+                if self.lifecycle is not ClientLifecycle.ENDED:
+                    await self._set_lifecycle(ClientLifecycle.STOPPING)
             await self._cancel_deadline()
             await self._close_socket()
             await self._stop_sender()
+            with suppress(_FatalFailure):
+                if self.lifecycle is not ClientLifecycle.ENDED:
+                    await self._set_lifecycle(ClientLifecycle.ENDED)
             self._close_event_stream()
             raise
         except Exception as error:
@@ -460,9 +467,28 @@ class NetworkClient:
                 await connect_task
             raise asyncio.TimeoutError()
         finally:
+            connect_task.cancel()
             stop_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await stop_task
+            await asyncio.gather(connect_task, stop_task, return_exceptions=True)
+
+    async def _sleep_or_stop(self, delay: float) -> None:
+        sleep_task = asyncio.create_task(self._sleep(delay))
+        stop_task = asyncio.create_task(self._stop_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {sleep_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if stop_task in done or self._stop_requested:
+                sleep_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sleep_task
+                return
+            await sleep_task
+        finally:
+            sleep_task.cancel()
+            stop_task.cancel()
+            await asyncio.gather(sleep_task, stop_task, return_exceptions=True)
 
     async def _open_socket(self) -> tuple[Socket, Any | None]:
         candidate = self._connector(self.config.uri)

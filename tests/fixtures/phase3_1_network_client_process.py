@@ -24,6 +24,8 @@ from ai_client.network import (
     NetworkClient,
     NetworkClientConfig,
     ReconnectPolicy,
+    SequenceGapDetected,
+    SequenceGapRecovered,
     ServerEvent,
     StaleActionError,
     VoteAction,
@@ -36,6 +38,9 @@ async def run_driver(
     entry_token: str,
     credentials_path: Path,
     status_path: Path,
+    stop_after: str | None = None,
+    stop_marker_path: Path | None = None,
+    inject_rejection: bool = False,
 ) -> int:
     client = NetworkClient(
         NetworkClientConfig(uri, game_id, entry_token),
@@ -49,6 +54,10 @@ async def run_driver(
     send_errors: list[dict[str, str]] = []
     chat_sent = 0
     chat_received = 0
+    gap_detected = 0
+    gap_recovered = 0
+    rejection_injected = False
+    stop_gate = asyncio.Event()
 
     async def run_client() -> object:
         return await client.run()
@@ -57,6 +66,12 @@ async def run_driver(
     async for event in client.events():
         if isinstance(event, ActionRejected):
             rejections.append({"action": event.action, "reason": event.reason})
+            continue
+        if isinstance(event, SequenceGapDetected):
+            gap_detected += 1
+            continue
+        if isinstance(event, SequenceGapRecovered):
+            gap_recovered += 1
             continue
         if isinstance(event, GameEnded):
             game_ended = True
@@ -80,6 +95,12 @@ async def run_driver(
                     await client.send_co_declare(
                         action, action.claimed_role_ids[0], "I claim this role."
                     )
+                    if inject_rejection and not rejection_injected:
+                        for _ in range(3):
+                            await client.send_co_declare(
+                                action, action.claimed_role_ids[0], "I claim this role again."
+                            )
+                        rejection_injected = True
                 elif isinstance(action, ChatAction):
                     await client.send_chat(action, "Protocol-only client speaking.")
                 elif isinstance(action, VoteAction) and action.valid_targets:
@@ -104,6 +125,20 @@ async def run_driver(
             sent_action_generations.add(key)
             if isinstance(action, ChatAction):
                 chat_sent += 1
+                stop_kind = "chat"
+            else:
+                stop_kind = "action"
+            if stop_after == stop_kind:
+                if stop_marker_path is None:
+                    raise RuntimeError("stop marker is required when stop_after is set")
+                stop_marker_path.write_text(
+                    json.dumps(
+                        {"pid": os.getpid(), "kind": stop_kind, "last_seq": client.snapshot().last_seq},
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                await stop_gate.wait()
             if isinstance(action, (VoteAction, AbilityAction)):
                 break
 
@@ -120,6 +155,22 @@ async def run_driver(
                 "send_errors": send_errors,
                 "chat_sent": chat_sent,
                 "chat_received": chat_received,
+                "gap_detected": gap_detected,
+                "gap_recovered": gap_recovered,
+                "server_imports": sorted(
+                    name for name in sys.modules
+                    if name == "server.aiwolf_core"
+                    or name.startswith("server.aiwolf_core.")
+                    or name == "server.network"
+                    or name.startswith("server.network.")
+                ),
+                "production_import_guard": not any(
+                    name == "server.aiwolf_core"
+                    or name.startswith("server.aiwolf_core.")
+                    or name == "server.network"
+                    or name.startswith("server.network.")
+                    for name in sys.modules
+                ),
                 "exit_reason": getattr(result_reason, "value", result_reason),
             },
             ensure_ascii=False,
@@ -136,6 +187,9 @@ def main() -> None:
     parser.add_argument("--entry-token", required=True)
     parser.add_argument("--credentials", required=True, type=Path)
     parser.add_argument("--status", required=True, type=Path)
+    parser.add_argument("--stop-after", choices=("action", "chat"))
+    parser.add_argument("--stop-marker", type=Path)
+    parser.add_argument("--inject-rejection", action="store_true")
     arguments = parser.parse_args()
     raise SystemExit(
         asyncio.run(
@@ -145,6 +199,9 @@ def main() -> None:
                 arguments.entry_token,
                 arguments.credentials,
                 arguments.status,
+                arguments.stop_after,
+                arguments.stop_marker,
+                arguments.inject_rejection,
             )
         )
     )
