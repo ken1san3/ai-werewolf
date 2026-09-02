@@ -84,6 +84,14 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 
 実装は行わない。指摘を `REVIEW_INBOX.md` へ残す。
 
+**Reviewer は Claude と Sol の2 model いる**（D053）。通常レビューはどちらでもよい。
+深掘りレビューと詳細設計は Sol。Sol の各レーンは**別チャット**で、文脈を共有しない。
+
+- **`_DESIGN.md` の `Status: APPROVED` は、設計を書いた model と別の model が付ける。**
+  Sol が書いた設計は Claude が承認する。文脈ではなく model を変えることが目的
+- **起票前に `REVIEW_INBOX.md` と `review_archive/` の両方で同じ日付のIDを確認し、
+  最大値+1を使う。** 同じ日に複数レーンが起票するため、inbox だけの採番は衝突する
+
 ### 2.1 開始時と読む順
 
 ```

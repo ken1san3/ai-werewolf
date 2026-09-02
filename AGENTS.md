@@ -8,7 +8,7 @@
 
 | 指示 | 送る先（役割 / model） | 手順 |
 |---|---|---|
-| 「レビューして」 | Reviewer / Claude | `python scripts/ai_status.py review` |
+| 「レビューして」 | Reviewer / Claude または Sol | `python scripts/ai_status.py review` |
 | 「Phase X.Y を詳細設計して」 | Detailed Design / Sol | `python scripts/ai_status.py design` |
 | 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer / Luna | `python scripts/ai_status.py implement` |
 | 「レビュー内容を確認して修正して」 | Implementer / Luna | `python scripts/ai_status.py fix` |
@@ -33,11 +33,15 @@ Next Task に残す。ユーザーはそれをそのまま送ればよい。
 |---|---|---|
 | Implementer / Local-LLM Orchestrator | Luna | 実装 / テスト / ローカルLLMの運用 / CURRENT_STATE・handoff・decision・failure の更新 |
 | Detailed Design | Sol | Reviewer が必要と判定したタスクの詳細設計（D051） |
-| Reviewer / Design Gate | Claude | 詳細設計の要否判定 / 詳細設計レビュー / 仕様整合レビュー / REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備 |
+| Reviewer / Design Gate（通常） | Claude, Sol | 詳細設計の要否判定 / 詳細設計レビュー / 仕様整合レビュー / REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備（D053） |
+| Reviewer（深掘り） | Sol | 同上。対象を絞って深く見る（D053） |
 
 - **新しい実装タスクは Reviewer の Implementation Design Gate を通る**（D051 / RUNBOOK §2.5）。
   不要と判定すれば Implementer へ直行、必要なら Detailed Design → Reviewer 承認 → Implementer。
 - Reviewer は原則コードを書かない。指摘は `Docs/ai/REVIEW_INBOX.md` へ残し、修正は Implementer が行う。
+- **Reviewer は2 model いる（D053）。Sol の各レーンは別チャットで動く。**
+  `_DESIGN.md` の `Status: APPROVED` だけは、設計を書いた model と別の model が付ける
+  （Sol の設計は Claude が承認）。model の違いが見落としを捕まえた実績による（R-97）。
 - Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。
 - 仕様・ルールの最終決定権はユーザーにある。各役割とも決定を `Docs/ai/decisions/` へ記録する。
 

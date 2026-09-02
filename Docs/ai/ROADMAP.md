@@ -199,9 +199,10 @@
 
 Phase 3 全体の完了条件: RuleBased AI 9人でゲーム完走
 
-3.2 World State・Memory / 3.3 Brain Interface と Dummy Brain /
-3.4 Reaction・Chat Controller / 3.5 Vote・Ability Controller の
-含む / 含まない / 完了条件は未確定（R-20260901-82）。3.1 の完了後に書く。
+3.3 Brain Interface と Dummy Brain / 3.4 Reaction・Chat Controller /
+3.5 Vote・Ability Controller の 含む / 含まない / 完了条件は未確定（R-20260901-82）。
+**3.2 の完了後に書く。** 先に書かないのは、3.2 の公開 API が
+3.3〜3.5 の境界を実物で決めるためである。
 
 ## 3.1 Network Client
 
@@ -254,6 +255,58 @@ Phase 3 全体の完了条件: RuleBased AI 9人でゲーム完走
 
 参照: DESIGN.md §2 §9.1 §9.2 §9.3 §9.4
 参照: D048 / D049 / D050 / D051、`handoffs/PHASE2_HANDOFF.md`
+参照: TEST_POLICY「ネットワーク Phase の検証の所在」（節番号は持たない）
+
+## 3.2 World State・Memory
+
+Network Client が渡す検証済みイベントと本人視点 snapshot から、
+**上位が読みやすい形の世界像と履歴**を組み立てる。
+`ai_client.network` の生の payload を 3.3〜3.5 へ直接触らせない。
+
+**このサブPhaseは「何が起きたかを覚えて、引ける形にする」までを担当し、
+それが何を意味するかは判断しない。**
+
+含む:
+- 受信イベントの取り込みループ。`ClientEvent` を速やかに消費し、
+  Network Client の受信を詰まらせない（bounded queue の consumer になる）
+- 本人視点の現在像: 生存者 / 死亡者と公開死因 / 現在フェーズと日番号 /
+  自分の役職・Modifier / 自分が受け取った能力結果 / 現在の行動選択肢
+- 履歴: 発言、CO 宣言と CO 報告、投票結果、死亡、フェーズ遷移を
+  **発生順に引ける形**で保持する
+- `game.state_sync` を受けたときの全量再基準化。再接続・欠番回復をまたいで
+  世界像が壊れないこと
+- 記憶量の上限と、上限に当たったときの捨て方
+- 3.3〜3.5 が使う読み取り API（読み取り専用。世界像を外から書き換えられない）
+
+含まない:
+- 推論。Belief / Suspicion / 信頼度 / ライン / 反応スコアは **Phase 6**
+- 発言生成、投票先や能力対象の選択（3.4 / 3.5）
+- Brain interface と Dummy Brain（3.3）
+- LLM、プロンプト整形、structured output（Phase 4）
+- サーバの可否判定の再実装。行動選択肢は受信した列挙をそのまま持つ
+- 役職名・チャネルIDのクライアントへの直書き
+- `server.aiwolf_core` / `server.network` の import
+
+完了条件:
+- `game.state_sync` だけを与えて世界像を1から構築でき、
+  以後の増分イベントで同じ状態へ到達する（sync と増分の等価性）
+- 切断 → Resume → 保持内 replay、および保持外の欠番 → 全量 sync 回復の
+  どちらでも、回復後の世界像が「最初から接続していた場合」と一致する
+- 履歴が発生順に引け、上限を超えたとき何が失われるかが観測できる
+- 読み取り API から返る値を書き換えても内部状態が変わらない
+- 9プロセスの完走テストが、World State を経由した状態でも通る
+- `server.aiwolf_core` / `server.network` を import していない
+- 全テストが LLM 無しで走る
+
+**Phase 3.2 の詳細設計で決定する事項。ROADMAP では決めない（D051）:**
+- 世界像の内部表現と、読み取り API の形
+- 履歴の保持単位と上限、上限到達時の捨て方
+- 全量 sync と増分イベントの適用を1つの経路にするか分けるか
+- イベント取り込みを Network Client と同じ task で回すか分けるか
+- 未知イベント種別を受けたときの扱い
+
+参照: ROADMAP §3.1、`design/PHASE3_1_NETWORK_CLIENT_DESIGN.md` の Public Interfaces
+参照: DESIGN.md §9.3 §9.4（サーバが送る内容。クライアント側の構造は定めていない）
 参照: TEST_POLICY「ネットワーク Phase の検証の所在」（節番号は持たない）
 
 # Phase 4 — Local LLM
