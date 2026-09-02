@@ -35,10 +35,10 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             preset,
             rules=replace(
                 preset.rules,
-                night_seconds=1,
+                night_seconds=2,
                 silence_after_dawn_seconds=0,
-                day_seconds=1,
-                vote_seconds=1,
+                day_seconds=2,
+                vote_seconds=2,
             ),
         )
         players = tuple(
@@ -164,7 +164,13 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                     if process.returncode is None:
                         process.terminate()
                 cleanup_results = await asyncio.gather(
-                    *(self._finish_process(process) for process in processes.values()),
+                    *(
+                        self._finish_process(
+                            process,
+                            status_path=root / f"{player_id}.status.json",
+                        )
+                        for player_id, process in processes.items()
+                    ),
                     return_exceptions=True,
                 )
                 await server.close()
@@ -181,10 +187,10 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             preset,
             rules=replace(
                 preset.rules,
-                night_seconds=1,
+                night_seconds=2,
                 silence_after_dawn_seconds=0,
-                day_seconds=1,
-                vote_seconds=1,
+                day_seconds=2,
+                vote_seconds=2,
             ),
         )
         players = tuple(
@@ -220,6 +226,7 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
         root: Path,
         stop_after: str | None = None,
         inject_rejection: bool = False,
+        inject_driver_error: bool = False,
     ) -> asyncio.subprocess.Process:
         marker = root / f"{player_id}.stop.json"
         arguments = [
@@ -235,6 +242,8 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             arguments.extend(["--stop-after", stop_after, "--stop-marker", str(marker)])
         if inject_rejection:
             arguments.append("--inject-rejection")
+        if inject_driver_error:
+            arguments.append("--inject-driver-error")
         return await asyncio.create_subprocess_exec(
             *arguments,
             cwd=str(PROJECT_ROOT),
@@ -257,100 +266,126 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
         try:
             with TemporaryDirectory() as temporary_directory:
                 root = Path(temporary_directory)
-                for player_id in game.players:
-                    processes[player_id] = await self._start_client_process(
-                        player_id=player_id,
+                try:
+                    for player_id in game.players:
+                        processes[player_id] = await self._start_client_process(
+                            player_id=player_id,
+                            registry=registry,
+                            uri=uri,
+                            root=root,
+                            stop_after=stop_after if player_id == stopped_player else None,
+                        )
+                    marker_path = root / f"{stopped_player}.stop.json"
+                    await self._wait_for(
+                        lambda: marker_path.exists(),
+                        timeout=15,
+                        description=f"{stop_after} stop marker",
+                    )
+                    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+                    self.assertEqual(marker["kind"], stop_after)
+                    checkpoint_seq = marker["last_seq"]
+                    first_pid = processes[stopped_player].pid
+                    session = server.sessions.session_for(GAME_ID)
+                    if replay_history_limit == 1:
+                        await self._wait_for(
+                            lambda: session._replay_floor_by_player.get(stopped_player, 0) > checkpoint_seq,
+                            timeout=10,
+                            description="replay history to leave the retention window",
+                        )
+                    else:
+                        await self._wait_for(
+                            lambda: any(
+                                reply.seq > checkpoint_seq
+                                for reply in session._history_by_player.get(stopped_player, ())
+                            ),
+                            timeout=10,
+                            description="replay history to retain a missed event",
+                        )
+                    processes[stopped_player].kill()
+                    await processes[stopped_player].wait()
+
+                    # The driver pauses after writing the marker, but the client's
+                    # receiver continues checkpointing messages until the process is
+                    # killed. Rewind the persisted checkpoint to the exact stop point
+                    # so the restart models the outage represented by the marker.
+                    credentials_path = root / f"{stopped_player}.credentials.json"
+                    credentials = json.loads(credentials_path.read_text(encoding="utf-8"))
+                    credentials["last_seq"] = checkpoint_seq
+                    credentials_path.write_text(
+                        json.dumps(credentials, ensure_ascii=False), encoding="utf-8"
+                    )
+
+                    processes[stopped_player] = await self._start_client_process(
+                        player_id=stopped_player,
                         registry=registry,
                         uri=uri,
                         root=root,
-                        stop_after=stop_after if player_id == stopped_player else None,
                     )
-                marker_path = root / f"{stopped_player}.stop.json"
-                await self._wait_for(
-                    lambda: marker_path.exists(),
-                    timeout=15,
-                    description=f"{stop_after} stop marker",
-                )
-                marker = json.loads(marker_path.read_text(encoding="utf-8"))
-                self.assertEqual(marker["kind"], stop_after)
-                checkpoint_seq = marker["last_seq"]
-                first_pid = processes[stopped_player].pid
-                session = server.sessions.session_for(GAME_ID)
-                if replay_history_limit == 1:
+                    self.assertNotEqual(first_pid, processes[stopped_player].pid)
                     await self._wait_for(
-                        lambda: session._replay_floor_by_player.get(stopped_player, 0) > checkpoint_seq,
-                        timeout=10,
-                        description="replay history to leave the retention window",
+                        lambda: game.game_result is not None,
+                        timeout=45,
+                        description="the server ticker to complete the game",
                     )
-                else:
                     await self._wait_for(
-                        lambda: any(
-                            reply.seq > checkpoint_seq
-                            for reply in session._history_by_player.get(stopped_player, ())
+                        lambda: all(
+                            (root / f"{player_id}.status.json").exists()
+                            for player_id in game.players
                         ),
-                        timeout=10,
-                        description="replay history to retain a missed event",
+                        timeout=15,
+                        description="all client statuses",
                     )
-                processes[stopped_player].kill()
-                await processes[stopped_player].wait()
-
-                processes[stopped_player] = await self._start_client_process(
-                    player_id=stopped_player,
-                    registry=registry,
-                    uri=uri,
-                    root=root,
-                )
-                self.assertNotEqual(first_pid, processes[stopped_player].pid)
-                await self._wait_for(
-                    lambda: game.game_result is not None,
-                    timeout=45,
-                    description="the server ticker to complete the game",
-                )
-                await self._wait_for(
-                    lambda: all(
-                        (root / f"{player_id}.status.json").exists()
+                    statuses = {
+                        player_id: json.loads(
+                            (root / f"{player_id}.status.json").read_text(encoding="utf-8")
+                        )
                         for player_id in game.players
-                    ),
-                    timeout=15,
-                    description="all client statuses",
-                )
-                statuses = {
-                    player_id: json.loads(
-                        (root / f"{player_id}.status.json").read_text(encoding="utf-8")
+                    }
+                    self.assertTrue(all(status["game_end"] for status in statuses.values()), statuses)
+                    self.assertTrue(statuses[stopped_player]["resumed"], statuses)
+                    self.assertEqual(
+                        (
+                            statuses[stopped_player]["gap_detected"],
+                            statuses[stopped_player]["gap_recovered"],
+                        ),
+                        expected_gap_counts,
+                        statuses,
                     )
-                    for player_id in game.players
-                }
-                self.assertTrue(all(status["game_end"] for status in statuses.values()), statuses)
-                self.assertTrue(statuses[stopped_player]["resumed"], statuses)
-                self.assertEqual(
-                    (
-                        statuses[stopped_player]["gap_detected"],
-                        statuses[stopped_player]["gap_recovered"],
-                    ),
-                    expected_gap_counts,
-                    statuses,
-                )
-                self.assertTrue(
-                    all(status["production_import_guard"] for status in statuses.values()),
-                    statuses,
-                )
-                self.assertTrue(
-                    all(not status["server_imports"] for status in statuses.values()),
-                    statuses,
-                )
-                self.assertEqual(
-                    sum(len(status["send_errors"]) for status in statuses.values()),
-                    0,
-                    statuses,
-                )
+                    self.assertTrue(
+                        all(status["production_import_guard"] for status in statuses.values()),
+                        statuses,
+                    )
+                    self.assertTrue(
+                        all(not status["server_imports"] for status in statuses.values()),
+                        statuses,
+                    )
+                    self.assertEqual(
+                        sum(len(status["send_errors"]) for status in statuses.values()),
+                        0,
+                        statuses,
+                    )
+                finally:
+                    for process in processes.values():
+                        if process.returncode is None:
+                            process.terminate()
+                    cleanup_results = await asyncio.gather(
+                        *(
+                            self._finish_process(
+                                process,
+                                status_path=root / f"{player_id}.status.json",
+                            )
+                            for player_id, process in processes.items()
+                        ),
+                        return_exceptions=True,
+                    )
+                    failures = [
+                        result for result in cleanup_results if isinstance(result, Exception)
+                    ]
+                    if failures:
+                        raise AssertionError(
+                            "client cleanup failures: " + " | ".join(map(str, failures))
+                        )
         finally:
-            for process in processes.values():
-                if process.returncode is None:
-                    process.terminate()
-            await asyncio.gather(
-                *(self._finish_process(process) for process in processes.values()),
-                return_exceptions=True,
-            )
             await server.close()
 
     async def test_separate_process_action_stop_resumes_within_replay_retention(self) -> None:
@@ -374,61 +409,125 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
         try:
             with TemporaryDirectory() as temporary_directory:
                 root = Path(temporary_directory)
-                for player_id in game.players:
-                    processes[player_id] = await self._start_client_process(
-                        player_id=player_id,
-                        registry=registry,
-                        uri=uri,
-                        root=root,
-                        inject_rejection=player_id == injected_player,
+                try:
+                    for player_id in game.players:
+                        processes[player_id] = await self._start_client_process(
+                            player_id=player_id,
+                            registry=registry,
+                            uri=uri,
+                            root=root,
+                            inject_rejection=player_id == injected_player,
+                        )
+                    await self._wait_for(
+                        lambda: game.game_result is not None,
+                        timeout=45,
+                        description="the server ticker to complete the game",
                     )
-                await self._wait_for(
-                    lambda: game.game_result is not None,
-                    timeout=45,
-                    description="the server ticker to complete the game",
-                )
-                await self._wait_for(
-                    lambda: all(
-                        (root / f"{player_id}.status.json").exists()
+                    await self._wait_for(
+                        lambda: all(
+                            (root / f"{player_id}.status.json").exists()
+                            for player_id in game.players
+                        ),
+                        timeout=15,
+                        description="all client statuses",
+                    )
+                    statuses = {
+                        player_id: json.loads(
+                            (root / f"{player_id}.status.json").read_text(encoding="utf-8")
+                        )
                         for player_id in game.players
-                    ),
-                    timeout=15,
-                    description="all client statuses",
-                )
-                statuses = {
-                    player_id: json.loads(
-                        (root / f"{player_id}.status.json").read_text(encoding="utf-8")
+                    }
+                    self.assertGreater(
+                        sum(len(status["action_rejections"]) for status in statuses.values()),
+                        0,
+                        statuses,
                     )
-                    for player_id in game.players
-                }
-                self.assertGreater(
-                    sum(len(status["action_rejections"]) for status in statuses.values()),
-                    0,
-                    statuses,
-                )
-                self.assertTrue(all(status["game_end"] for status in statuses.values()), statuses)
-                self.assertTrue(
-                    all(status["production_import_guard"] for status in statuses.values()),
-                    statuses,
-                )
-                self.assertTrue(
-                    all(not status["server_imports"] for status in statuses.values()),
-                    statuses,
-                )
-                self.assertEqual(
-                    sum(len(status["send_errors"]) for status in statuses.values()),
-                    0,
-                    statuses,
-                )
-                self.assertTrue(all(status["pid"] != os.getpid() for status in statuses.values()))
+                    self.assertTrue(all(status["game_end"] for status in statuses.values()), statuses)
+                    self.assertTrue(
+                        all(status["production_import_guard"] for status in statuses.values()),
+                        statuses,
+                    )
+                    self.assertTrue(
+                        all(not status["server_imports"] for status in statuses.values()),
+                        statuses,
+                    )
+                    self.assertEqual(
+                        sum(len(status["send_errors"]) for status in statuses.values()),
+                        0,
+                        statuses,
+                    )
+                    self.assertTrue(all(status["pid"] != os.getpid() for status in statuses.values()))
+                finally:
+                    for process in processes.values():
+                        if process.returncode is None:
+                            process.terminate()
+                    cleanup_results = await asyncio.gather(
+                        *(
+                            self._finish_process(
+                                process,
+                                status_path=root / f"{player_id}.status.json",
+                            )
+                            for player_id, process in processes.items()
+                        ),
+                        return_exceptions=True,
+                    )
+                    failures = [
+                        result for result in cleanup_results if isinstance(result, Exception)
+                    ]
+                    if failures:
+                        raise AssertionError(
+                            "client cleanup failures: " + " | ".join(map(str, failures))
+                        )
         finally:
-            for process in processes.values():
-                if process.returncode is None:
-                    process.terminate()
-            await asyncio.gather(
-                *(self._finish_process(process) for process in processes.values()),
-                return_exceptions=True,
-            )
+            await server.close()
+
+    async def test_driver_failure_writes_diagnostics(self) -> None:
+        game, registry, server, uri = await self._start_completion_server()
+        process: asyncio.subprocess.Process | None = None
+        try:
+            with TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                player_id = next(iter(game.players))
+                stdout_path = root / "driver.stdout"
+                stderr_path = root / "driver.stderr"
+                arguments = [
+                    os.sys.executable,
+                    str(CLIENT),
+                    "--uri", uri,
+                    "--game-id", GAME_ID,
+                    "--entry-token", registry.entry_tokens_for(GAME_ID)[player_id],
+                    "--credentials", str(root / f"{player_id}.credentials.json"),
+                    "--status", str(root / f"{player_id}.status.json"),
+                    "--inject-driver-error",
+                ]
+                with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+                    process = await asyncio.create_subprocess_exec(
+                        *arguments,
+                        cwd=str(PROJECT_ROOT),
+                        stdout=stdout_file,
+                        stderr=stderr_file,
+                    )
+                    await process.wait()
+                stdout = stdout_path.read_bytes()
+                stderr = stderr_path.read_bytes()
+                self.assertNotEqual(process.returncode, 0)
+                status = json.loads(
+                    (root / f"{player_id}.status.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(status["exception_type"], "RuntimeError")
+                self.assertEqual(
+                    status["exception_message"], "injected Phase 3.1 driver failure"
+                )
+                self.assertEqual(status["events_received"], 0)
+                self.assertEqual(status["actions_sent"], 0)
+                self.assertIn("RuntimeError", stderr.decode(errors="replace"))
+                self.assertEqual(stdout, b"")
+        finally:
+            if process is not None and process.returncode is None:
+                process.terminate()
+                await process.wait()
             await server.close()
 
     async def _wait_for(self, condition, *, timeout: float, description: str) -> None:
@@ -441,16 +540,31 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
         except TimeoutError as error:
             raise AssertionError(f"timed out waiting for {description}") from error
 
-    async def _finish_process(self, process: asyncio.subprocess.Process) -> None:
+    async def _finish_process(
+        self, process: asyncio.subprocess.Process, *, status_path: Path | None = None
+    ) -> None:
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
         except TimeoutError:
             process.kill()
             stdout, stderr = await process.communicate()
         if process.returncode not in {0, -15}:
+            diagnostics = [
+                f"stdout={stdout.decode(errors='replace')!r}",
+                f"stderr={stderr.decode(errors='replace')!r}",
+            ]
+            if status_path is not None:
+                try:
+                    status = status_path.read_text(encoding="utf-8")
+                except OSError as error:
+                    diagnostics.append(
+                        f"status_read_error={type(error).__name__}: {error}"
+                    )
+                else:
+                    diagnostics.append(f"status={status}")
             self.fail(
                 f"Phase 3.1 client {process.pid} exited {process.returncode}: "
-                f"{stdout.decode(errors='replace')} {stderr.decode(errors='replace')}"
+                + " ".join(diagnostics)
             )
 
 
