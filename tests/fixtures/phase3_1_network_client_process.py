@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
+from typing import Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -30,6 +32,46 @@ from ai_client.network import (
     StaleActionError,
     VoteAction,
 )
+
+DAYTIME_ACTION_SAFETY_SECONDS = 0.25
+CHAT_SENDER_LIMIT = 3
+
+
+def _is_expired_daytime_action_state(
+    payload: object, server_timestamp: object
+) -> bool:
+    """Reject action states that are already past the server's phase deadline.
+
+    The protocol's event timestamp and phase deadline use the server's
+    monotonic-second clock. The local monotonic clock also covers the time
+    spent waiting in the subprocess pipe after the event was published.
+    """
+
+    if not isinstance(payload, Mapping) or payload.get("phase") != "day":
+        return False
+    phase_ends_at = payload.get("phase_ends_at")
+    if (
+        not isinstance(phase_ends_at, int)
+        or isinstance(phase_ends_at, bool)
+        or not isinstance(server_timestamp, int)
+        or isinstance(server_timestamp, bool)
+    ):
+        return False
+    current_server_time = max(float(server_timestamp), time.monotonic())
+    return phase_ends_at - current_server_time <= DAYTIME_ACTION_SAFETY_SECONDS
+
+
+def _is_preferred_chat_sender(snapshot: object) -> bool:
+    """Limit simultaneous chat sends while retaining multiple client paths."""
+
+    player_id = getattr(snapshot, "player_id", None)
+    players = getattr(snapshot, "players", ())
+    player_ids = tuple(
+        item.get("player_id")
+        for item in players
+        if isinstance(item, Mapping) and isinstance(item.get("player_id"), str)
+    )
+    return isinstance(player_id, str) and player_id in player_ids[:CHAT_SENDER_LIMIT]
 
 
 async def run_driver(
@@ -57,6 +99,8 @@ async def run_driver(
     gap_detected = 0
     gap_recovered = 0
     rejection_injected = False
+    daytime_chat_sent = False
+    daytime_co_declared = False
     stop_gate = asyncio.Event()
 
     async def run_client() -> object:
@@ -85,10 +129,45 @@ async def run_driver(
             "player.action_state",
         }:
             continue
+        action_state = (
+            event.payload.get("action_state")
+            if event.type == "game.state_sync"
+            else event.payload
+        )
         snapshot = client.snapshot()
         for action in snapshot.actions:
+            latest_action_state = client.snapshot().action_state
+            daytime_action = getattr(action, "phase", None) == "day"
+            keep_chat_stop_scenario = stop_after == "chat" and isinstance(action, ChatAction)
+            keep_rejection_scenario = inject_rejection and isinstance(action, CoDeclareAction)
+            preferred_chat_sender = _is_preferred_chat_sender(snapshot)
+            if (
+                isinstance(action, ChatAction)
+                and not keep_chat_stop_scenario
+                and not preferred_chat_sender
+            ):
+                continue
+            if (
+                daytime_action
+                and not keep_chat_stop_scenario
+                and not keep_rejection_scenario
+                and (
+                    _is_expired_daytime_action_state(action_state, event.timestamp)
+                    or _is_expired_daytime_action_state(
+                        latest_action_state, event.timestamp
+                    )
+                )
+            ):
+                # One state push can expose more than one daytime action. A
+                # previous send or subprocess-pipe delay may consume the
+                # remaining phase time before this handle is reached.
+                continue
             key = (action.action_generation, action.type)
             if key in sent_action_generations:
+                continue
+            if isinstance(action, ChatAction) and daytime_chat_sent:
+                continue
+            if isinstance(action, CoDeclareAction) and daytime_co_declared:
                 continue
             try:
                 if isinstance(action, CoDeclareAction) and action.claimed_role_ids:
@@ -125,9 +204,12 @@ async def run_driver(
             sent_action_generations.add(key)
             if isinstance(action, ChatAction):
                 chat_sent += 1
+                daytime_chat_sent = True
                 stop_kind = "chat"
             else:
                 stop_kind = "action"
+                if isinstance(action, CoDeclareAction):
+                    daytime_co_declared = True
             if stop_after == stop_kind:
                 if stop_marker_path is None:
                     raise RuntimeError("stop marker is required when stop_after is set")

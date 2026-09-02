@@ -69,6 +69,7 @@ DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先
 [ ] git diff 確認 → コミット
 [ ] CURRENT_STATE.md 更新（Current Phase / Completed / Next Task / Test Status）
     Test Status には commit hash を入れる。
+    Known failing が「なし」以外なら、対応する OPEN / IN_PROGRESS 指摘を残す。
     **Latest Review は書き換えない**（Reviewer の担当）
 [ ] 新しい判断があれば decisions/、再発しそうな失敗があれば failures/
 [ ] Phase 全体が完了したときのみ handoffs/PHASE<N>_HANDOFF.md を作成

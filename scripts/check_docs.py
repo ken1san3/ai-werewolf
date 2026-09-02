@@ -125,6 +125,28 @@ def check_review_inbox() -> None:
             fail("review-inbox", f"{m.group(1)} が FIXED なのに Fix: 行が無い")
 
 
+def check_known_failures_have_active_review() -> None:
+    """Keep the test-status failure list connected to the work queue."""
+
+    state = read(CURRENT_STATE)
+    status = re.search(r"(?ms)^## Test Status\s*\n(.*?)(?=^## |\Z)", state)
+    if status is None:
+        return
+    known = re.search(r"(?m)^Known failing:\s*(.+)$", status.group(1))
+    if known is None:
+        return
+    value = known.group(1).replace("**", "").replace("`", "").strip()
+    if value == "なし" or value.startswith("なし。"):
+        return
+    inbox = read(DOCS / "REVIEW_INBOX.md")
+    active = re.findall(r"(?m)^## R-\d{8}-\d+ \[(?:OPEN|IN_PROGRESS)\]", inbox)
+    if not active:
+        fail(
+            "known-failing-review",
+            "CURRENT_STATE.md に既知の失敗があるのに REVIEW_INBOX.md に OPEN / IN_PROGRESS が無い",
+        )
+
+
 # --- 5. ai_status が参照する RUNBOOK の role 節が実在するか ----------------
 def check_runbook_sections() -> None:
     runbook = read(DOCS / "RUNBOOK.md")
@@ -214,15 +236,45 @@ def check_next_task_file() -> None:
 
 # --- 7. DESIGN が挙げるイベント名が実装に存在するか ---------------------------
 def check_event_names() -> None:
-    core_events = set()
-    for path in CORE.glob("*.py"):
-        core_events |= set(re.findall(r'type="([A-Z][A-Z_]+)"', read(path)))
+    core_events = core_event_types()
     design = read(DESIGN)
     for name in set(re.findall(r"`([A-Z][A-Z_]{4,})`", design)):
         if name in {"PUBLIC", "PRIVATE", "SERVER", "AI"}:
             continue
         if name not in core_events:
             fail("event-name", f"DESIGN が `{name}` を挙げるが実装に無い")
+
+
+def core_event_types() -> set[str]:
+    core_events = set()
+    for path in CORE.glob("*.py"):
+        core_events |= set(re.findall(r'type="([A-Z][A-Z_]+)"', read(path)))
+    return core_events
+
+
+def check_world_core_event_catalog() -> None:
+    reducer = read(ROOT / "ai_client" / "world" / "reducer.py")
+    block = re.search(
+        r"(?ms)^KNOWN_CORE_TYPES = frozenset\(\s*\{(.*?)\}\s*\)",
+        reducer,
+    )
+    if block is None:
+        fail("world-event-catalog", "reducer.py の KNOWN_CORE_TYPES を見つけられない")
+        return
+    catalog = set(re.findall(r'"([A-Z][A-Z_]+)"', block.group(1)))
+    core_events = core_event_types()
+    missing = sorted(core_events - catalog)
+    extra = sorted(catalog - core_events)
+    if missing:
+        fail(
+            "world-event-catalog",
+            "core にあって KNOWN_CORE_TYPES に無い event type: " + ", ".join(missing),
+        )
+    if extra:
+        fail(
+            "world-event-catalog",
+            "KNOWN_CORE_TYPES にあって core に無い event type: " + ", ".join(extra),
+        )
 
 
 def rule_key_paths(block: str) -> set[str]:
@@ -410,11 +462,13 @@ def main() -> int:
         check_decision_refs,
         check_open_questions,
         check_review_inbox,
+        check_known_failures_have_active_review,
         check_runbook_sections,
         check_design_target,
         check_design_gate_status,
         check_next_task_file,
         check_event_names,
+        check_world_core_event_catalog,
         check_rule_keys,
         check_role_table,
         check_registry_ids,

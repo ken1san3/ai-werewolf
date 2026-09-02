@@ -154,6 +154,63 @@ class DesignGateTests(unittest.TestCase):
 
         self.assertTrue(any("R-20260902-99 が重複" in problem for problem in check_docs.problems))
 
+    def test_docs_checker_requires_active_review_for_known_failure(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        state = "## Test Status\nKnown failing: F006\n\n## Latest Review\n"
+
+        def read(path: Path) -> str:
+            if path == check_docs.CURRENT_STATE:
+                return state
+            if path == check_docs.DOCS / "REVIEW_INBOX.md":
+                return "## Open\n\n現在、OPEN / IN_PROGRESS の指摘はありません。\n"
+            raise AssertionError(f"unexpected read: {path}")
+
+        with patch.object(check_docs, "read", side_effect=read):
+            check_docs.check_known_failures_have_active_review()
+
+        self.assertTrue(any("既知の失敗" in problem for problem in check_docs.problems))
+
+    def test_docs_checker_accepts_known_failure_with_active_review(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        state = "## Test Status\nKnown failing: F006\n\n## Latest Review\n"
+        inbox = "## R-20260902-116 [OPEN] High\n"
+
+        def read(path: Path) -> str:
+            if path == check_docs.CURRENT_STATE:
+                return state
+            if path == check_docs.DOCS / "REVIEW_INBOX.md":
+                return inbox
+            raise AssertionError(f"unexpected read: {path}")
+
+        with patch.object(check_docs, "read", side_effect=read):
+            check_docs.check_known_failures_have_active_review()
+
+        self.assertEqual(check_docs.problems, [])
+
+    def test_docs_checker_accepts_current_world_event_catalog(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+
+        check_docs.check_world_core_event_catalog()
+
+        self.assertEqual(check_docs.problems, [])
+
+    def test_docs_checker_rejects_missing_and_extra_world_event_catalog_entries(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        reducer = 'KNOWN_CORE_TYPES = frozenset(\n    {"EVENT_B"}\n)\n'
+
+        with (
+            patch.object(check_docs, "read", return_value=reducer),
+            patch.object(check_docs, "core_event_types", return_value={"EVENT_A"}),
+        ):
+            check_docs.check_world_core_event_catalog()
+
+        self.assertTrue(any("EVENT_A" in problem for problem in check_docs.problems))
+        self.assertTrue(any("EVENT_B" in problem for problem in check_docs.problems))
+
 
 if __name__ == "__main__":
     unittest.main()
