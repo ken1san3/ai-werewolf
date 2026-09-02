@@ -202,7 +202,8 @@ class WorldState:
             self._commit()
             return
         if isinstance(event, SequenceGapDetected):
-            self._freshness = Freshness.STALE
+            if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
+                self._freshness = Freshness.STALE
             self._commit()
             return
         if isinstance(event, FatalTermination):
@@ -229,7 +230,7 @@ class WorldState:
             ClientLifecycle.RECONNECT_WAIT,
             ClientLifecycle.STOPPING,
         }:
-            if self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
+            if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._freshness = Freshness.STALE
         elif lifecycle is ClientLifecycle.CONNECTED:
             if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:

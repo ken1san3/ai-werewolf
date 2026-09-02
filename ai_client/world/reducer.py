@@ -152,6 +152,12 @@ def _required_nullable_string(payload: Mapping[str, Any], key: str) -> str | Non
     return _optional_string(payload, key)
 
 
+def _required_nullable_int(payload: Mapping[str, Any], key: str) -> int | None | object:
+    if key not in payload:
+        return _INVALID
+    return _optional_int(payload, key)
+
+
 def _required_day_phase(payload: Mapping[str, Any]) -> tuple[int, str] | None:
     day = payload.get("day")
     phase = payload.get("phase")
@@ -467,7 +473,7 @@ class WorldReducer:
             self.phase = PhaseView(event_phase, event_day, ends)
             self._append(PhaseTransitionRecord(self._take_order(), event_day, event_phase, ends))
         elif event_type in {"DAY_EXTENDED", "DAY_SHORTENED"}:
-            ends = _optional_int(payload, "phase_ends_at")
+            ends = _required_nullable_int(payload, "phase_ends_at")
             event_day = payload.get("day")
             event_phase = _required_string(payload, "phase")
             used = _optional_int(payload, "extensions_used")

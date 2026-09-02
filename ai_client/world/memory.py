@@ -50,12 +50,34 @@ def logical_record_bytes(record: HistoryRecord) -> int:
 
 def _record_player_ids(record: HistoryRecord) -> frozenset[str]:
     values: list[str] = []
-    for name in ("player_id", "target_player_id", "voter_player_id", "selected_player_id"):
+    for name in (
+        "player_id",
+        "target_player_id",
+        "voter_player_id",
+        "selected_player_id",
+        "lynched_player_id",
+    ):
         value = getattr(record, name, None)
         if isinstance(value, str):
             values.append(value)
     values.extend(
         value for value in getattr(record, "candidate_player_ids", ()) if isinstance(value, str)
+    )
+    values.extend(
+        value
+        for value in getattr(record, "runoff_candidate_player_ids", ())
+        if isinstance(value, str)
+    )
+    tallies = getattr(record, "tallies", {})
+    if hasattr(tallies, "keys"):
+        values.extend(value for value in tallies.keys() if isinstance(value, str))
+    player_results = getattr(record, "player_results", {})
+    if hasattr(player_results, "keys"):
+        values.extend(value for value in player_results.keys() if isinstance(value, str))
+    values.extend(
+        player.player_id
+        for player in getattr(record, "players", ())
+        if isinstance(getattr(player, "player_id", None), str)
     )
     for entry in getattr(record, "final_votes", ()):
         for name in ("voter_player_id", "target_player_id"):
@@ -111,6 +133,8 @@ class HistoryStore:
         size = logical_record_bytes(record)
         self._total_seen += 1
         if size > self.max_bytes:
+            while self._records:
+                self._evict_oldest()
             self._dropped_count += 1
             self._dropped_through_order = record.order
             return

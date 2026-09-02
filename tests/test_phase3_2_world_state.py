@@ -5,7 +5,16 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from ai_client.network import ClientLifecycle, ClientSnapshot, ServerEvent
+from ai_client.network import (
+    ClientLifecycle,
+    ClientExitReason,
+    ClientSnapshot,
+    LifecycleChanged,
+    NetworkClient,
+    NetworkClientConfig,
+    SequenceGapDetected,
+    ServerEvent,
+)
 from ai_client.network.types import immutable_mapping
 from ai_client.world import (
     AbilityResultRecord,
@@ -17,6 +26,7 @@ from ai_client.world import (
     Freshness,
     GameLifecycleRecord,
     HistoryQuery,
+    KnownUnmodeledEventRecord,
     MalformedEventRecord,
     PhaseTimingChangedRecord,
     PhaseTransitionRecord,
@@ -87,6 +97,28 @@ class ListSource:
         for item in self._events:
             await asyncio.sleep(0)
             yield item
+
+
+class BlockingSource:
+    def __init__(self) -> None:
+        self._snapshot = ClientSnapshot(lifecycle=ClientLifecycle.CONNECTED)
+        self.events_started = asyncio.Event()
+
+    def snapshot(self) -> ClientSnapshot:
+        return self._snapshot
+
+    async def events(self):
+        self.events_started.set()
+        await asyncio.Future()
+        yield None  # pragma: no cover
+
+
+class NoopCredentialStore:
+    async def load(self):
+        return None
+
+    async def save(self, checkpoint) -> None:
+        del checkpoint
 
 
 def async_test(function):
@@ -229,7 +261,7 @@ def test_public_models_are_deeply_immutable() -> None:
 
 
 def test_history_retention_is_global_oldest_first_and_reports_loss() -> None:
-    from ai_client.world.memory import HistoryStore
+    from ai_client.world.memory import HistoryStore, logical_record_bytes
 
     store = HistoryStore(max_records=2, max_bytes=100_000)
     store.append(ChatRecord(1, 1, "day", "public", "p0", "A", "one"))
@@ -240,3 +272,212 @@ def test_history_retention_is_global_oldest_first_and_reports_loss() -> None:
     assert retention.dropped_count == 1
     assert retention.dropped_through_order == 1
     assert store.query(HistoryQuery(after_order=1))[0].order == 2
+
+    byte_limited = HistoryStore(
+        max_records=3,
+        max_bytes=logical_record_bytes(ChatRecord(1, 1, "day", "public", "p0", "A", "one")) * 2 - 1,
+    )
+    byte_limited.append(ChatRecord(1, 1, "day", "public", "p0", "A", "one"))
+    byte_limited.append(ChatRecord(2, 1, "day", "public", "p0", "A", "two"))
+    assert [record.order for record in byte_limited.records] == [2]
+    assert byte_limited.retention().dropped_through_order == 1
+
+
+@async_test
+async def test_initial_lifecycle_stays_empty_until_sync_then_recovers_from_stale() -> None:
+    source = ListSource([], last_seq=0, lifecycle=ClientLifecycle.NEW)
+    world = WorldState(source)
+
+    world._consume(LifecycleChanged(ClientLifecycle.NEW, ClientLifecycle.JOINING))
+    world._consume(LifecycleChanged(ClientLifecycle.JOINING, ClientLifecycle.SYNCHRONIZING))
+    world._consume(SequenceGapDetected(1, 2, 1))
+    assert world.snapshot().freshness is Freshness.EMPTY
+
+    source._snapshot = ClientSnapshot(lifecycle=ClientLifecycle.CONNECTED, last_seq=1)
+    world._consume(event("game.state_sync", 1, sync_payload()))
+    assert world.snapshot().freshness is Freshness.CURRENT
+
+    world._consume(LifecycleChanged(ClientLifecycle.CONNECTED, ClientLifecycle.RECONNECT_WAIT))
+    assert world.snapshot().freshness is Freshness.STALE
+    source._snapshot = ClientSnapshot(lifecycle=ClientLifecycle.CONNECTED, last_seq=2)
+    world._consume(event("game.state_sync", 2, sync_payload()))
+    assert world.snapshot().freshness is Freshness.CURRENT
+
+
+@async_test
+async def test_history_player_filters_and_co_view_keep_global_order() -> None:
+    source = ListSource([], last_seq=6, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source)
+    events = (
+        event("game.state_sync", 1, sync_payload()),
+        event("game.event", 2, {"event_type": "CO_DECLARED", "event_payload": {"player_id": "p0", "claimed_role_id": "villager", "comment": "first"}}),
+        event("game.event", 3, {"event_type": "CO_REPORTED", "event_payload": {"player_id": "p1", "kind": "inspect", "target_player_id": "p0", "claimed_result": "wolf"}}),
+        event("game.event", 4, {"event_type": "CO_DECLARED", "event_payload": {"player_id": "p1", "claimed_role_id": "seer", "comment": "second"}}),
+        event("game.event", 5, {"event_type": "VOTE_RESOLVED", "event_payload": {"day": 1, "phase": "vote", "result": "runoff", "tallies": {"p0": 2}, "lynched_player_id": "p1", "runoff_candidate_player_ids": ["p2"]}}),
+    )
+    for received in events:
+        world._consume(received)
+
+    assert [record.order for record in world.co_for_day(1).records] == [3, 4, 5]
+    for player_id in ("p0", "p1", "p2"):
+        records = world.history(HistoryQuery(player_id=player_id)).records
+        assert any(isinstance(record, VoteResultRecord) for record in records)
+
+
+@async_test
+async def test_oversized_record_creates_a_consistent_suffix_window() -> None:
+    source = ListSource([], last_seq=0, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source, config=WorldStateConfig(max_history_records=4, max_history_bytes=180))
+    memory = world._reducer.memory
+    memory.append(ChatRecord(1, 1, "day", "public", "p0", "A", "small"))
+    memory.append(ChatRecord(2, 1, "day", "public", "p0", "A", "x" * 500))
+    memory.append(ChatRecord(3, 1, "day", "public", "p0", "A", "later"))
+
+    retention = memory.retention()
+    assert [record.order for record in memory.records] == [3]
+    assert retention.dropped_count == 2
+    assert retention.dropped_through_order == 2
+    assert retention.first_retained_order == 3
+    assert retention.last_order == 3
+    assert world.history().complete is False
+    assert world.history(HistoryQuery(after_order=2)).complete is True
+
+
+@async_test
+async def test_timing_event_requires_nullable_deadline_without_mutating_current_view() -> None:
+    source = ListSource([], last_seq=5, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source)
+    world._consume(event("game.state_sync", 1, sync_payload()))
+    initial_records = len(world.history().records)
+
+    invalid_payloads = (
+        {"day": 1, "phase": "day", "extensions_used": 1},
+        {"day": 1, "phase": "day", "phase_ends_at": "late", "extensions_used": 1},
+    )
+    for seq, payload in enumerate(invalid_payloads, start=2):
+        world._consume(event("game.event", seq, {"event_type": "DAY_EXTENDED", "event_payload": payload}))
+        assert world.snapshot().phase is not None
+        assert world.snapshot().phase.phase_ends_at == 120
+        assert not any(isinstance(record, PhaseTimingChangedRecord) for record in world.history().records[initial_records:])
+
+    world._consume(event("game.event", 4, {"event_type": "DAY_SHORTENED", "event_payload": {"day": 1, "phase": "day", "phase_ends_at": None, "extensions_used": 1}}))
+    assert world.snapshot().phase is not None
+    assert world.snapshot().phase.phase_ends_at is None
+    assert isinstance(world.history().records[-1], PhaseTimingChangedRecord)
+    world._consume(event("game.event", 5, {"event_type": "DAY_EXTENDED", "event_payload": {"day": 1, "phase": "day", "phase_ends_at": 180, "extensions_used": 2}}))
+    assert world.snapshot().phase is not None
+    assert world.snapshot().phase.phase_ends_at == 180
+    assert world.snapshot().malformed_event_count == 2
+
+
+@async_test
+async def test_sync_and_incremental_history_normalize_to_the_same_records() -> None:
+    history = [
+        {"type": "game.event", "payload": {"event_type": "PHASE_STARTED", "event_payload": {"phase": "day", "day": 1, "phase_ends_at": 120}}},
+        {"type": "chat.message", "payload": {"channel": "public", "message": {"player_id": "p0", "display_name": "Alice", "message": "hello"}}},
+        {"type": "game.event", "payload": {"event_type": "CO_DECLARED", "event_payload": {"player_id": "p0", "claimed_role_id": "villager", "comment": "claim"}}},
+    ]
+    sync = sync_payload()
+    sync["history"] = history
+    source = ListSource([], last_seq=4, lifecycle=ClientLifecycle.CONNECTED)
+    from_sync = WorldState(source)
+    from_live = WorldState(source)
+    from_sync._consume(event("game.state_sync", 1, sync))
+
+    initial = sync_payload()
+    initial["history"] = []
+    from_live._consume(event("game.state_sync", 1, initial))
+    for seq, entry in enumerate(history, start=2):
+        from_live._consume(event(entry["type"], seq, entry["payload"]))
+
+    assert from_sync.history().records == from_live.history().records
+
+
+@async_test
+async def test_repeated_sync_replaces_history_and_known_unmodeled_stays_distinct() -> None:
+    source = ListSource([], last_seq=3, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source)
+    first = sync_payload()
+    second = sync_payload()
+    second["history"] = [
+        {"type": "game.event", "payload": {"event_type": "CO_DECLARED", "event_payload": {"player_id": "p1", "claimed_role_id": "seer", "comment": "new"}}},
+    ]
+    world._consume(event("game.state_sync", 1, first))
+    world._consume(event("game.state_sync", 2, second))
+    assert len(world.history().records) == 1
+    assert isinstance(world.history().records[0], CoDeclarationRecord)
+
+    world._consume(event("game.event", 3, {"event_type": "ACTION_SUBMITTED", "event_payload": {}}))
+    assert isinstance(world.history().records[-1], KnownUnmodeledEventRecord)
+    assert world.snapshot().known_unmodeled_event_count == 1
+    assert world.snapshot().unknown_event_count == 0
+
+
+@async_test
+async def test_remaining_public_event_shapes_are_typed_without_unknown_records() -> None:
+    source = ListSource([], last_seq=3, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source)
+    world._consume(event("game.state_sync", 1, sync_payload()))
+    world._consume(event("game.event", 2, {"event_type": "GAME_CREATED", "event_payload": {"game_id": "game-1", "day": 1, "phase": "day", "players": [{"player_id": "p0", "display_name": "Alice"}, {"player_id": "p1", "display_name": "Bob"}]}}))
+    world._consume(event("game.event", 3, {"event_type": "DAY_SHORTENED", "event_payload": {"day": 1, "phase": "day", "phase_ends_at": 90, "extensions_used": None}}))
+
+    assert isinstance(world.history().records[-2], GameLifecycleRecord)
+    assert isinstance(world.history().records[-1], PhaseTimingChangedRecord)
+    assert world.snapshot().unknown_event_count == 0
+    assert world.snapshot().malformed_event_count == 0
+    assert world.snapshot().phase is not None
+    assert world.snapshot().phase.phase_ends_at == 90
+
+
+@async_test
+async def test_burst_consumption_and_stop_release_waiters_without_stopping_source() -> None:
+    burst = [event("game.state_sync", 1, sync_payload())]
+    burst.extend(
+        event("chat.message", seq, {"channel": "public", "message": {"message": str(seq)}})
+        for seq in range(2, 66)
+    )
+    burst_source = ListSource(burst, last_seq=65, lifecycle=ClientLifecycle.ENDED)
+    burst_world = WorldState(burst_source)
+    await burst_world.run()
+    assert burst_world.snapshot().last_applied_seq == 65
+
+    source = BlockingSource()
+    world = WorldState(source)
+    runner = asyncio.create_task(world.run())
+    await source.events_started.wait()
+    waiter = asyncio.create_task(world.wait_for_update(world.snapshot().version))
+    await world.stop()
+    exited = await runner
+    waited = await waiter
+    assert exited.reason.value == "STOPPED"
+    assert waited.freshness is Freshness.ENDED
+    assert source._snapshot.lifecycle is ClientLifecycle.CONNECTED
+
+
+@async_test
+async def test_consumer_failure_leaves_network_queue_to_consumer_overrun() -> None:
+    client = NetworkClient(
+        NetworkClientConfig(
+            "ws://127.0.0.1:1",
+            "game-1",
+            "entry-token",
+            inbound_event_capacity=2,
+        ),
+        NoopCredentialStore(),
+    )
+    world = WorldState(client)
+
+    def fail_reducer(_event: ServerEvent):
+        raise RuntimeError("reducer failure")
+
+    world._reducer.apply_server_event = fail_reducer  # type: ignore[method-assign]
+    await client._publish(event("game.event", 1, {"event_type": "PUBLIC_NOTIFY", "event_payload": {"notify_id": "n"}}))
+    exited = await world.run()
+    assert exited.freshness is Freshness.FAILED
+
+    notice = LifecycleChanged(ClientLifecycle.CONNECTED, ClientLifecycle.RECONNECT_WAIT)
+    await client._publish(notice)
+    await client._publish(notice)
+    with pytest.raises(Exception) as raised:
+        await client._publish(notice)
+    assert getattr(raised.value, "reason", None) is ClientExitReason.CONSUMER_OVERRUN

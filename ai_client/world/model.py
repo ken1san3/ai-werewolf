@@ -391,7 +391,7 @@ class CoView:
 
     @property
     def records(self) -> tuple[HistoryRecord, ...]:
-        return self.declarations + self.reports
+        return tuple(sorted(self.declarations + self.reports, key=lambda record: record.order))
 
 
 @dataclass(frozen=True)
