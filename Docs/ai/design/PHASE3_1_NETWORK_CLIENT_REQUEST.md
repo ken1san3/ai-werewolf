@@ -4,7 +4,7 @@ Issued by: Reviewer / Design Gate（2026-09-01、D051）
 For: Detailed Design
 Status: REQUESTED — 成果物 `PHASE3_1_NETWORK_CLIENT_DESIGN.md` が
 Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RUNBOOK §4.3）。
-Request status: CLOSED — 対応設計の承認、実装、検証が完了。
+Request status: OPEN
 
 ```
 DESIGN: REQUIRED
@@ -121,3 +121,101 @@ World State も再接続制御も持たない。**設計の出発点にはでき
 - 責務分離、state / lifecycle、failure handling、concurrency 前提のいずれかが曖昧
 - 3.2〜3.5 や Phase 4 を先取りしている
 - 関数内部まで書いてある（コードの二重管理）
+
+
+---
+
+## Addendum B — Resume の配送契約と、終了をまたぐ復旧（2026-09-03、R-20260903-03 / 05）
+
+Issued by: Reviewer / Claude（Primary Design Gate、D051）
+For: Detailed Design / Sol
+**この Addendum は本 REQUEST の一部である。** `PHASE3_1_NETWORK_CLIENT_DESIGN.md` は
+`DRAFT` へ戻した。新しいファイルを作らず同じ `_DESIGN.md` を改訂し `Status: IN_REVIEW` にする。
+改訂後の `APPROVED` は Claude が付ける（D053）。
+
+### 判定
+
+```
+DESIGN: REQUIRED
+```
+
+**Accepted decision の変更にあたるため、Implementer にも Reviewer にも局所判断の権限が無い。**
+
+### B1. Resume の配送順（R-20260903-03）
+
+**現状は canonical と矛盾している。**
+
+`D047_PLAYER_STATE_DELIVERY.md`（Accepted）:
+
+```
+  検証済みの送信イベントをプレイヤー単位で保存し、Resume は `last_seq` より後のものを
+  元の envelope・seq のまま再送する。**その後に resume 応答、新しい全量 sync を送る。**
+```
+
+`handoffs/PHASE3_1_HANDOFF.md`:
+
+```
+  Resume replay が ACK より先に届く経路を維持し、ACK の欠落・不一致・重複・payload 不整合を
+  `INVALID_SERVER_MESSAGE` として拒否する。
+```
+
+canonical は **replay → ACK → sync** である。ところが commit `f8c6668` で
+`server/network/server.py` は **ACK → replay → sync** へ変え、
+`ai_client/network/client.py` には `_resume_ack_sequence` の2段判定が入り、
+`tests/test_state_delivery.py` と `tests/test_network_review_regressions.py` は
+wire `[4, 3, 5]` を明示的に固定するよう書き換えられた。
+
+**この配送順の変更を指示したのは Reviewer / Claude である（R-20260903-01 の Required 1）。
+D047 を確認せずに書いた。判断を誤った。** Luna は指示どおりに実装している。
+
+決めること。**採らなかった案と理由を1〜2行で書くこと。**
+
+- **A案（既定）: canonical へ戻す。** サーバの enqueue 順を replay → ACK → sync に戻し、
+  **クライアント側だけで直す。** 認証前に届いた replay を上位 consumer へ公開せず、
+  ACK を受理して検証したあとに順序どおり適用・公開する。
+  `_resume_ack_sequence` の特例と wire の seq 非単調は不要になる
+- **B案: D047 を supersede する。** 新しい decision（`decisions/` の次番）を書き、
+  ACK 先行に変える理由、`seq` の採番順と配送順が別物であること、
+  欠番検出への影響を明記する。`DESIGN.md` §9.2 と handoff も同時に直す
+
+**A案を既定とする。** B案を採るなら、A案では解決できない理由を示すこと。
+どちらでも、決着後に `DESIGN.md` §9.2 の「単調増加」の意味を明確にすること。
+
+### B2. 終了をまたぐ復旧（R-20260903-05）
+
+`ai_client/network/client.py:672` は top-level の `game.event` が `GAME_ENDED` の
+ときだけ `_GameEndedSignal` を上げる。`ai_client/world/service.py:207` も同じである。
+Reviewer が実コードで確認した。結果、Sol が実サーバで再現した2つが起きる。
+
+1. 終了が retained replay に含まれると、**そのあとに来る全量 sync を読む前に終了する。**
+   新プロセスの world は `self=None` / `phase=night` のまま。
+   D047 の「sync を現在地として既存状態を置換」に到達しない
+2. 切断中に終了した場合、`GAME_ENDED` は全量 sync の `history` の中にしか現れない。
+   どちらの層もそれを終了と解釈せず、**CONNECTED / CURRENT のまま待ち続ける**
+
+決めること。**採らなかった案と理由を1〜2行で書くこと。**
+
+- 全量 sync の commit と終了通知の**順序と所有者**。
+  「baseline を確定してから終了する」を誰が保証するか
+- replay 中の `GAME_ENDED` を受けたとき、後続の ACK / sync をどこまで読んでから終了するか。
+  読み切る前に socket が閉じられた場合はどうするか
+- sync の `history` に終了がある場合の終了判定を、どちらの層の責務にするか。
+  **公開権限は変えない**（`history` は既に本人へ許可された内容である）
+- 有限時間で終了することの保証。待ち続けないための上限をどこに置くか
+- `WorldState` の `Freshness.ENDED` と `NetworkClient` の `ClientExitReason.GAME_ENDED` の関係
+
+### Out of scope
+
+- protocol schema・ゲームコア・content の変更
+- 公開権限の変更（誰に何を送るか）
+- Phase 3.1 完走テストの検証コントラクト（R-20260903-02 / 06。別の設計で扱う）
+- `WorldState` の recovery sync 拒否後の lifecycle（R-20260903-04。承認済み Addendum A の
+  範囲内なので Implementer が直す）
+
+### この設計が承認されない条件
+
+- A案 / B案のどちらを採るかが決まっていない
+- B案なのに新しい decision が無い、または D047 を supersede すると書いていない
+- B2 の「誰が終了を宣言するか」が層をまたいで曖昧なまま
+- sync-only 経路が有限時間で終了する保証が無い
+- 公開権限を変えている

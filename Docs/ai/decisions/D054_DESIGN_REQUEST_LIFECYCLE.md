@@ -21,6 +21,11 @@ REQUEST の設計作業状態と Gate の開閉状態を分離する。`Status:`
 `Status: APPROVED` のときだけとする。対応設計が欠落・未承認、または明示状態が不正な
 場合は Gate に残し、`check_docs.py` が不整合として報告する。
 
+同じサブPhaseの複数の REQUEST を同時に OPEN にしてよい。`CURRENT_STATE.md` の
+Next Task には `Target design:` を1行置き、現在の実装対象となる `_DESIGN.md` を
+ファイル名で名指しする。Design Gate はその対象設計が存在し `Status: APPROVED` の
+ときだけ実装を許可する。
+
 ## Why
 
 REQUEST の作業状態を壊さずに、実装済み要求を明示的に閉じられる。承認前の要求が
@@ -31,5 +36,7 @@ REQUEST の作業状態を壊さずに、実装済み要求を明示的に閉じ
 
 - 1サブPhaseに複数の REQUEST / DESIGN の対を置ける。
 - `Request status: CLOSED` は実装完了時に Implementer が更新する。
-- `Design gate: REQUIRED` は開いている要求がちょうど1件のときだけ実装を許可する。
+- `Design gate: REQUIRED` は開いている要求が1件以上のとき Gate を有効にする。
+  実装対象は `CURRENT_STATE.md` の `Target design:` で名指しし、対応する `_DESIGN.md`
+  が `Status: APPROVED` のときだけ実装を許可する。
 - `check_docs.py` は Request status の語彙と CLOSED の対応設計承認を検査する。

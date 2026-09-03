@@ -350,6 +350,11 @@ Required tests。
 開いている REQUEST だけであり、`CLOSED` の要求は除外する。対応設計が未承認・欠落の
 `CLOSED` は除外せず、`check_docs.py` で不整合として報告する。
 
+`Design gate: REQUIRED` のときは開いている REQUEST が1件以上あればよい。
+`CURRENT_STATE.md` の `Next Task` に `Target design:` を1行置いて現在の主対象となる
+`_DESIGN.md` をファイル名で名指しし、Design Gate はその対応設計の `Status: APPROVED`
+を実装許可の条件にする。複数の REQUEST が OPEN でも、主対象以外を暗黙に選ばない。
+
 | ファイル | 誰が書くか | 何のためか |
 |---|---|---|
 | `PHASE<N>_<M>_<名前>_REQUEST.md` | Reviewer / Implementer | 依頼。`DESIGN: REQUIRED` と `Request status:` の宣言 |
@@ -372,7 +377,8 @@ SUPERSEDED  作り直した。後継を1行で指す
 **設計作業の承認は `_DESIGN.md` の `Status:` に書く。** `_REQUEST.md` の
 `Status:` は依頼の作業状態として `REQUESTED` のまま置いてよい。
 実装と検証まで終えたときだけ、別行の `Request status: CLOSED` へ更新する。
-Design Gate は `_DESIGN.md` の承認状態と、REQUEST の open / closed の両方を見る。
+Design Gate は `_DESIGN.md` の承認状態、REQUEST の open / closed、
+`CURRENT_STATE.md` の `Target design:` を見る。
 
 ### 4.4 終了時
 

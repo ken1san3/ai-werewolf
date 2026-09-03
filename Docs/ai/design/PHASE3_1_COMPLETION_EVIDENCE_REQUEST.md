@@ -10,6 +10,12 @@ Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RU
 DESIGN: REQUIRED
 ```
 
+Request status: OPEN
+
+設計は APPROVED だが R-20260903-02 / 06 が未解決で、実装と検証は完了していないため
+REQUEST を OPEN に戻した。R-20260903-07 の修正により、Addendum B の設計要求と
+この検証コントラクト要求を同時に Gate へ提示できる。
+
 対象は `tests/` のみ。`ai_client/` と `server/` は変更しない。
 
 ## Reason
