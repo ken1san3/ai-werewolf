@@ -153,6 +153,7 @@ class NetworkClient:
         self._resume_last_seq_requested: int | None = None
         self._join_retry_after_ambiguous = False
         self._resume_sync_required = False
+        self._resume_ack_sequence: int | None = None
         self._sync_deadline: float | None = None
         self._sequence_gap_previous_seq: int | None = None
         self._background_failure: _FatalFailure | _TransientFailure | None = None
@@ -366,6 +367,7 @@ class NetworkClient:
             self._checkpoint.last_seq if self._checkpoint is not None else None
         )
         self._resume_sync_required = False
+        self._resume_ack_sequence = None
         self._sync_deadline = None
         self._background_failure = None
         await self._set_lifecycle(
@@ -551,10 +553,10 @@ class NetworkClient:
                     "session.joined was not requested",
                 )
 
-        if is_sync_barrier and not self._authenticated:
+        if not self._authenticated and message_type not in {"session.joined", "session.resumed"}:
             raise _FatalFailure(
                 ClientExitReason.INVALID_SERVER_MESSAGE,
-                "game.state_sync arrived before session authentication",
+                f"server event arrived before session authentication: {message_type}",
             )
 
         if (
@@ -563,20 +565,36 @@ class NetworkClient:
             and message_type == "session.resumed"
             and sequence > previous_seq + 1
         ):
-            await self._publish(
-                SequenceGapDetected(
-                    expected_seq=previous_seq + 1,
-                    received_seq=sequence,
-                    connection_generation=self._connection_generation,
-                )
-            )
-            self._resume_sync_required = True
-            if self._sequence_gap_previous_seq is None:
-                self._sequence_gap_previous_seq = previous_seq
+            # The server allocates the authentication reply after the
+            # retained events, but sends the reply first. Hold its sequence
+            # as a control marker so the following retained event can still
+            # be consumed from the requested checkpoint.
+            self._resume_ack_sequence = sequence
             self._authenticated = True
             self._state.apply_server_event(message)
             await self._publish(self._server_event(message))
             return
+
+        if self._resume_ack_sequence is not None:
+            if sequence == previous_seq + 1:
+                # The next message is the first retained replay event; its
+                # sequence is intentionally below the already-published ack.
+                self._resume_ack_sequence = None
+            else:
+                ack_sequence = self._resume_ack_sequence
+                self._resume_ack_sequence = None
+                await self._publish(
+                    SequenceGapDetected(
+                        expected_seq=previous_seq + 1,
+                        received_seq=ack_sequence,
+                        connection_generation=self._connection_generation,
+                    )
+                )
+                self._resume_sync_required = True
+                if self._sequence_gap_previous_seq is None:
+                    self._sequence_gap_previous_seq = previous_seq
+                if not is_sync_barrier:
+                    return
 
         if self._resume_sync_required and not is_sync_barrier:
             # Replay is outside the server's retention window. Do not apply

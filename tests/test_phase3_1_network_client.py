@@ -781,16 +781,16 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.sent[0]["type"], "session.resume")
         self.assertEqual(second.sent[0]["payload"]["last_seq"], 3)
 
-    async def test_resume_replay_before_ack_stays_contiguous_and_needs_no_gap_notice(self) -> None:
+    async def test_resume_authentication_precedes_replay_and_replay_stays_contiguous(self) -> None:
         game_id = "game-1"
         socket = FakeSocket([
-            server_event("game.event", game_id, 4, {
-                "event_type": "REPLAYED_EVENT",
-                "event_payload": {},
-            }),
             server_event("session.resumed", game_id, 5, {
                 "player_id": "p0",
                 "last_seq": 3,
+            }),
+            server_event("game.event", game_id, 4, {
+                "event_type": "REPLAYED_EVENT",
+                "event_payload": {},
             }),
             server_event("game.state_sync", game_id, 6, state_sync_payload()),
             server_event("game.event", game_id, 7, {
@@ -814,6 +814,10 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.reason, ClientExitReason.GAME_ENDED)
         self.assertFalse(any(isinstance(event, SequenceGapDetected) for event in observed))
         self.assertFalse(any(isinstance(event, SequenceGapRecovered) for event in observed))
+        self.assertEqual(
+            [event.type for event in observed if isinstance(event, ServerEvent)],
+            ["session.resumed", "game.event", "game.state_sync", "game.event"],
+        )
         self.assertEqual(client.snapshot().last_seq, 7)
 
     async def test_stale_duplicate_does_not_move_state_or_checkpoint_backwards(self) -> None:
@@ -1190,6 +1194,32 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.saved, [])
         self.assertEqual(client.snapshot().last_seq, 0)
         self.assertIsNone(client.snapshot().player_id)
+
+    async def test_resume_rejects_normal_server_events_before_authentication(self) -> None:
+        for message in (
+            server_event(
+                "game.event",
+                "game-1",
+                1,
+                {"event_type": "GAME_ENDED", "event_payload": {}},
+            ),
+            server_event("player.action_state", "game-1", 1, action_state_payload()),
+        ):
+            with self.subTest(message_type=json.loads(message)["type"]):
+                socket = FakeSocket([message])
+                store = MemoryStore(SessionCheckpoint("connection-token", 0))
+                client = NetworkClient(
+                    NetworkClientConfig("ws://fake", "game-1", "entry-token"),
+                    store,
+                    connector=lambda _uri, socket=socket: socket,
+                )
+
+                result = await client.run()
+
+                self.assertEqual(result.reason, ClientExitReason.INVALID_SERVER_MESSAGE)
+                self.assertEqual(store.saved, [])
+                self.assertEqual(client.snapshot().last_seq, 0)
+                self.assertIsNone(client.snapshot().player_id)
 
     async def test_resume_ack_payload_must_match_requested_checkpoint(self) -> None:
         socket = FakeSocket([

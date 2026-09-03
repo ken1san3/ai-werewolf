@@ -686,6 +686,45 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await server.close()
 
+    async def test_websocket_resume_enqueues_authentication_before_retained_replay(self) -> None:
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(registry, tick_interval_seconds=3600)
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as joined_socket:
+                await joined_socket.send(json.dumps(join_message(registry, "player-0")))
+                joined = json.loads(await joined_socket.recv())
+                sync = json.loads(await joined_socket.recv())
+                await joined_socket.send(json.dumps(client_message("session.ready", {})))
+                ready = json.loads(await joined_socket.recv())
+                self.assertEqual(ready["type"], "session.ready")
+
+            async with connect(uri) as resumed_socket:
+                await resumed_socket.send(
+                    json.dumps(
+                        client_message(
+                            "session.resume",
+                            {
+                                "connection_token": joined["payload"]["connection_token"],
+                                "last_seq": sync["seq"],
+                            },
+                        )
+                    )
+                )
+                first = json.loads(await resumed_socket.recv())
+                self.assertEqual(first["type"], "session.resumed")
+                self.assertEqual(first["seq"], ready["seq"] + 1)
+                replayed = json.loads(await resumed_socket.recv())
+                self.assertEqual(replayed["type"], "session.ready")
+                self.assertEqual(replayed["seq"], ready["seq"])
+                self.assertEqual(
+                    json.loads(await resumed_socket.recv())["type"], "game.state_sync"
+                )
+        finally:
+            await server.close()
+
     async def test_outbound_schema_failure_is_logged_and_closes_only_that_connection(self) -> None:
         class OutboundFailingValidator:
             def validate_client(self, message: object) -> None:

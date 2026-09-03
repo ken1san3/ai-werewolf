@@ -206,7 +206,7 @@ class SlowConnectionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await server.close()
 
-    async def test_pending_send_is_cancelled_on_resume_without_reordering_replay_and_sync(self):
+    async def test_pending_send_is_cancelled_on_resume_with_authentication_before_replay(self):
         game = make_game()
         registry = GameRegistry({GAME_ID: game})
         server = WebSocketGameServer(registry, ticker=TickDriver(registry, clock=lambda: 0), tick_interval_seconds=0.01)
@@ -233,8 +233,8 @@ class SlowConnectionTests(unittest.IsolatedAsyncioTestCase):
                             "connection_token": joined["payload"]["connection_token"], "last_seq": sync["seq"],
                         })))
                         messages = [await receive(replacement) for _ in range(3)]
-                        self.assertEqual([m["type"] for m in messages], ["game.event", "session.resumed", "game.state_sync"])
-                        self.assertEqual([m["seq"] for m in messages], [3, 4, 5])
+                        self.assertEqual([m["type"] for m in messages], ["session.resumed", "game.event", "game.state_sync"])
+                        self.assertEqual([m["seq"] for m in messages], [4, 3, 5])
                         await old.wait_closed()
                         self.assertEqual(old.close_code, 4001)
         finally:
