@@ -470,13 +470,9 @@ class NetworkClient:
             if connect_task in done:
                 return await connect_task
             if stop_task in done or self._stop_requested:
-                connect_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await connect_task
+                await self._cancel_and_close_socket_attempt(connect_task)
                 raise _TransientFailure("stopped")
-            connect_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await connect_task
+            await self._cancel_and_close_socket_attempt(connect_task)
             raise asyncio.TimeoutError()
         finally:
             connect_task.cancel()
@@ -510,6 +506,33 @@ class NetworkClient:
         if enter is not None:
             return await enter(), candidate
         return candidate, None
+
+    async def _cancel_and_close_socket_attempt(
+        self, connect_task: asyncio.Task[tuple[Socket, Any | None]]
+    ) -> None:
+        """Cancel a connector and close a socket it resolved during the race."""
+
+        connect_task.cancel()
+        try:
+            opened = await connect_task
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            return
+        socket, owner = opened
+        await self._close_socket_resource(socket)
+        if owner is None:
+            return
+        exit_method = getattr(owner, "__aexit__", None)
+        if exit_method is None:
+            return
+        try:
+            result = exit_method(None, None, None)
+        except Exception:
+            return
+        if inspect.isawaitable(result):
+            with suppress(Exception):
+                await result
 
     async def _receive(self, socket: Socket) -> Any:
         receiver = getattr(socket, "recv", None)
@@ -939,6 +962,15 @@ class NetworkClient:
             # finally must still close the newly-owned resources.
             self._cleanup_result = None
 
+        if (
+            self._socket is None
+            and self._sender_task is None
+            and self._deadline_task is None
+            and self._outbound is None
+        ):
+            self._cleanup_result = True
+            return True
+
         deadline = asyncio.get_running_loop().time() + self.config.shutdown_timeout_seconds
         cleanup_ok = True
         # Cancel client-owned tasks before waiting on the transport.  This
@@ -974,6 +1006,9 @@ class NetworkClient:
         socket = self._socket
         if socket is None:
             return
+        await self._close_socket_resource(socket)
+
+    async def _close_socket_resource(self, socket: Socket) -> None:
         close = getattr(socket, "close", None)
         if close is not None:
             result = close()

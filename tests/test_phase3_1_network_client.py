@@ -1101,7 +1101,7 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(client._sender_task)  # noqa: SLF001
         self.assertIsNone(client._deadline_task)  # noqa: SLF001
 
-    async def test_stop_race_closes_socket_without_sending_authentication(self) -> None:
+    async def test_stop_race_closes_socket_when_connector_resolves_during_cancel(self) -> None:
         started = asyncio.Event()
         release = asyncio.Event()
         socket = FakeSocket([])
@@ -1127,6 +1127,36 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(socket.sent, [])
         self.assertTrue(socket.closed)
         self.assertIsNone(client._sender_task)  # noqa: SLF001
+
+    async def test_connect_timeout_closes_socket_when_connector_resolves_during_cancel(self) -> None:
+        started = asyncio.Event()
+        socket = FakeSocket([])
+
+        async def connector(_uri: str) -> FakeSocket:
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                return socket
+            raise AssertionError("connector must be cancelled")
+
+        client = NetworkClient(
+            NetworkClientConfig(
+                "ws://fake",
+                "game-1",
+                "entry-token",
+                connect_timeout_seconds=0.01,
+            ),
+            MemoryStore(),
+            connector=connector,
+        )
+        open_task = asyncio.create_task(client._open_socket_or_stop())  # noqa: SLF001
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        with self.assertRaises(asyncio.TimeoutError):
+            await asyncio.wait_for(open_task, timeout=1)
+
+        self.assertTrue(socket.closed)
 
     async def test_stop_interrupts_reconnect_backoff_without_releasing_sleep(self) -> None:
         class ClosingAfterSyncSocket(FakeSocket):
