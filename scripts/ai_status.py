@@ -36,6 +36,7 @@ STATUS_VALUE = re.compile(
 REQUEST_STATUS_LINE = re.compile(r"(?m)^Request status:\s*(.*?)\s*$")
 REQUEST_STATUS_VALUE = re.compile(r"^(OPEN|CLOSED)(?:\s+—(?:\s.*)?)?$")
 TARGET_SUBPHASE_LINE = re.compile(r"(?m)^Target subphase:\s*([0-9]+(?:\.[0-9]+)*)\s*$")
+TARGET_DESIGN_LINE = re.compile(r"(?m)^Target design:\s*(.*?)\s*$")
 DESIGN_GATE_LINE = re.compile(r"(?m)^Design gate:\s*(.*?)\s*$")
 DESIGN_GATE_VALUES = {"REQUIRED", "NOT REQUIRED"}
 
@@ -112,6 +113,18 @@ def target_subphase(state: str | None = None) -> str | None:
     return match.group(1) if match else None
 
 
+def target_design(state: str | None = None) -> str | None:
+    """Return the single design document selected by CURRENT_STATE."""
+
+    if state is None:
+        state = read(AI / "CURRENT_STATE.md")
+    declarations = TARGET_DESIGN_LINE.findall(state)
+    if len(declarations) != 1:
+        return None
+    value = declarations[0].strip().strip("`").strip()
+    return value or None
+
+
 def design_gate(state: str | None = None) -> str | None:
     """Return the explicitly declared two-value Design Gate decision."""
 
@@ -161,7 +174,7 @@ def design_request_documents() -> list[Path]:
 
 
 def design_gate_documents(target: str | None = None) -> list[Path]:
-    """Return open required request files for exactly one target subphase."""
+    """Return all open required request files for a target subphase."""
 
     target = target if target is not None else target_subphase()
     if target is None:
@@ -169,6 +182,22 @@ def design_gate_documents(target: str | None = None) -> list[Path]:
     return [
         path for path in design_request_documents() if design_phase_key(path) == target
     ]
+
+
+def target_design_request(
+    requests: list[Path], target: str | None
+) -> Path | None:
+    """Resolve CURRENT_STATE's design selection to one open request."""
+
+    if target is None:
+        return None
+    target_name = Path(target).name
+    matches = [
+        request
+        for request in requests
+        if design_output_path(request).name == target_name
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def design_output_path(request: Path) -> Path:
@@ -242,17 +271,35 @@ def print_design_gate(state: str) -> None:
         print(f"target subphase: Phase {target}: DESIGN: NOT REQUIRED")
         print("implementation: allowed")
         return
-    if len(requests) != 1:
+    if not requests:
         print(
             f"target subphase: Phase {target}: UNKNOWN — "
-            "開いている DESIGN: REQUIRED の依頼書を一意に決められない"
+            "開いている DESIGN: REQUIRED の依頼書が無い"
         )
         print("implementation: blocked")
         return
 
-    request = requests[0]
+    selected_design = target_design(state)
+    request = target_design_request(requests, selected_design)
+    if request is None:
+        print(
+            f"target subphase: Phase {target}: UNKNOWN — "
+            "CURRENT_STATE の Target design が開いている REQUEST を一意に指していない"
+        )
+        print(
+            "open request documents: "
+            + ", ".join(display_path(item) for item in requests)
+        )
+        print("implementation: blocked")
+        return
+
     design = design_output_path(request)
     print(f"target subphase: Phase {target}: DESIGN: REQUIRED")
+    print(
+        "open request documents: "
+        + ", ".join(display_path(item) for item in requests)
+    )
+    print(f"target design: {display_path(design)}")
     print(f"request document: {display_path(request)}")
     if not design.is_file():
         print(f"design document: {display_path(design)}")

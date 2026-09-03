@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from random import Random
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -42,7 +43,41 @@ CLIENT = PROJECT_ROOT / "tests" / "fixtures" / "phase3_1_network_client_process.
 GAME_ID = "123e4567-e89b-12d3-a456-426614174261"
 
 
+def _co_acceptance_keys(events: list[object]) -> set[tuple[int, str]]:
+    """Recover CO_DECLARED's day from the preceding PHASE_STARTED context."""
+
+    current_day: int | None = None
+    accepted: set[tuple[int, str]] = set()
+    for event in events:
+        if getattr(event, "type", None) == "PHASE_STARTED":
+            day = event.payload.get("day")
+            if isinstance(day, int) and not isinstance(day, bool):
+                current_day = day
+        elif getattr(event, "type", None) == "CO_DECLARED":
+            if current_day is None:
+                raise AssertionError("CO_DECLARED has no PHASE_STARTED day context")
+            player_id = event.payload.get("player_id")
+            if not isinstance(player_id, str) or not player_id:
+                raise AssertionError("CO_DECLARED player_id is missing")
+            accepted.add((current_day, player_id))
+    return accepted
+
+
 class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
+    def test_co_acceptance_keys_keep_each_phase_day(self) -> None:
+        events = [
+            SimpleNamespace(type="PHASE_STARTED", payload={"day": 1}),
+            SimpleNamespace(type="CO_DECLARED", payload={"player_id": "p0"}),
+            SimpleNamespace(type="CO_DECLARED", payload={"player_id": "p1"}),
+            SimpleNamespace(type="PHASE_STARTED", payload={"day": 2}),
+            SimpleNamespace(type="CO_DECLARED", payload={"player_id": "p0"}),
+        ]
+
+        self.assertEqual(
+            _co_acceptance_keys(events),
+            {(1, "p0"), (1, "p1"), (2, "p0")},
+        )
+
     def test_completion_evidence_contract_is_fail_closed(self) -> None:
         self.assertEqual(
             ALL_REJECTION_REASONS,
@@ -602,18 +637,32 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                         item["key"]
                         for item in evidence_by_key.values()
                         if item["kind"] == "co_declare"
+                        and item["outcome"] != "no_legal_target"
                     }
-                    co_eligible_players = {
-                        key.split("|", 1)[0] for key in co_eligible
+                    co_eligible_by_day: dict[int, set[str]] = {}
+                    for key in co_eligible:
+                        player_id, day, action_kind = key.split("|")
+                        self.assertEqual(action_kind, "co_declare", key)
+                        co_eligible_by_day.setdefault(int(day), set()).add(player_id)
+                    co_accepted = _co_acceptance_keys(game.event_bus.events)
+                    eligible_pairs = {
+                        (day, player_id)
+                        for day, player_ids in co_eligible_by_day.items()
+                        for player_id in player_ids
                     }
-                    co_accepted = {
-                        event.payload["player_id"]
-                        for event in game.event_bus.events
-                        if event.type == "CO_DECLARED"
-                    }
+                    self.assertTrue(co_accepted <= eligible_pairs, (co_accepted, eligible_pairs))
+                    for day, eligible_players in co_eligible_by_day.items():
+                        accepted_players = {
+                            player_id for accepted_day, player_id in co_accepted if accepted_day == day
+                        }
+                        self.assertGreaterEqual(
+                            len(accepted_players),
+                            acceptance_quorum(len(eligible_players)),
+                            (day, eligible_players, accepted_players),
+                        )
                     self.assertGreaterEqual(
                         len(co_accepted),
-                        max(2, acceptance_quorum(len(co_eligible_players))),
+                        2,
                     )
                     chat_sent_players = {
                         item["key"].split("|", 1)[0]

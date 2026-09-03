@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from ai_client.network import (
+    ChatAction,
     ClientLifecycle,
     ClientExitReason,
     ClientSnapshot,
@@ -326,6 +327,61 @@ async def test_current_actions_are_exposed_only_when_network_is_caught_up() -> N
     assert isinstance(actions, CurrentActionsView)
     assert actions.is_caught_up is True
     assert actions.actions == ()
+
+
+@async_test
+async def test_rejected_recovery_sync_stays_stale_until_a_valid_sync() -> None:
+    source = ListSource([], last_seq=1, lifecycle=ClientLifecycle.CONNECTED)
+    world = WorldState(source)
+    world._consume(event("game.state_sync", 1, sync_payload()))
+
+    action = ChatAction(
+        connection_generation=1,
+        action_generation=1,
+        phase="day",
+        day=1,
+        type="chat",
+        channel="public",
+    )
+    source._snapshot = ClientSnapshot(
+        lifecycle=ClientLifecycle.RECONNECT_WAIT,
+        last_seq=2,
+        actions=(action,),
+    )
+    world._consume(LifecycleChanged(ClientLifecycle.CONNECTED, ClientLifecycle.RECONNECT_WAIT))
+    assert world.snapshot().freshness is Freshness.STALE
+    assert world.current_actions().actions == ()
+
+    source._snapshot = ClientSnapshot(
+        lifecycle=ClientLifecycle.SYNCHRONIZING,
+        last_seq=2,
+        actions=(action,),
+    )
+    world._consume(LifecycleChanged(ClientLifecycle.RECONNECT_WAIT, ClientLifecycle.SYNCHRONIZING))
+    invalid = sync_payload()
+    invalid["revealed_roles"] = [
+        {"player_id": "p0", "role_id": "first"},
+        {"player_id": "p0", "role_id": "duplicate"},
+    ]
+    world._consume(event("game.state_sync", 2, invalid))
+
+    source._snapshot = ClientSnapshot(
+        lifecycle=ClientLifecycle.CONNECTED,
+        last_seq=2,
+        actions=(action,),
+    )
+    world._consume(LifecycleChanged(ClientLifecycle.SYNCHRONIZING, ClientLifecycle.CONNECTED))
+    assert world.snapshot().freshness is Freshness.STALE
+    assert world.current_actions().actions == ()
+
+    source._snapshot = ClientSnapshot(
+        lifecycle=ClientLifecycle.CONNECTED,
+        last_seq=3,
+        actions=(action,),
+    )
+    world._consume(event("game.state_sync", 3, sync_payload()))
+    assert world.snapshot().freshness is Freshness.CURRENT
+    assert world.current_actions().actions == (action,)
 
 
 @async_test

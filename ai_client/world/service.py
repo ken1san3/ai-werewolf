@@ -75,6 +75,7 @@ class WorldState:
         self._freshness = Freshness.EMPTY
         self._version = 0
         self._has_sync = False
+        self._recovery_sync_accepted = False
         self._stop_requested = False
         self._run_started = False
         self._run_task: asyncio.Task[WorldStateExit] | None = None
@@ -137,7 +138,11 @@ class WorldState:
         network = self._source.snapshot()
         caught_up = self._reducer.last_applied_seq == network.last_seq
         actions: tuple[object, ...] = ()
-        if caught_up and network.lifecycle is ClientLifecycle.CONNECTED:
+        if (
+            caught_up
+            and network.lifecycle is ClientLifecycle.CONNECTED
+            and self._freshness is Freshness.CURRENT
+        ):
             actions = tuple(network.actions)
         return CurrentActionsView(
             world_version=self._version,
@@ -190,17 +195,16 @@ class WorldState:
             result = self._reducer.apply_server_event(event)
             if result.state_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._has_sync = True
+                self._recovery_sync_accepted = True
                 self._freshness = (
                     Freshness.CURRENT
                     if self._network_lifecycle() is ClientLifecycle.CONNECTED
                     else Freshness.STALE
                 )
-            elif (
-                event.type == "game.state_sync"
-                and self._has_sync
-                and self._freshness not in {Freshness.ENDED, Freshness.FAILED}
-            ):
-                self._freshness = Freshness.STALE
+            elif event.type == "game.state_sync":
+                self._recovery_sync_accepted = False
+                if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
+                    self._freshness = Freshness.STALE
             if (
                 event.type == "game.event"
                 and isinstance(event.payload.get("event_type"), str)
@@ -243,11 +247,16 @@ class WorldState:
             ClientLifecycle.RECONNECT_WAIT,
             ClientLifecycle.STOPPING,
         }:
+            self._recovery_sync_accepted = False
             if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._freshness = Freshness.STALE
         elif lifecycle is ClientLifecycle.CONNECTED:
             if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
-                self._freshness = Freshness.CURRENT
+                self._freshness = (
+                    Freshness.CURRENT
+                    if self._recovery_sync_accepted
+                    else Freshness.STALE
+                )
         elif lifecycle is ClientLifecycle.ENDED:
             self._freshness = Freshness.ENDED
         elif lifecycle is ClientLifecycle.FAILED:

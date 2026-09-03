@@ -32,7 +32,7 @@ class DesignGateTests(unittest.TestCase):
         ):
             self.assertEqual(ai_status.design_gate_documents("3.1"), [phase_31])
 
-    def test_closed_approved_request_is_excluded_and_reopening_overflows(self) -> None:
+    def test_closed_approved_request_is_excluded_and_multiple_open_requests_are_supported(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             design_dir = Path(temporary_directory) / "design"
             design_dir.mkdir()
@@ -80,7 +80,9 @@ class DesignGateTests(unittest.TestCase):
             with patch.object(ai_status, "design_gate_documents", return_value=[request]):
                 with redirect_stdout(output):
                     ai_status.print_design_gate(
-                        "Target subphase: 3.1\nDesign gate: REQUIRED\n"
+                        "Target subphase: 3.1\n"
+                        "Target design: PHASE3_1_NETWORK_CLIENT_DESIGN.md\n"
+                        "Design gate: REQUIRED\n"
                     )
         self.assertIn("_DESIGN.md が無い", output.getvalue())
         self.assertIn("implementation: blocked", output.getvalue())
@@ -100,7 +102,8 @@ class DesignGateTests(unittest.TestCase):
         with patch.object(ai_status, "design_gate_documents", return_value=[]):
             with redirect_stdout(output):
                 ai_status.print_design_gate(
-                    "Target subphase: 3.1\nDesign gate: REQUIRED\n"
+                    "Target subphase: 3.1\nTarget design: PHASE3_1_NETWORK_CLIENT_DESIGN.md\n"
+                    "Design gate: REQUIRED\n"
                 )
         self.assertIn("UNKNOWN", output.getvalue())
         self.assertIn("implementation: blocked", output.getvalue())
@@ -152,7 +155,7 @@ class DesignGateTests(unittest.TestCase):
             patch.object(check_docs.ai_status, "design_gate_documents", return_value=[]),
         ):
             check_docs.check_design_target()
-        self.assertTrue(any("REQUEST が1件無い" in problem for problem in check_docs.problems))
+        self.assertTrue(any("REQUEST が無い" in problem for problem in check_docs.problems))
 
         check_docs.problems.clear()
         with (
@@ -164,7 +167,7 @@ class DesignGateTests(unittest.TestCase):
             check_docs.check_design_target()
         self.assertTrue(any("NOT REQUIRED" in problem for problem in check_docs.problems))
 
-    def test_docs_checker_accepts_multiple_requests_when_only_one_is_open(self) -> None:
+    def test_docs_checker_accepts_multiple_open_requests_when_target_is_named(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             docs = root / "Docs" / "ai"
@@ -189,7 +192,10 @@ class DesignGateTests(unittest.TestCase):
                 "Status: IN_REVIEW\n", encoding="utf-8"
             )
             state.write_text(
-                "Target subphase: 3.1\nDesign gate: REQUIRED\n", encoding="utf-8"
+                "Target subphase: 3.1\n"
+                "Target design: PHASE3_1_COMPLETION_EVIDENCE_DESIGN.md\n"
+                "Design gate: REQUIRED\n",
+                encoding="utf-8",
             )
             roadmap.write_text("## 3.1\n", encoding="utf-8")
 
@@ -208,9 +214,52 @@ class DesignGateTests(unittest.TestCase):
                 )
                 check_docs.problems.clear()
                 check_docs.check_design_target()
-                self.assertTrue(
-                    any("現在2件" in problem for problem in check_docs.problems)
+                self.assertEqual(check_docs.problems, [])
+
+    def test_print_design_gate_uses_named_target_when_multiple_requests_are_open(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            design_dir = root / "design"
+            design_dir.mkdir()
+            network_request = design_dir / "PHASE3_1_NETWORK_CLIENT_REQUEST.md"
+            completion_request = design_dir / "PHASE3_1_COMPLETION_EVIDENCE_REQUEST.md"
+            completion_design = design_dir / "PHASE3_1_COMPLETION_EVIDENCE_DESIGN.md"
+            network_request.write_text(
+                "Status: REQUESTED\nDESIGN: REQUIRED\n", encoding="utf-8"
+            )
+            completion_request.write_text(
+                "Status: REQUESTED\nDESIGN: REQUIRED\n", encoding="utf-8"
+            )
+            (design_dir / "PHASE3_1_NETWORK_CLIENT_DESIGN.md").write_text(
+                "Status: DRAFT\n", encoding="utf-8"
+            )
+            completion_design.write_text(
+                "Status: APPROVED\n", encoding="utf-8"
+            )
+            output = io.StringIO()
+            state = (
+                "Target subphase: 3.1\n"
+                "Target design: PHASE3_1_COMPLETION_EVIDENCE_DESIGN.md\n"
+                "Design gate: REQUIRED\n"
+            )
+            with patch.object(ai_status, "AI", root), redirect_stdout(output):
+                ai_status.print_design_gate(state)
+
+        rendered = output.getvalue()
+        self.assertIn("open request documents:", rendered)
+        self.assertIn(f"target design: {completion_design.as_posix()}", rendered)
+        self.assertIn("approved: yes", rendered)
+        self.assertIn("implementation: allowed", rendered)
+
+    def test_required_gate_without_named_target_design_is_blocked(self) -> None:
+        output = io.StringIO()
+        with patch.object(ai_status, "design_gate_documents", return_value=[Path("request.md")]):
+            with redirect_stdout(output):
+                ai_status.print_design_gate(
+                    "Target subphase: 3.1\nDesign gate: REQUIRED\n"
                 )
+        self.assertIn("Target design", output.getvalue())
+        self.assertIn("implementation: blocked", output.getvalue())
 
     def test_docs_checker_rejects_review_id_reused_in_archive(self) -> None:
         check_docs.problems.clear()

@@ -180,11 +180,23 @@ def check_design_target() -> None:
             "design-target",
             f"Target subphase {target} は Design gate: NOT REQUIRED なのに DESIGN: REQUIRED の REQUEST がある",
         )
-    elif decision == "REQUIRED" and len(requests) != 1:
+    elif decision == "REQUIRED" and not requests:
         fail(
             "design-target",
-            f"Target subphase {target} に開いている DESIGN: REQUIRED の REQUEST が1件無い（現在{len(requests)}件）",
+            f"Target subphase {target} に開いている DESIGN: REQUIRED の REQUEST が無い",
         )
+    elif decision == "REQUIRED":
+        selected = ai_status.target_design(state)
+        if selected is None:
+            fail(
+                "design-target",
+                "CURRENT_STATE.md に Target design: の一意な宣言が無い",
+            )
+        elif ai_status.target_design_request(requests, selected) is None:
+            fail(
+                "design-target",
+                "CURRENT_STATE.md の Target design: が開いている REQUEST を一意に指していない",
+            )
 
 
 def check_design_gate_status() -> None:
