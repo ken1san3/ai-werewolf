@@ -686,7 +686,7 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await server.close()
 
-    async def test_websocket_resume_enqueues_authentication_before_retained_replay(self) -> None:
+    async def test_websocket_resume_enqueues_retained_replay_before_authentication(self) -> None:
         game = make_game()
         registry = GameRegistry({game.game_id: game})
         server = WebSocketGameServer(registry, tick_interval_seconds=3600)
@@ -713,12 +713,12 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                         )
                     )
                 )
-                first = json.loads(await resumed_socket.recv())
-                self.assertEqual(first["type"], "session.resumed")
-                self.assertEqual(first["seq"], ready["seq"] + 1)
                 replayed = json.loads(await resumed_socket.recv())
                 self.assertEqual(replayed["type"], "session.ready")
                 self.assertEqual(replayed["seq"], ready["seq"])
+                first = json.loads(await resumed_socket.recv())
+                self.assertEqual(first["type"], "session.resumed")
+                self.assertEqual(first["seq"], ready["seq"] + 1)
                 self.assertEqual(
                     json.loads(await resumed_socket.recv())["type"], "game.state_sync"
                 )

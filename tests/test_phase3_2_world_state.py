@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import FrozenInstanceError
+import json
 
 import pytest
+from websockets.asyncio.client import connect
 
 from ai_client.network import (
     ChatAction,
     ClientLifecycle,
     ClientExitReason,
     ClientSnapshot,
+    GameEnded,
     LifecycleChanged,
     NetworkClient,
     NetworkClientConfig,
     SequenceGapDetected,
     ServerEvent,
+    SessionCheckpoint,
 )
 from ai_client.network.types import immutable_mapping
 from ai_client.world import (
@@ -39,6 +43,9 @@ from ai_client.world import (
     WorldState,
     WorldStateConfig,
 )
+from server.aiwolf_core import EventVisibility, GameEvent
+from server.network import GameRegistry, SessionManager, WebSocketGameServer
+from tests.test_network_sessions import GAME_ID, client_message, join_message, make_game
 
 
 def event(message_type: str, seq: int, payload: dict) -> ServerEvent:
@@ -123,11 +130,170 @@ class NoopCredentialStore:
         del checkpoint
 
 
+class MemoryCredentialStore:
+    def __init__(self, checkpoint: SessionCheckpoint | None = None) -> None:
+        self.checkpoint = checkpoint
+
+    async def load(self) -> SessionCheckpoint | None:
+        return self.checkpoint
+
+    async def save(self, checkpoint: SessionCheckpoint) -> None:
+        self.checkpoint = checkpoint
+
+
+class RecordingSource:
+    def __init__(self, client: NetworkClient) -> None:
+        self.client = client
+        self.events_seen: list[object] = []
+
+    def snapshot(self) -> ClientSnapshot:
+        return self.client.snapshot()
+
+    async def events(self):
+        async for item in self.client.events():
+            self.events_seen.append(item)
+            yield item
+
+
+async def _recover_terminal_from_real_server(*, retain_terminal_event: bool):
+    game = make_game()
+    registry = GameRegistry({GAME_ID: game})
+    server = WebSocketGameServer(
+        registry,
+        sessions=SessionManager(registry, replay_history_limit=128),
+        tick_interval_seconds=3600,
+    )
+    listener = await server.start("127.0.0.1", 0)
+    uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+    old_socket = await connect(uri)
+    client_task: asyncio.Task | None = None
+    world_task: asyncio.Task | None = None
+    try:
+        await old_socket.send(json.dumps(join_message(registry, "player-0")))
+        joined = json.loads(await asyncio.wait_for(old_socket.recv(), 2))
+        initial_sync = json.loads(await asyncio.wait_for(old_socket.recv(), 2))
+        await old_socket.send(json.dumps(client_message("session.ready", {})))
+        ready = json.loads(await asyncio.wait_for(old_socket.recv(), 2))
+        checkpoint = SessionCheckpoint(
+            joined["payload"]["connection_token"], ready["seq"]
+        )
+
+        if retain_terminal_event:
+            async with server._dispatch_lock:  # noqa: SLF001 - deterministic fixture boundary
+                game.event_bus.publish(
+                    GameEvent(
+                        "GAME_ENDED",
+                        EventVisibility.PUBLIC,
+                        {
+                            "winner_team": "village",
+                            "outcome": "team_victory",
+                            "player_results": {"player-0": "won"},
+                        },
+                    )
+                )
+                server._flush_outbound_deliveries()  # noqa: SLF001
+            terminal_replay = server.sessions.session_for(GAME_ID)._history_by_player["player-0"][-1]  # noqa: SLF001
+            assert terminal_replay.type == "game.event"
+        else:
+            await old_socket.close()
+            await asyncio.wait_for(old_socket.wait_closed(), 2)
+            for _ in range(100):
+                if server.sessions.session_for(GAME_ID).connection_count("player-0") == 0:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("old connection did not leave the server")
+            async with server._dispatch_lock:  # noqa: SLF001 - deterministic fixture boundary
+                game.event_bus.publish(
+                    GameEvent(
+                        "GAME_ENDED",
+                        EventVisibility.PUBLIC,
+                        {
+                            "winner_team": "village",
+                            "outcome": "team_victory",
+                            "player_results": {"player-0": "won"},
+                        },
+                    )
+                )
+                server._flush_outbound_deliveries()  # noqa: SLF001
+            assert not any(
+                reply.type == "game.event" and reply.seq > checkpoint.last_seq
+                for reply in server.sessions.session_for(GAME_ID)._history_by_player["player-0"]  # noqa: SLF001
+            )
+
+        await old_socket.close()
+        await asyncio.wait_for(old_socket.wait_closed(), 2)
+        store = MemoryCredentialStore(checkpoint)
+        client = NetworkClient(
+            NetworkClientConfig(uri, GAME_ID, None),
+            store,
+        )
+        source = RecordingSource(client)
+        world = WorldState(source)
+        client_task = asyncio.create_task(client.run())
+        world_task = asyncio.create_task(world.run())
+        client_exit, world_exit = await asyncio.wait_for(
+            asyncio.gather(client_task, world_task), 5
+        )
+        return client_exit, world_exit, world.snapshot(), world.history(), source.events_seen
+    finally:
+        for task in (world_task, client_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in (world_task, client_task) if task is not None),
+            return_exceptions=True,
+        )
+        await old_socket.close()
+        await server.close()
+
+
 def async_test(function):
     def wrapper(*args, **kwargs):
         return asyncio.run(function(*args, **kwargs))
 
     return wrapper
+
+
+@async_test
+async def test_f007_retained_terminal_replay_ends_after_authoritative_sync() -> None:
+    client_exit, world_exit, snapshot, history, events_seen = await _recover_terminal_from_real_server(
+        retain_terminal_event=True
+    )
+
+    assert client_exit.reason is ClientExitReason.GAME_ENDED
+    assert world_exit.reason.value == "CLIENT_ENDED"
+    assert snapshot.freshness is Freshness.ENDED
+    terminal_events = [item for item in events_seen if isinstance(item, ServerEvent)]
+    assert [item.type for item in terminal_events] == [
+        "game.event",
+        "session.resumed",
+        "game.state_sync",
+    ]
+    ended = [item for item in events_seen if isinstance(item, GameEnded)]
+    assert len(ended) == 1
+    assert ended[0].event.type == "game.state_sync"
+    assert len([record for record in history.records if isinstance(record, GameLifecycleRecord)]) == 1
+
+
+@async_test
+async def test_f007_sync_only_terminal_fact_ends_after_authoritative_sync() -> None:
+    client_exit, world_exit, snapshot, history, events_seen = await _recover_terminal_from_real_server(
+        retain_terminal_event=False
+    )
+
+    assert client_exit.reason is ClientExitReason.GAME_ENDED
+    assert world_exit.reason.value == "CLIENT_ENDED"
+    assert snapshot.freshness is Freshness.ENDED
+    terminal_events = [item for item in events_seen if isinstance(item, ServerEvent)]
+    assert [item.type for item in terminal_events] == [
+        "session.resumed",
+        "game.state_sync",
+    ]
+    ended = [item for item in events_seen if isinstance(item, GameEnded)]
+    assert len(ended) == 1
+    assert ended[0].event.type == "game.state_sync"
+    assert len([record for record in history.records if isinstance(record, GameLifecycleRecord)]) == 1
 
 
 @async_test
@@ -276,6 +442,7 @@ async def test_live_events_are_typed_and_queries_are_indexed() -> None:
         event("game.event", 8, {"event_type": "INSPECT_RESULT", "event_payload": {"target_player_id": "p1", "result": "not_wolf"}}),
         event("game.event", 9, {"event_type": "PUBLIC_NOTIFY", "event_payload": {"notify_id": "dawn_notice"}}),
         event("game.event", 10, {"event_type": "GAME_ENDED", "event_payload": {"winner_team": "village", "outcome": "team_victory", "player_results": {"p0": "won"}}}),
+        GameEnded(event("game.event", 10, {"event_type": "GAME_ENDED", "event_payload": {"winner_team": "village", "outcome": "team_victory", "player_results": {"p0": "won"}}})),
     ]
     source = ListSource(events, last_seq=10, lifecycle=ClientLifecycle.CONNECTED)
     world = WorldState(source)
@@ -305,6 +472,7 @@ async def test_unknown_and_malformed_events_are_nonfatal_and_do_not_mutate_view(
         event("game.event", 3, {"event_type": "CO_DECLARED", "event_payload": {"player_id": "p0"}}),
         event("unknown.future", 4, {}),
         event("game.event", 5, {"event_type": "GAME_ENDED", "event_payload": {"winner_team": "village", "outcome": "done", "player_results": {}}}),
+        GameEnded(event("game.event", 5, {"event_type": "GAME_ENDED", "event_payload": {"winner_team": "village", "outcome": "done", "player_results": {}}})),
     ]
     world = WorldState(ListSource(events, last_seq=5, lifecycle=ClientLifecycle.CONNECTED))
     await world.run()
@@ -316,6 +484,21 @@ async def test_unknown_and_malformed_events_are_nonfatal_and_do_not_mutate_view(
     assert any(isinstance(record, UnknownEventRecord) for record in world.history().records)
     assert any(isinstance(record, MalformedEventRecord) for record in world.history().records)
     assert all("secret" not in repr(record) for record in world.history().records)
+
+
+@async_test
+async def test_invalid_game_ended_notice_cannot_promote_rejected_sync_to_ended() -> None:
+    source = ListSource([], last_seq=2, lifecycle=ClientLifecycle.ENDED)
+    world = WorldState(source)
+    world._consume(event("game.state_sync", 1, sync_payload()))
+    invalid_sync = sync_payload()
+    invalid_sync["revealed_roles"] = [{"player_id": "missing", "role_id": "opaque"}]
+    world._consume(event("game.state_sync", 2, invalid_sync))
+
+    world._consume(GameEnded(event("game.state_sync", 2, invalid_sync)))
+    world._consume(LifecycleChanged(ClientLifecycle.CONNECTED, ClientLifecycle.ENDED))
+
+    assert world.snapshot().freshness is Freshness.STALE
 
 
 @async_test

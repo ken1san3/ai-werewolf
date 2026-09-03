@@ -94,10 +94,10 @@ class WebSocketGameServer:
                             self._close_replaced_connections(result.replaced_connection_ids)
                             if context is not None:
                                 self._register_connection(context, websocket)
-                            if result.reply is not None:
-                                self._enqueue(context, result.reply)
                             for reply in result.replay:
                                 self._enqueue(context, reply)
+                            if result.reply is not None:
+                                self._enqueue(context, result.reply)
                             if sync is not None:
                                 self._enqueue(context, sync)
                         else:

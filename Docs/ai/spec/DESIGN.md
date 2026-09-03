@@ -701,6 +701,13 @@ content ローダーが未知キーを全て拒否しているのと同じ扱い
 `seq` はクライアントの取りこぼし検出のためであり、**順序保証の根拠にはしない。**
 権威はサーバの状態であって、クライアントが並べ替えた結果ではない。
 
+Resume の wire 配送は、保持内なら `replay → session.resumed → game.state_sync` の順とする。
+replay は元の envelope / `seq` の再送であり、`session.resumed` と全量 sync はその後に
+新規採番する。したがって保持内の受信列は checkpoint の次から連続して増加する。
+認証前に replay が届く実装は、検証済みの ACK を受けるまで公開・state・checkpoint 更新を
+行わず有限 FIFO に保留し、ACK 後に受信順で解放する。保持外では replay を部分返却せず、
+`session.resumed` の ACK と authoritative `game.state_sync` で再基準化する。
+
 未認証の接続にはプレイヤー宛ての stream が無く `seq` を振れないため、
 Join / Resume に失敗した接続へは拒否イベントを送らず接続を閉じる。
 

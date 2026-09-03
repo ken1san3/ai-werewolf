@@ -33,7 +33,9 @@ ROADMAP §3.2 の現在像、履歴、全量syncによる再基準化、増分�
 `ai_client/world/` は `ai_client/network/` の下ではなく同階層に置く。
 依存方向は `world -> ai_client.network` のpublic typeだけとし、Network Clientから
 World Stateをimportしない。`server.aiwolf_core` / `server.network` はimportしない。
-`ai_client/network/`、server、schema、contentは変更しない。
+`ai_client/network/`、server、schema、contentは変更しない。終了 fact の検出、
+復旧時に全量 sync を先に commit してから `GameEnded` を通知する境界は Phase 3.1
+Network の責務であり、World State はその公開型を消費するだけとする。
 
 ## Responsibilities
 
@@ -261,12 +263,14 @@ EMPTY
 CURRENT
   ├─ incremental event ─> CURRENT (version + 1)
   ├─ disconnect / synchronizing / seq gap ─> STALE
-  ├─ GAME_ENDED / client ENDED ─> ENDED
+  ├─ GAME_ENDED server event ─> CURRENT (history only)
+  ├─ GameEnded notice after the required sync commit ─> ENDED
   └─ fatal termination / source failure ─> FAILED
 
 STALE
   ├─ replay events ─> STALE
   ├─ authoritative game.state_sync + CONNECTED ─> CURRENT
+  ├─ GameEnded notice after the required sync commit ─> ENDED
   ├─ stop ─> ENDED
   └─ fatal termination ─> FAILED
 
@@ -278,7 +282,11 @@ any nonterminal ── newer game.state_sync ─> baseline reset in same WorldSt
 - `LifecycleChanged`のJOINING / RESUMING / SYNCHRONIZING / RECONNECT_WAIT、
   `SequenceGapDetected`で`STALE`にする。last good snapshotは読めるがfreshではない。
 - authoritative syncを適用し、Network ClientのCONNECTEDを観測した時点で`CURRENT`に戻す。
+- raw `game.event` の `GAME_ENDED` は通常も replay も履歴へ追加するが、それだけでは
+  `ENDED` にしない。Network Client は終了 fact を記憶し、復旧時は authoritative
+  `game.state_sync` を先に公開してから、その sync を指す `GameEnded` notice を公開する。
 - `GameEnded` noticeは同じGAME_ENDED server eventをhistoryへ二重追加せず、終了状態だけを更新する。
+  したがって World は full baseline を commit した後に notice を消費して `ENDED` にする。
 - `ActionRejected`などServerEventと専用noticeの両方があるものは、事実recordを二重化しない。
 
 ## Main Control Flow
@@ -292,6 +300,12 @@ Brainが停止してもWorld State consumerは継続し、Network Client queue�
 `player.deaths`、`player.action_state`でcurrent viewを置換する。再接続時にreplayが届けば同じ
 incremental経路を通り、最終`game.state_sync`でbaselineを再構築するため、replayの有無にかかわらず
 回復後の像はserver snapshotへ収束する。
+
+終了をまたぐ Resume では、replay 内の `GAME_ENDED` は履歴事実として処理し、
+`game.state_sync` を先に reducer へ全量適用する。Network Client がその sync を指す
+`GameEnded` notice を続けて出したとき、World は baseline の commit 後にだけ
+`Freshness.ENDED` / `CLIENT_ENDED` へ遷移する。切断中に終了して replay が無い場合も、
+sync.history 内の終了 fact を Network Client が検出して同じ順序にする。
 
 ## Failure Handling
 
@@ -330,7 +344,9 @@ incremental経路を通り、最終`game.state_sync`でbaselineを再構築す�
   bounded queueは以後drainされず、残りslot数（既定capacity 1024件）が起動側の対応猶予になる。
   埋まればNetwork Clientも`CONSUMER_OVERRUN`でfatal終了する。この連鎖は意図的なfail-fastであり、
   起動側はWorld State failureを待ち、猶予内にNetwork Clientをstopするかconsumerを含め再起動する。
-- sourceが正常に閉じたらlast client lifecycleに応じて`ENDED`または`FAILED`を返す。
+- sourceが正常に閉じたら、既にキューへ入ったServerEventとnoticeを最後までdrainした後の
+  last client lifecycleに応じて`ENDED`または`FAILED`を返す。sourceの最終状態を先に読むだけで
+  未消費のbaselineを捨ててはならない。
 - `stop()`はconsumerだけを終了し、Network Clientのsocket ownershipを奪わない。ただし
   Network Clientを継続するなら、起動側は同時にstopするかexclusive replacement consumerを
   queue容量の猶予内に開始しなければならない。

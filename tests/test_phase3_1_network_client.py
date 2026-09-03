@@ -20,6 +20,7 @@ from ai_client.network import (
     CredentialError,
     DeliveryUnknownError,
     FileCredentialStore,
+    GameEnded,
     NetworkClient,
     NetworkClientConfig,
     NotDeliveredError,
@@ -178,6 +179,26 @@ class BlockingSendSocket(FakeSocket):
 
 
 class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
+    def test_resume_buffer_and_shutdown_timeout_configuration_is_strict(self) -> None:
+        for value in (0, -1, True, 1.5):
+            with self.subTest(resume_replay_capacity=value):
+                with self.assertRaises(ValueError):
+                    NetworkClientConfig(
+                        "ws://fake",
+                        "game-1",
+                        "entry-token",
+                        resume_replay_capacity=value,
+                    )
+        for value in (0, -1, True, float("nan"), float("inf")):
+            with self.subTest(shutdown_timeout_seconds=value):
+                with self.assertRaises(ValueError):
+                    NetworkClientConfig(
+                        "ws://fake",
+                        "game-1",
+                        "entry-token",
+                        shutdown_timeout_seconds=value,
+                    )
+
     async def test_typed_send_uses_the_current_received_action_handle(self) -> None:
         game_id = "game-1"
         socket = FakeSocket([
@@ -781,16 +802,16 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.sent[0]["type"], "session.resume")
         self.assertEqual(second.sent[0]["payload"]["last_seq"], 3)
 
-    async def test_resume_authentication_precedes_replay_and_replay_stays_contiguous(self) -> None:
+    async def test_resume_replay_precedes_authentication_and_replay_stays_contiguous(self) -> None:
         game_id = "game-1"
         socket = FakeSocket([
-            server_event("session.resumed", game_id, 5, {
-                "player_id": "p0",
-                "last_seq": 3,
-            }),
             server_event("game.event", game_id, 4, {
                 "event_type": "REPLAYED_EVENT",
                 "event_payload": {},
+            }),
+            server_event("session.resumed", game_id, 5, {
+                "player_id": "p0",
+                "last_seq": 3,
             }),
             server_event("game.state_sync", game_id, 6, state_sync_payload()),
             server_event("game.event", game_id, 7, {
@@ -816,9 +837,102 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(isinstance(event, SequenceGapRecovered) for event in observed))
         self.assertEqual(
             [event.type for event in observed if isinstance(event, ServerEvent)],
-            ["session.resumed", "game.event", "game.state_sync", "game.event"],
+            ["game.event", "session.resumed", "game.state_sync", "game.event"],
         )
         self.assertEqual(client.snapshot().last_seq, 7)
+
+    async def test_resume_terminal_replay_waits_for_sync_and_points_to_sync(self) -> None:
+        game_id = "game-1"
+        socket = FakeSocket([
+            server_event("game.event", game_id, 4, {
+                "event_type": "GAME_ENDED",
+                "event_payload": {"outcome": "village"},
+            }),
+            server_event("session.resumed", game_id, 5, {
+                "player_id": "p0",
+                "last_seq": 3,
+            }),
+            server_event("game.state_sync", game_id, 6, state_sync_payload()),
+        ])
+        client = NetworkClient(
+            NetworkClientConfig("ws://fake", game_id, "entry-token"),
+            MemoryStore(SessionCheckpoint("connection-token", 3)),
+            connector=lambda _uri: socket,
+        )
+        observed: list[object] = []
+        run_task = asyncio.create_task(client.run())
+        async for event in client.events():
+            observed.append(event)
+        result = await run_task
+
+        self.assertEqual(result.reason, ClientExitReason.GAME_ENDED)
+        ended = [event for event in observed if isinstance(event, GameEnded)]
+        self.assertEqual(len(ended), 1)
+        self.assertEqual(ended[0].event.type, "game.state_sync")
+        self.assertEqual(ended[0].event.seq, 6)
+        self.assertEqual(client.snapshot().last_seq, 6)
+
+    async def test_resume_replay_buffer_overrun_is_fatal_before_authentication(self) -> None:
+        socket = FakeSocket([
+            server_event("game.event", "game-1", 1, {
+                "event_type": "PUBLIC_NOTIFY",
+                "event_payload": {"notify_id": "first"},
+            }),
+            server_event("game.event", "game-1", 2, {
+                "event_type": "PUBLIC_NOTIFY",
+                "event_payload": {"notify_id": "second"},
+            }),
+        ])
+        store = MemoryStore(SessionCheckpoint("connection-token", 0))
+        client = NetworkClient(
+            NetworkClientConfig(
+                "ws://fake",
+                "game-1",
+                "entry-token",
+                resume_replay_capacity=1,
+            ),
+            store,
+            connector=lambda _uri: socket,
+        )
+
+        result = await client.run()
+
+        self.assertEqual(result.reason, ClientExitReason.RESUME_BUFFER_OVERRUN)
+        self.assertEqual(store.saved, [])
+        self.assertEqual(client.snapshot().last_seq, 0)
+        self.assertIsNone(client.snapshot().player_id)
+
+    async def test_resume_sync_history_terminal_ends_after_sync_commit(self) -> None:
+        game_id = "game-1"
+        payload = state_sync_payload()
+        payload["history"] = [{
+            "type": "game.event",
+            "payload": {"event_type": "GAME_ENDED", "event_payload": {}},
+        }]
+        socket = FakeSocket([
+            server_event("session.resumed", game_id, 4, {
+                "player_id": "p0",
+                "last_seq": 3,
+            }),
+            server_event("game.state_sync", game_id, 5, payload),
+        ])
+        client = NetworkClient(
+            NetworkClientConfig("ws://fake", game_id, "entry-token"),
+            MemoryStore(SessionCheckpoint("connection-token", 3)),
+            connector=lambda _uri: socket,
+        )
+        observed: list[object] = []
+        run_task = asyncio.create_task(client.run())
+        async for event in client.events():
+            observed.append(event)
+        result = await run_task
+
+        self.assertEqual(result.reason, ClientExitReason.GAME_ENDED)
+        ended = [event for event in observed if isinstance(event, GameEnded)]
+        self.assertEqual(len(ended), 1)
+        self.assertEqual(ended[0].event.type, "game.state_sync")
+        self.assertEqual(ended[0].event.seq, 5)
+        self.assertEqual(client.snapshot().last_seq, 5)
 
     async def test_stale_duplicate_does_not_move_state_or_checkpoint_backwards(self) -> None:
         game_id = "game-1"
@@ -1195,15 +1309,10 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.snapshot().last_seq, 0)
         self.assertIsNone(client.snapshot().player_id)
 
-    async def test_resume_rejects_normal_server_events_before_authentication(self) -> None:
+    async def test_resume_rejects_sync_before_authentication(self) -> None:
         for message in (
-            server_event(
-                "game.event",
-                "game-1",
-                1,
-                {"event_type": "GAME_ENDED", "event_payload": {}},
-            ),
-            server_event("player.action_state", "game-1", 1, action_state_payload()),
+            server_event("game.state_sync", "game-1", 1, state_sync_payload()),
+            server_event("session.ready", "game-1", 1, {"player_id": "p0", "ready": True}),
         ):
             with self.subTest(message_type=json.loads(message)["type"]):
                 socket = FakeSocket([message])

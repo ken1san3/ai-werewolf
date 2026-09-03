@@ -274,7 +274,7 @@ class StateWebSocketTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(socket.close_code, 1008)
             self.assertEqual(self.server.sessions.session_for(GAME_ID).connected_player_ids, frozenset())
 
-    async def test_resume_authentication_precedes_replay_and_snapshot(self):
+    async def test_resume_replay_precedes_authentication_and_snapshot(self):
         async with connect(self.uri) as old:
             joined, initial = await self.join(old, "player-0")
             self.game.event_bus.publish(GameEvent("MISSED", EventVisibility.PRIVATE, {"value": "own"}, "player-0"))
@@ -283,13 +283,13 @@ class StateWebSocketTests(unittest.IsolatedAsyncioTestCase):
                 await resumed.send(json.dumps(client_message("session.resume", {
                     "connection_token": joined["payload"]["connection_token"], "last_seq": initial["seq"],
                 })))
-                ack = await self.receive(resumed)
                 replay = await self.receive(resumed)
+                ack = await self.receive(resumed)
                 sync = await self.receive(resumed)
                 self.assertEqual(replay, missed)
                 self.assertEqual([m["type"] for m in (ack, replay, sync)],
                                  ["session.resumed", "game.event", "game.state_sync"])
-                self.assertEqual([m["seq"] for m in (ack, replay, sync)], [4, 3, 5])
+                self.assertEqual([m["seq"] for m in (replay, ack, sync)], [3, 4, 5])
                 await old.wait_closed()
                 self.assertEqual(old.close_code, 4001)
                 self.game.event_bus.publish(GameEvent("AFTER_SYNC", EventVisibility.PUBLIC, {}))

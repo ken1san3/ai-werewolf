@@ -233,8 +233,8 @@ class SlowConnectionTests(unittest.IsolatedAsyncioTestCase):
                             "connection_token": joined["payload"]["connection_token"], "last_seq": sync["seq"],
                         })))
                         messages = [await receive(replacement) for _ in range(3)]
-                        self.assertEqual([m["type"] for m in messages], ["session.resumed", "game.event", "game.state_sync"])
-                        self.assertEqual([m["seq"] for m in messages], [4, 3, 5])
+                        self.assertEqual([m["type"] for m in messages], ["game.event", "session.resumed", "game.state_sync"])
+                        self.assertEqual([m["seq"] for m in messages], [3, 4, 5])
                         await old.wait_closed()
                         self.assertEqual(old.close_code, 4001)
         finally:

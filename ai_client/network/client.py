@@ -153,10 +153,12 @@ class NetworkClient:
         self._resume_last_seq_requested: int | None = None
         self._join_retry_after_ambiguous = False
         self._resume_sync_required = False
-        self._resume_ack_sequence: int | None = None
+        self._resume_replay_buffer: list[Mapping[str, Any]] = []
+        self._terminal_candidate_seen = False
         self._sync_deadline: float | None = None
         self._sequence_gap_previous_seq: int | None = None
         self._background_failure: _FatalFailure | _TransientFailure | None = None
+        self._cleanup_result: bool | None = True
 
     @property
     def lifecycle(self) -> ClientLifecycle:
@@ -181,6 +183,8 @@ class NetworkClient:
         """Yield client events until the client reaches a terminal state."""
 
         while True:
+            if self._event_stream_closed and self._events.empty():
+                return
             item = await self._events.get()
             if item is _EVENT_STREAM_END:
                 return
@@ -257,9 +261,7 @@ class NetworkClient:
             with suppress(_FatalFailure):
                 if self.lifecycle is not ClientLifecycle.ENDED:
                     await self._set_lifecycle(ClientLifecycle.STOPPING)
-            await self._cancel_deadline()
-            await self._close_socket()
-            await self._stop_sender()
+            await self._cleanup_generation()
             with suppress(_FatalFailure):
                 if self.lifecycle is not ClientLifecycle.ENDED:
                     await self._set_lifecycle(ClientLifecycle.ENDED)
@@ -276,7 +278,10 @@ class NetworkClient:
         self._stop_event.set()
         if self._run_started and not self._event_stream_closed:
             await self._set_lifecycle(ClientLifecycle.STOPPING)
-        await self._close_socket()
+        if self._run_started:
+            await self._cleanup_generation()
+        else:
+            await self._close_socket()
 
     async def send_chat(self, action: ChatAction, message: str) -> SendReceipt:
         self._validate_action(action, "chat")
@@ -367,9 +372,10 @@ class NetworkClient:
             self._checkpoint.last_seq if self._checkpoint is not None else None
         )
         self._resume_sync_required = False
-        self._resume_ack_sequence = None
+        self._resume_replay_buffer.clear()
         self._sync_deadline = None
         self._background_failure = None
+        self._cleanup_result = None
         await self._set_lifecycle(
             ClientLifecycle.RESUMING if self._checkpoint is not None else ClientLifecycle.JOINING
         )
@@ -438,13 +444,17 @@ class NetworkClient:
         except (NotDeliveredError, DeliveryUnknownError) as error:
             raise _TransientFailure(str(error)) from error
         finally:
-            await self._cancel_deadline()
-            await self._close_socket()
-            await self._stop_sender()
+            cleanup_ok = await self._cleanup_generation()
             self._state.invalidate_actions()
             self._sync_deadline = None
             self._socket = None
             self._outbound = None
+            self._resume_replay_buffer.clear()
+            if not cleanup_ok:
+                raise _FatalFailure(
+                    ClientExitReason.INTERNAL_ERROR,
+                    "shutdown timeout",
+                )
 
         return _GenerationOutcome(connected=self._connected_once_in_generation)
 
@@ -517,10 +527,7 @@ class NetworkClient:
         return await receiver()
 
     async def _accept_server_message(self, raw_message: str | bytes) -> None:
-        try:
-            message = self.validator.decode_server(raw_message)
-        except ProtocolValidationError:
-            raise
+        message = self.validator.decode_server(raw_message)
         if not same_major_version(message["protocol_version"], self.validator.protocol_version):
             raise _FatalFailure(ClientExitReason.INCOMPATIBLE_PROTOCOL)
         if message["game_id"] != self.config.game_id:
@@ -554,46 +561,49 @@ class NetworkClient:
                 )
 
         if not self._authenticated and message_type not in {"session.joined", "session.resumed"}:
+            if self._resume_request_sent:
+                self._buffer_resume_replay(message)
+                return
             raise _FatalFailure(
                 ClientExitReason.INVALID_SERVER_MESSAGE,
                 f"server event arrived before session authentication: {message_type}",
             )
 
-        if (
-            self._resume_request_sent
-            and self._awaiting_sync
-            and message_type == "session.resumed"
-            and sequence > previous_seq + 1
-        ):
-            # The server allocates the authentication reply after the
-            # retained events, but sends the reply first. Hold its sequence
-            # as a control marker so the following retained event can still
-            # be consumed from the requested checkpoint.
-            self._resume_ack_sequence = sequence
-            self._authenticated = True
-            self._state.apply_server_event(message)
-            await self._publish(self._server_event(message))
-            return
-
-        if self._resume_ack_sequence is not None:
-            if sequence == previous_seq + 1:
-                # The next message is the first retained replay event; its
-                # sequence is intentionally below the already-published ack.
-                self._resume_ack_sequence = None
-            else:
-                ack_sequence = self._resume_ack_sequence
-                self._resume_ack_sequence = None
-                await self._publish(
-                    SequenceGapDetected(
-                        expected_seq=previous_seq + 1,
-                        received_seq=ack_sequence,
-                        connection_generation=self._connection_generation,
-                    )
+        if message_type == "session.resumed":
+            requested_seq = self._resume_last_seq_requested
+            if requested_seq is None or sequence <= requested_seq:
+                raise _FatalFailure(
+                    ClientExitReason.INVALID_SERVER_MESSAGE,
+                    "session.resumed sequence is not newer than the requested checkpoint",
                 )
-                self._resume_sync_required = True
-                if self._sequence_gap_previous_seq is None:
-                    self._sequence_gap_previous_seq = previous_seq
-                if not is_sync_barrier:
+            if self._resume_replay_buffer:
+                expected_sequence = requested_seq + len(self._resume_replay_buffer) + 1
+                if sequence != expected_sequence:
+                    raise _FatalFailure(
+                        ClientExitReason.INVALID_SERVER_MESSAGE,
+                        "session.resumed does not follow the retained replay",
+                    )
+                self._authenticated = True
+                replay = tuple(self._resume_replay_buffer)
+                self._resume_replay_buffer.clear()
+                for replay_message in replay:
+                    await self._commit_server_message(replay_message)
+                previous_seq = self._state.last_seq
+            else:
+                self._authenticated = True
+                if sequence > previous_seq + 1:
+                    await self._publish(
+                        SequenceGapDetected(
+                            expected_seq=previous_seq + 1,
+                            received_seq=sequence,
+                            connection_generation=self._connection_generation,
+                        )
+                    )
+                    self._resume_sync_required = True
+                    if self._sequence_gap_previous_seq is None:
+                        self._sequence_gap_previous_seq = previous_seq
+                    self._state.apply_server_event(message)
+                    await self._publish(self._server_event(message))
                     return
 
         if self._resume_sync_required and not is_sync_barrier:
@@ -601,6 +611,7 @@ class NetworkClient:
             # an incremental event until the authoritative sync barrier arrives.
             return
 
+        previous_seq = self._state.last_seq
         if sequence <= previous_seq:
             return
         if not is_sync_barrier and sequence != previous_seq + 1:
@@ -615,6 +626,42 @@ class NetworkClient:
                 self._sequence_gap_previous_seq = previous_seq
             raise _TransientFailure("sequence_gap")
 
+        await self._commit_server_message(message, is_sync_barrier=is_sync_barrier)
+
+    def _buffer_resume_replay(self, message: Mapping[str, Any]) -> None:
+        message_type = message["type"]
+        if message_type == "game.state_sync" or message_type.startswith("session."):
+            raise _FatalFailure(
+                ClientExitReason.INVALID_SERVER_MESSAGE,
+                f"invalid pre-authentication resume message: {message_type}",
+            )
+        requested_seq = self._resume_last_seq_requested
+        if requested_seq is None:
+            raise _FatalFailure(
+                ClientExitReason.INVALID_SERVER_MESSAGE,
+                "resume replay arrived without a requested checkpoint",
+            )
+        sequence = message["seq"]
+        if sequence <= requested_seq:
+            return
+        if len(self._resume_replay_buffer) >= self.config.resume_replay_capacity:
+            raise _FatalFailure(ClientExitReason.RESUME_BUFFER_OVERRUN)
+        expected_sequence = requested_seq + len(self._resume_replay_buffer) + 1
+        if sequence != expected_sequence:
+            raise _FatalFailure(
+                ClientExitReason.INVALID_SERVER_MESSAGE,
+                "resume replay is not contiguous",
+            )
+        self._resume_replay_buffer.append(message)
+
+    async def _commit_server_message(
+        self,
+        message: Mapping[str, Any],
+        *,
+        is_sync_barrier: bool = False,
+    ) -> None:
+        message_type = message["type"]
+        sequence = message["seq"]
         self._state.apply_server_event(message)
         token = self._checkpoint.connection_token if self._checkpoint is not None else None
         if message_type == "session.joined":
@@ -624,8 +671,6 @@ class NetworkClient:
             except (TypeError, ValueError) as error:
                 raise _FatalFailure(ClientExitReason.INVALID_SERVER_MESSAGE, str(error)) from error
             token = token_value
-            self._authenticated = True
-        elif message_type == "session.resumed":
             self._authenticated = True
         if token is None:
             raise _FatalFailure(ClientExitReason.CREDENTIAL_SAVE_FAILED, "no connection token")
@@ -640,19 +685,33 @@ class NetworkClient:
         self._state.set_last_seq(sequence)
 
         event = self._server_event(message)
+        terminal_sync = is_sync_barrier and (
+            self._terminal_candidate_seen or self._sync_history_has_game_ended(message["payload"])
+        )
+        terminal_event = (
+            message_type == "game.event"
+            and message["payload"]["event_type"] == "GAME_ENDED"
+            and not self._awaiting_sync
+            and not self._resume_sync_required
+        )
+        if terminal_sync or terminal_event:
+            self._ensure_event_capacity(
+                1 + (1 if self._sequence_gap_previous_seq is not None else 0) + 2
+            )
         await self._publish(event)
         if message_type == "action.rejected":
             payload = message["payload"]
-            await self._publish(
-                ActionRejected(payload["action"], payload["reason"], sequence)
-            )
-        if message_type in {"player.action_state", "game.state_sync"}:
+            await self._publish(ActionRejected(payload["action"], payload["reason"], sequence))
+        if message_type in {"player.action_state", "game.state_sync"} and not terminal_sync:
             self._schedule_deadline(
                 message["payload"]["action_state"]
                 if message_type == "game.state_sync"
                 else message["payload"],
                 message["timestamp"],
             )
+
+        if message_type == "game.event" and message["payload"]["event_type"] == "GAME_ENDED":
+            self._terminal_candidate_seen = True
 
         if is_sync_barrier:
             if self._sequence_gap_previous_seq is not None:
@@ -667,14 +726,36 @@ class NetworkClient:
             self._awaiting_sync = False
             self._resume_sync_required = False
             self._connected_once_in_generation = True
+            if terminal_sync:
+                await self._publish(GameEnded(event))
+                await self._set_lifecycle(ClientLifecycle.ENDED)
+                raise _GameEndedSignal()
             await self._set_lifecycle(ClientLifecycle.CONNECTED)
 
-        if (
-            message_type == "game.event"
-            and message["payload"]["event_type"] == "GAME_ENDED"
-        ):
+        if terminal_event:
             await self._publish(GameEnded(event))
+            await self._set_lifecycle(ClientLifecycle.ENDED)
             raise _GameEndedSignal()
+
+    @staticmethod
+    def _sync_history_has_game_ended(payload: Mapping[str, Any]) -> bool:
+        history = payload.get("history", ())
+        if not isinstance(history, Sequence) or isinstance(history, (str, bytes)):
+            return False
+        for entry in history:
+            if not isinstance(entry, Mapping) or entry.get("type") != "game.event":
+                continue
+            entry_payload = entry.get("payload")
+            if (
+                isinstance(entry_payload, Mapping)
+                and entry_payload.get("event_type") == "GAME_ENDED"
+            ):
+                return True
+        return False
+
+    def _ensure_event_capacity(self, count: int) -> None:
+        if self._events.maxsize - self._events.qsize() < count:
+            raise _FatalFailure(ClientExitReason.CONSUMER_OVERRUN)
 
     def _server_event(self, message: Mapping[str, Any]) -> ServerEvent:
         return ServerEvent(
@@ -840,6 +921,43 @@ class NetworkClient:
         with suppress(asyncio.CancelledError):
             await task
 
+    async def _cleanup_generation(self) -> bool:
+        """Bound all transport/task cleanup to one shutdown deadline."""
+
+        if self._cleanup_result is not None:
+            if not self._cleanup_result:
+                return False
+            if (
+                self._socket is None
+                and self._sender_task is None
+                and self._deadline_task is None
+                and self._outbound is None
+            ):
+                return True
+            # A stop can finish while the connector is still resolving.  If
+            # that connector subsequently hands us a socket, the generation
+            # finally must still close the newly-owned resources.
+            self._cleanup_result = None
+
+        deadline = asyncio.get_running_loop().time() + self.config.shutdown_timeout_seconds
+        cleanup_ok = True
+        # Cancel client-owned tasks before waiting on the transport.  This
+        # keeps a blocked sender from surviving a close/wait_closed timeout.
+        for cleanup in (self._cancel_deadline, self._stop_sender, self._close_socket):
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                cleanup_ok = False
+                break
+            try:
+                await asyncio.wait_for(cleanup(), timeout=remaining)
+            except asyncio.TimeoutError:
+                cleanup_ok = False
+                break
+        if not cleanup_ok:
+            self._abort_socket()
+        self._cleanup_result = cleanup_ok
+        return cleanup_ok
+
     async def _stop_sender(self) -> None:
         queue = self._outbound
         if queue is not None:
@@ -868,6 +986,16 @@ class NetworkClient:
             if inspect.isawaitable(result):
                 with suppress(Exception):
                     await result
+
+    def _abort_socket(self) -> None:
+        socket = self._socket
+        if socket is None:
+            return
+        transport = getattr(socket, "transport", None)
+        abort = getattr(transport, "abort", None)
+        if callable(abort):
+            with suppress(Exception):
+                abort()
 
     def _raise_for_close(self, error: ConnectionClosed) -> None:
         code = getattr(error, "code", None)
@@ -910,8 +1038,10 @@ class NetworkClient:
     async def _finish(
         self, reason: ClientExitReason, *, success: bool, detail: str | None = None
     ) -> ClientExit:
-        await self._cancel_deadline()
-        await self._close_socket()
+        if not await self._cleanup_generation():
+            reason = ClientExitReason.INTERNAL_ERROR
+            success = False
+            detail = "shutdown timeout"
         if reason in {ClientExitReason.GAME_ENDED, ClientExitReason.STOPPED}:
             if self.lifecycle is not ClientLifecycle.ENDED:
                 with suppress(_FatalFailure):
@@ -922,7 +1052,6 @@ class NetworkClient:
                     await self._set_lifecycle(ClientLifecycle.FAILED)
             with suppress(_FatalFailure):
                 await self._publish(FatalTermination(reason, detail))
-        await self._stop_sender()
         self._close_event_stream()
         return ClientExit(reason, success, self.lifecycle, detail)
 
@@ -930,15 +1059,8 @@ class NetworkClient:
         if self._event_stream_closed:
             return
         self._event_stream_closed = True
-        try:
+        if not self._events.full():
             self._events.put_nowait(_EVENT_STREAM_END)
-        except asyncio.QueueFull:
-            # The queue is already in terminal overrun territory.  Preserve
-            # wake-up semantics for consumers by dropping the oldest item.
-            with suppress(asyncio.QueueEmpty):
-                self._events.get_nowait()
-            with suppress(asyncio.QueueFull):
-                self._events.put_nowait(_EVENT_STREAM_END)
 
 
 __all__ = ["NetworkClient"]

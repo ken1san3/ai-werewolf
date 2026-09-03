@@ -1,7 +1,7 @@
-Status: IN_REVIEW
+Status: APPROVED — Reviewer / Claude 承認（2026-09-03、Addendum B 反映後の再承認）。B1 は A案（D047 の replay → ACK → sync へ戻し、クライアントの有限 buffer で認証前公開を防ぐ）を採り、`_resume_ack_sequence` と wire `[4, 3, 5]` の互換経路を消すと明記している。`resume_replay_capacity` の既定128が D049「再送履歴は replay_history_limit（既定128件）」に対応することを確認した。B2 は Network が終了 fact を検出し、World が全量 baseline を commit した後にGameEnded を消費する、という所有権の分け方を決め、`GameEnded.event` が復旧時は commit 済みの`game.state_sync` を指すことと、既定60秒 + cleanup 5秒の有限終了まで書いている。公開権限は変えていない。
+2026-09-03 承認条件（実装と同じ変更に含めること）: (1) `PHASE3_2_WORLD_STATE_MEMORY_DESIGN.md` の終了記述を本 Addendum B2 に合わせて改訂する（`ai_client/world/service.py` を2つの設計が別々に記述する状態にしない）。(2) `Docs/ai/spec/DESIGN.md` §9.2 と `handoffs/PHASE3_1_HANDOFF.md` を B1 の確定した意味へ反映する。(3) `tests/test_state_delivery.py` / `tests/test_network_review_regressions.py` の wire 期待値を`[3, 4, 5]` へ戻す。
 2026-09-03: Detailed Design / Sol が REQUEST Addendum B（R-20260903-03 / 05）へ回答。
 §Addendum B の A案と終了 barrier を追加し、本文の競合する記述を改訂した。Claude の再承認待ち。
-replay 保持の記述は実物と突き合わせて一致を確認した。実装時の確認事項は R-20260901-93。
 
 # Phase 3.1 Network Client — Detailed Design
 

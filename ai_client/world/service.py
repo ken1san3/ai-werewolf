@@ -75,7 +75,9 @@ class WorldState:
         self._freshness = Freshness.EMPTY
         self._version = 0
         self._has_sync = False
+        self._last_committed_sync_seq: int | None = None
         self._recovery_sync_accepted = False
+        self._terminal_notice_rejected = False
         self._stop_requested = False
         self._run_started = False
         self._run_task: asyncio.Task[WorldStateExit] | None = None
@@ -113,9 +115,15 @@ class WorldState:
             return self._exit(WorldStateExitReason.FAILED)
 
         lifecycle = self._network_lifecycle()
-        if lifecycle is ClientLifecycle.ENDED:
+        if (
+            lifecycle is ClientLifecycle.ENDED
+            and self._recovery_sync_accepted
+            and not self._terminal_notice_rejected
+        ):
             self._set_freshness(Freshness.ENDED)
             return self._exit(WorldStateExitReason.CLIENT_ENDED)
+        if lifecycle is ClientLifecycle.ENDED and self._freshness is Freshness.FAILED:
+            return self._exit(WorldStateExitReason.FAILED)
         self._set_freshness(Freshness.FAILED)
         return self._exit(WorldStateExitReason.SOURCE_CLOSED)
 
@@ -195,7 +203,9 @@ class WorldState:
             result = self._reducer.apply_server_event(event)
             if result.state_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._has_sync = True
+                self._last_committed_sync_seq = event.seq
                 self._recovery_sync_accepted = True
+                self._terminal_notice_rejected = False
                 self._freshness = (
                     Freshness.CURRENT
                     if self._network_lifecycle() is ClientLifecycle.CONNECTED
@@ -205,13 +215,6 @@ class WorldState:
                 self._recovery_sync_accepted = False
                 if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                     self._freshness = Freshness.STALE
-            if (
-                event.type == "game.event"
-                and isinstance(event.payload.get("event_type"), str)
-                and event.payload.get("event_type") == "GAME_ENDED"
-                and self._freshness is not Freshness.FAILED
-            ):
-                self._freshness = Freshness.ENDED
             self._commit()
             return
         if isinstance(event, LifecycleChanged):
@@ -228,6 +231,21 @@ class WorldState:
             self._commit()
             return
         if isinstance(event, GameEnded):
+            if (
+                not self._has_sync
+                or not self._recovery_sync_accepted
+                or (
+                    event.event.type == "game.state_sync"
+                    and event.event.seq != self._last_committed_sync_seq
+                )
+                or (
+                    event.event.type == "game.event"
+                    and event.event.payload.get("event_type") != "GAME_ENDED"
+                )
+                or event.event.type not in {"game.event", "game.state_sync"}
+            ):
+                self._terminal_notice_rejected = True
+                return
             self._freshness = Freshness.ENDED
             self._commit()
             return
@@ -258,7 +276,8 @@ class WorldState:
                     else Freshness.STALE
                 )
         elif lifecycle is ClientLifecycle.ENDED:
-            self._freshness = Freshness.ENDED
+            if self._recovery_sync_accepted:
+                self._freshness = Freshness.ENDED
         elif lifecycle is ClientLifecycle.FAILED:
             self._freshness = Freshness.FAILED
 

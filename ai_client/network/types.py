@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -30,6 +31,7 @@ class ClientExitReason(str, Enum):
     JOIN_OUTCOME_UNKNOWN = "JOIN_OUTCOME_UNKNOWN"
     CREDENTIAL_INVALID = "CREDENTIAL_INVALID"
     CREDENTIAL_SAVE_FAILED = "CREDENTIAL_SAVE_FAILED"
+    RESUME_BUFFER_OVERRUN = "RESUME_BUFFER_OVERRUN"
     CONSUMER_OVERRUN = "CONSUMER_OVERRUN"
     CONFIG_INVALID = "CONFIG_INVALID"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -77,6 +79,8 @@ class NetworkClientConfig:
     sync_timeout_seconds: float = 5.0
     inbound_event_capacity: int = 1024
     outbound_command_capacity: int = 64
+    resume_replay_capacity: int = 128
+    shutdown_timeout_seconds: float = 5.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.uri, str) or not self.uri:
@@ -89,8 +93,24 @@ class NetworkClientConfig:
             raise ValueError("entry_token must be non-empty when supplied")
         if self.protocol_version is not None and not _valid_protocol_version(self.protocol_version):
             raise ValueError("protocol_version must be major.minor")
-        if self.connect_timeout_seconds <= 0 or self.sync_timeout_seconds <= 0:
-            raise ValueError("connection and sync timeouts must be positive")
+        for name, value in (
+            ("connect_timeout_seconds", self.connect_timeout_seconds),
+            ("sync_timeout_seconds", self.sync_timeout_seconds),
+            ("shutdown_timeout_seconds", self.shutdown_timeout_seconds),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive finite number")
+        if (
+            isinstance(self.resume_replay_capacity, bool)
+            or not isinstance(self.resume_replay_capacity, int)
+            or self.resume_replay_capacity < 1
+        ):
+            raise ValueError("resume_replay_capacity must be a positive integer")
         if self.inbound_event_capacity < 1 or self.outbound_command_capacity < 1:
             raise ValueError("event and command capacities must be positive")
 
