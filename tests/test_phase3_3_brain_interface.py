@@ -1,0 +1,394 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import FrozenInstanceError, replace
+from typing import Any
+import unittest
+
+from ai_client.brain import (
+    AbilityDecision,
+    BrainController,
+    BrainInput,
+    BrainRunConfig,
+    ChatDecision,
+    CoDeclareDecision,
+    CoReportDecision,
+    CoordinatorExitReason,
+    DecisionStatus,
+    DummyBrain,
+    NoDecision,
+    PhaseBrainCoordinator,
+    VoteDecision,
+)
+from ai_client.network import (
+    AbilityAction,
+    ChatAction,
+    CoDeclareAction,
+    CoReportAction,
+    DeliveryUnknownError,
+    NotDeliveredError,
+    SendReceipt,
+    VoteAction,
+)
+from ai_client.world import (
+    AbilityResultView,
+    CoView,
+    CurrentActionsView,
+    Freshness,
+    HistoryView,
+    WorldSnapshot,
+)
+
+
+class _FakeWorld:
+    def __init__(self, *, action: object | None = None) -> None:
+        snapshot = WorldSnapshot(
+            version=1,
+            freshness=Freshness.CURRENT,
+            is_caught_up=True,
+            last_applied_seq=10,
+            phase=replace_phase(),
+        )
+        self._snapshot = snapshot
+        self._actions = CurrentActionsView(
+            world_version=1,
+            world_last_applied_seq=10,
+            network_last_seq=10,
+            is_caught_up=True,
+            actions=() if action is None else (action,),
+        )
+        self._update = asyncio.Event()
+        self.reads = 0
+
+    def snapshot(self) -> WorldSnapshot:
+        return self._snapshot
+
+    def current_actions(self) -> CurrentActionsView:
+        self.reads += 1
+        return self._actions
+
+    def history(self) -> HistoryView:
+        return HistoryView((), True, self._snapshot.history_retention)
+
+    def co_for_day(self, day: int) -> CoView:
+        return CoView((), (), True, self._snapshot.history_retention)
+
+    def ability_results(self) -> AbilityResultView:
+        return AbilityResultView((), True, self._snapshot.history_retention)
+
+    async def wait_for_update(self, after_version: int) -> WorldSnapshot:
+        while self._snapshot.version <= after_version and self._snapshot.freshness not in {
+            Freshness.ENDED,
+            Freshness.FAILED,
+        }:
+            event = self._update
+            await event.wait()
+        return self._snapshot
+
+    def update(
+        self,
+        *,
+        action: object | None = None,
+        freshness: Freshness = Freshness.CURRENT,
+        phase: tuple[int, str] | None = None,
+        caught_up: bool = True,
+    ) -> None:
+        next_version = self._snapshot.version + 1
+        day, phase_name = phase or (
+            self._snapshot.phase.day if self._snapshot.phase else 1,
+            self._snapshot.phase.phase if self._snapshot.phase else "day",
+        )
+        self._snapshot = replace(
+            self._snapshot,
+            version=next_version,
+            freshness=freshness,
+            is_caught_up=caught_up,
+            phase=replace_phase(day=day, phase=phase_name),
+        )
+        self._actions = replace(
+            self._actions,
+            world_version=next_version,
+            world_last_applied_seq=self._snapshot.last_applied_seq,
+            network_last_seq=self._snapshot.last_applied_seq,
+            is_caught_up=caught_up,
+            actions=() if action is None else (action,),
+        )
+        event = self._update
+        self._update = asyncio.Event()
+        event.set()
+
+
+def replace_phase(*, day: int = 1, phase: str = "day"):
+    from ai_client.world import PhaseView
+
+    return PhaseView(phase=phase, day=day, phase_ends_at=100)
+
+
+class _Sender:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.receipt = SendReceipt("receipt-1", 1)
+        self.error: BaseException | None = None
+
+    async def _record(self, name: str, *args: Any) -> SendReceipt:
+        self.calls.append((name, args))
+        if self.error is not None:
+            raise self.error
+        return self.receipt
+
+    async def send_chat(self, *args: Any) -> SendReceipt:
+        return await self._record("chat", *args)
+
+    async def send_vote(self, *args: Any) -> SendReceipt:
+        return await self._record("vote", *args)
+
+    async def send_ability(self, *args: Any) -> SendReceipt:
+        return await self._record("ability", *args)
+
+    async def send_co_declare(self, *args: Any) -> SendReceipt:
+        return await self._record("co_declare", *args)
+
+    async def send_co_report(self, *args: Any) -> SendReceipt:
+        return await self._record("co_report", *args)
+
+
+def action(kind: str) -> object:
+    common = {
+        "connection_generation": 1,
+        "action_generation": 1,
+        "phase": "day",
+        "day": 1,
+        "type": kind,
+    }
+    if kind == "chat":
+        return ChatAction(**common, channel="public")
+    if kind == "vote":
+        return VoteAction(**common, valid_targets=("p2",), target_count=1, allows_abstain=False)
+    if kind == "ability":
+        return AbilityAction(
+            **common,
+            ability_id="inspect",
+            description=None,
+            valid_targets=("p2",),
+            target_count=1,
+            uses_remaining=1,
+        )
+    if kind == "co_declare":
+        return CoDeclareAction(**common, claimed_role_ids=("seer",))
+    if kind == "co_report":
+        return CoReportAction(**common)
+    raise AssertionError(kind)
+
+
+class _ScriptedBrain:
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.calls: list[BrainInput] = []
+
+    async def decide(self, request: BrainInput) -> object:
+        self.calls.append(request)
+        return self.result
+
+
+class _BlockingBrain:
+    def __init__(self, result: object | None = None) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+        self.result = result if result is not None else NoDecision()
+
+    async def decide(self, request: BrainInput) -> object:
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
+        return self.result
+
+
+def make_controller(
+    kind: str = "chat", *, brain: object | None = None
+) -> tuple[BrainController, _FakeWorld, _Sender, BrainInput]:
+    handle = action(kind)
+    world = _FakeWorld(action=handle)
+    sender = _Sender()
+    controller = BrainController(
+        world=world,
+        sender=sender,
+        brain=brain or DummyBrain(seed=7),
+        config=BrainRunConfig(max_decision_seconds=0.2, cancellation_grace_seconds=0.02),
+    )
+    request = controller.capture_input()
+    assert request is not None
+    return controller, world, sender, request
+
+
+class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
+    def test_input_and_decisions_are_frozen(self) -> None:
+        controller, _world, _sender, request = make_controller()
+        with self.assertRaises(FrozenInstanceError):
+            request.action_context = request.action_context  # type: ignore[misc]
+        with self.assertRaises(FrozenInstanceError):
+            request.action_context.options[0].option_id = "other"  # type: ignore[misc]
+        self.assertIsInstance(request, BrainInput)
+
+    def test_capture_preserves_version_seq_and_original_handle(self) -> None:
+        controller, world, _sender, request = make_controller()
+        handle = world.current_actions().actions[0]
+        option = request.action_context.options[0]
+        self.assertEqual(option.option_id, "action:0")
+        self.assertIs(option.handle, handle)
+        self.assertEqual(request.snapshot.version, request.action_context.world_version)
+        self.assertEqual(request.snapshot.last_applied_seq, request.action_context.network_last_seq)
+        self.assertEqual(world.reads, 2)
+
+    def test_capture_rejects_inconsistent_state_but_allows_empty_actions(self) -> None:
+        controller, world, _sender, _request = make_controller()
+        world.update(caught_up=False)
+        self.assertIsNone(controller.capture_input())
+        world.update(caught_up=True, action=None)
+        request = controller.capture_input()
+        self.assertIsNotNone(request)
+        assert request is not None
+        self.assertEqual(request.action_context.options, ())
+
+    async def test_each_typed_decision_dispatches_once(self) -> None:
+        cases = (
+            ("chat", ChatDecision("action:0", "hello"), "chat"),
+            ("vote", VoteDecision("action:0", "p2"), "vote"),
+            ("ability", AbilityDecision("action:0", ("p2",)), "ability"),
+            ("co_declare", CoDeclareDecision("action:0", "seer", "claim"), "co_declare"),
+            ("co_report", CoReportDecision("action:0", "inspect", "p2", "clear"), "co_report"),
+        )
+        for kind, decision, expected_name in cases:
+            with self.subTest(kind=kind):
+                brain = _ScriptedBrain(decision)
+                controller, _world, sender, request = make_controller(kind, brain=brain)
+                outcome = await controller.decide_and_send(request)
+                self.assertEqual(outcome.status, DecisionStatus.SENT)
+                self.assertEqual([name for name, _args in sender.calls], [expected_name])
+
+    async def test_no_decision_never_sends(self) -> None:
+        controller, _world, sender, request = make_controller(brain=DummyBrain(seed=1))
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.NO_DECISION)
+        self.assertEqual(sender.calls, [])
+
+    async def test_invalid_decisions_are_observable_and_never_send(self) -> None:
+        invalid = (
+            object(),
+            ChatDecision("missing", "hello"),
+            VoteDecision("action:0", "not-listed"),
+            AbilityDecision("action:0", ("p2", "p2")),
+            CoDeclareDecision("action:0", "not-listed", "claim"),
+            CoReportDecision("action:0", "", "p2", "clear"),
+        )
+        for decision in invalid:
+            with self.subTest(decision=type(decision).__name__):
+                kind = "chat" if isinstance(decision, (object, ChatDecision)) else "vote"
+                if isinstance(decision, VoteDecision):
+                    kind = "vote"
+                elif isinstance(decision, AbilityDecision):
+                    kind = "ability"
+                elif isinstance(decision, CoDeclareDecision):
+                    kind = "co_declare"
+                elif isinstance(decision, CoReportDecision):
+                    kind = "co_report"
+                brain = _ScriptedBrain(decision)
+                controller, _world, sender, request = make_controller(kind, brain=brain)
+                outcome = await controller.decide_and_send(request)
+                self.assertEqual(outcome.status, DecisionStatus.INVALID_DECISION)
+                self.assertEqual(sender.calls, [])
+
+    async def test_stale_action_after_validation_does_not_send(self) -> None:
+        brain = _BlockingBrain(ChatDecision("action:0", "hello"))
+        controller, world, sender, request = make_controller(brain=brain)
+        task = asyncio.create_task(controller.decide_and_send(request))
+        await asyncio.wait_for(brain.started.wait(), 0.2)
+        world.update(action=replace(action("chat"), action_generation=2))
+        brain.release.set()
+        outcome = await task
+        self.assertEqual(outcome.status, DecisionStatus.STALE)
+        self.assertEqual(sender.calls, [])
+
+    async def test_world_updates_while_brain_is_waiting(self) -> None:
+        brain = _BlockingBrain()
+        controller, world, _sender, request = make_controller(brain=brain)
+        task = asyncio.create_task(controller.decide_and_send(request))
+        await asyncio.wait_for(brain.started.wait(), 0.2)
+        world.update(action=action("chat"))
+        await asyncio.sleep(0)
+        self.assertEqual(world.snapshot().version, 2)
+        brain.release.set()
+        outcome = await task
+        self.assertEqual(outcome.status, DecisionStatus.NO_DECISION)
+
+    async def test_timeout_exception_and_send_failures_have_no_fallback(self) -> None:
+        brain = _BlockingBrain()
+        controller, _world, sender, request = make_controller(brain=brain)
+        controller.config = BrainRunConfig(max_decision_seconds=0.03, cancellation_grace_seconds=0.01)
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.TIMED_OUT)
+        self.assertEqual(sender.calls, [])
+
+        class _ErrorBrain:
+            async def decide(self, request: BrainInput) -> object:
+                raise ValueError("private failure detail")
+
+        controller, _world, sender, request = make_controller(brain=_ErrorBrain())
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.BRAIN_FAILED)
+        self.assertEqual(outcome.error_type, "ValueError")
+        self.assertIsNone(getattr(outcome, "error", None))
+        self.assertEqual(sender.calls, [])
+
+        failing = _ScriptedBrain(object())
+        controller, _world, sender, request = make_controller(brain=failing)
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.INVALID_DECISION)
+        self.assertEqual(sender.calls, [])
+
+        for error, expected in (
+            (NotDeliveredError("not delivered"), DecisionStatus.SEND_NOT_DELIVERED),
+            (DeliveryUnknownError("unknown"), DecisionStatus.SEND_DELIVERY_UNKNOWN),
+            (Exception("unexpected"), DecisionStatus.SEND_DELIVERY_UNKNOWN),
+        ):
+            controller, _world, sender, request = make_controller(
+                "chat", brain=_ScriptedBrain(ChatDecision("action:0", "hello"))
+            )
+            sender.error = error
+            outcome = await controller.decide_and_send(request)
+            self.assertEqual(outcome.status, expected)
+
+    async def test_replacement_brain_uses_same_controller_dispatch(self) -> None:
+        scripted = _ScriptedBrain(ChatDecision("action:0", "hello"))
+        controller, _world, sender, request = make_controller("chat", brain=scripted)
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.SENT)
+        self.assertEqual(sender.calls[0][0], "chat")
+
+    async def test_phase_coordinator_invokes_once_per_phase(self) -> None:
+        controller, world, _sender, _request = make_controller(brain=DummyBrain(seed=4))
+        brain = controller.brain
+        coordinator = PhaseBrainCoordinator(world=world, controller=controller)
+        task = asyncio.create_task(coordinator.run())
+        await asyncio.sleep(0.02)
+        world.update(action=action("chat"))
+        await asyncio.sleep(0.02)
+        world.update(action=action("chat"), phase=(1, "vote"))
+        await asyncio.sleep(0.02)
+        world.update(freshness=Freshness.ENDED, action=None, phase=(1, "game_end"))
+        exit_value = await asyncio.wait_for(task, 0.5)
+        self.assertEqual(exit_value.reason, CoordinatorExitReason.WORLD_ENDED)
+        self.assertEqual(brain.call_count, 2)
+        self.assertEqual(len(coordinator.attempted_phases), 2)
+
+    def test_dummy_brain_is_seeded_and_deterministic(self) -> None:
+        controller, _world, _sender, request = make_controller()
+        first = DummyBrain(seed=99)
+        second = DummyBrain(seed=99)
+        self.assertEqual(first.seed, second.seed)
+        self.assertEqual(first.seed, 99)
+        self.assertEqual(controller.brain.seed, 7)
+
+
+if __name__ == "__main__":
+    unittest.main()

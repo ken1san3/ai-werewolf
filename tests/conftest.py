@@ -34,6 +34,10 @@ _COMPLETION_TESTS = {
         "tests/test_phase3_2_completion.py",
         "test_nine_world_clients_recover_from_out_of_retention_sync",
     ),
+    (
+        "tests/test_phase3_3_completion.py",
+        "test_nine_brain_clients_complete_with_dummy",
+    ),
 }
 
 
