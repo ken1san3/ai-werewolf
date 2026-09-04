@@ -14,6 +14,7 @@ from typing import Any
 
 
 STATUS_SCHEMA_VERSION = "phase-completion-evidence/v1"
+EVIDENCE_CONTRACT = "phase3.1/addendum-c-v1"
 
 ACTION_EVIDENCE_OUTCOMES = frozenset(
     {"sent", "deadline_suppressed", "stale_before_send", "no_legal_target", "send_error"}
@@ -115,6 +116,12 @@ def _non_negative_int(value: object, field: str) -> int:
     return value
 
 
+def _positive_int(value: object, field: str) -> int:
+    result = _non_negative_int(value, field)
+    _require(result > 0, f"{field} must be positive int")
+    return result
+
+
 def _string(value: object, field: str) -> str:
     _require(isinstance(value, str) and bool(value), f"{field} must be a non-empty string")
     return value
@@ -130,6 +137,7 @@ def validate_status(
     *,
     expected_player_id: str | None = None,
     allow_defect_rejections: bool = False,
+    require_addendum_c: bool = False,
 ) -> None:
     """Validate the common driver status envelope and evidence records."""
 
@@ -137,6 +145,15 @@ def validate_status(
     missing = sorted(_REQUIRED_STATUS_FIELDS - set(status))
     _require(not missing, f"status is missing fields: {', '.join(missing)}")
     _require(status["schema_version"] == STATUS_SCHEMA_VERSION, "unsupported evidence schema version")
+    if require_addendum_c:
+        _require(
+            status.get("evidence_contract") == EVIDENCE_CONTRACT,
+            "unsupported Phase 3.1 evidence contract",
+        )
+        _require("initial_sync_seq" in status, "status is missing initial_sync_seq")
+        initial_sync_seq = status.get("initial_sync_seq")
+        _positive_int(initial_sync_seq, "initial_sync_seq")
+        _string(status.get("player_id"), "player_id")
     _non_negative_int(status["pid"], "pid")
     player_id = status["player_id"]
     if expected_player_id is not None:
@@ -234,6 +251,14 @@ def validate_status(
             item.get("action_generation"),
             f"action_evidence[{index}].action_generation",
         )
+        if require_addendum_c:
+            source_seq = _positive_int(
+                item.get("source_seq"), f"action_evidence[{index}].source_seq"
+            )
+            _require(
+                source_seq <= status["last_seq"],
+                f"action_evidence[{index}].source_seq exceeds last_seq",
+            )
         _require(
             isinstance(item.get("after_resume"), bool),
             f"action_evidence[{index}].after_resume must be bool",
@@ -285,6 +310,7 @@ def validate_stop_marker(
     *,
     expected_player_id: str | None = None,
     expected_kind: str | None = None,
+    require_addendum_c: bool = False,
 ) -> None:
     """Validate the process-incarnation marker used to bound an interruption."""
 
@@ -293,6 +319,13 @@ def validate_stop_marker(
         marker.get("schema_version") == STATUS_SCHEMA_VERSION,
         "unsupported stop-marker schema version",
     )
+    if require_addendum_c:
+        _require(
+            marker.get("evidence_contract") == EVIDENCE_CONTRACT,
+            "unsupported Phase 3.1 stop-marker contract",
+        )
+        _require("initial_sync_seq" in marker, "stop marker is missing initial_sync_seq")
+        _positive_int(marker.get("initial_sync_seq"), "stop marker initial_sync_seq")
     _non_negative_int(marker.get("pid"), "stop marker pid")
     _string(marker.get("player_id"), "stop marker player_id")
     if expected_player_id is not None:
@@ -312,6 +345,7 @@ def validate_stop_marker(
     validate_status(
         {
             "schema_version": STATUS_SCHEMA_VERSION,
+            **({"evidence_contract": EVIDENCE_CONTRACT} if require_addendum_c else {}),
             "pid": marker["pid"],
             "player_id": marker["player_id"],
             "resumed": False,
@@ -330,8 +364,10 @@ def validate_stop_marker(
             "client_exit_reason": None,
             "exception_type": None,
             "exception_message": None,
+            **({"initial_sync_seq": marker.get("initial_sync_seq")} if require_addendum_c else {}),
         },
         expected_player_id=marker["player_id"],
+        require_addendum_c=require_addendum_c,
     )
 
 
@@ -444,3 +480,290 @@ def action_evidence_counts(
             semantic_key = str(item["key"])
             counts[semantic_key] = counts.get(semantic_key, 0) + 1
     return counts
+
+
+def _action_state_from_reply(message_type: object, payload: object) -> Mapping[str, Any] | None:
+    if not isinstance(payload, Mapping):
+        return None
+    if message_type == "game.state_sync":
+        action_state = payload.get("action_state")
+    elif message_type == "player.action_state":
+        action_state = payload
+    else:
+        return None
+    return action_state if isinstance(action_state, Mapping) else None
+
+
+def _offer_for_action(
+    *,
+    player_id: str,
+    seq: int,
+    message_type: str,
+    day: object,
+    phase: object,
+    action: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    action_type = action.get("type")
+    if action_type not in {"vote", "ability", "co_declare", "chat"}:
+        return None
+    if not isinstance(day, int) or isinstance(day, bool) or day < 0:
+        return None
+    if not isinstance(phase, str) or not phase:
+        return None
+    common = {
+        "player_id": player_id,
+        "seq": seq,
+        "type": message_type,
+        "day": day,
+        "phase": phase,
+        "selectable": False,
+    }
+    if action_type == "vote":
+        targets = action.get("valid_targets")
+        target_count = action.get("target_count")
+        allows_abstain = action.get("allows_abstain")
+        selectable = (
+            isinstance(targets, list)
+            and isinstance(target_count, int)
+            and not isinstance(target_count, bool)
+            and target_count >= 0
+            and isinstance(allows_abstain, bool)
+            and (len(targets) >= target_count or allows_abstain)
+        )
+        common.update({"kind": "vote", "key": f"{player_id}|{day}|{phase}|vote"})
+    elif action_type == "ability":
+        ability_id = action.get("ability_id")
+        targets = action.get("valid_targets")
+        target_count = action.get("target_count")
+        uses_remaining = action.get("uses_remaining")
+        selectable = (
+            isinstance(ability_id, str)
+            and bool(ability_id)
+            and isinstance(targets, list)
+            and isinstance(target_count, int)
+            and not isinstance(target_count, bool)
+            and target_count >= 0
+            and len(targets) >= target_count
+            and uses_remaining != 0
+        )
+        if not isinstance(ability_id, str) or not ability_id:
+            return None
+        common.update(
+            {
+                "kind": "ability",
+                "key": f"{player_id}|{day}|{phase}|ability|{ability_id}",
+                "ability_id": ability_id,
+            }
+        )
+    elif action_type == "co_declare":
+        claimed = action.get("claimed_role_ids")
+        selectable = isinstance(claimed, list) and bool(claimed)
+        common.update({"kind": "co_declare", "key": f"{player_id}|{day}|co_declare"})
+    else:
+        selectable = True
+        common.update({"kind": "chat", "key": f"{player_id}|{day}|chat"})
+    common["selectable"] = selectable
+    return common
+
+
+def record_server_reply(
+    ledger: dict[str, Any],
+    *,
+    player_id: str,
+    seq: int,
+    message_type: str,
+    payload: object,
+) -> None:
+    """Record one already-created server reply without creating a reply."""
+
+    _string(player_id, "ledger player_id")
+    _positive_int(seq, "ledger seq")
+    _string(message_type, "ledger type")
+    action_state = _action_state_from_reply(message_type, payload)
+    day = action_state.get("day") if action_state is not None else None
+    phase = action_state.get("phase") if action_state is not None else None
+    headers = ledger.setdefault("reply_headers", [])
+    headers.append(
+        {
+            "player_id": player_id,
+            "seq": seq,
+            "type": message_type,
+            "day": day if isinstance(day, int) and not isinstance(day, bool) else None,
+            "phase": phase if isinstance(phase, str) else None,
+        }
+    )
+    if action_state is None:
+        return
+    occurrences = ledger.setdefault("offer_occurrences", [])
+    seen = {(item.get("player_id"), item.get("seq"), item.get("key")) for item in occurrences}
+    actions = action_state.get("actions")
+    if not isinstance(actions, list):
+        return
+    for action in actions:
+        if not isinstance(action, Mapping):
+            continue
+        offer = _offer_for_action(
+            player_id=player_id,
+            seq=seq,
+            message_type=message_type,
+            day=day,
+            phase=phase,
+            action=action,
+        )
+        if offer is None:
+            continue
+        identity = (offer["player_id"], offer["seq"], offer["key"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        occurrences.append(offer)
+
+
+def expected_opportunities(ledger: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """Return the first selectable server occurrence for every semantic key."""
+
+    expected: dict[str, Mapping[str, Any]] = {}
+    for occurrence in ledger.get("offer_occurrences", ()):
+        if not isinstance(occurrence, Mapping) or not occurrence.get("selectable"):
+            continue
+        key = occurrence.get("key")
+        if not isinstance(key, str) or key in expected:
+            continue
+        expected[key] = occurrence
+    return expected
+
+
+def assert_action_coverage(
+    ledger: Mapping[str, Any],
+    statuses: Iterable[Mapping[str, Any]],
+    *,
+    marker: Mapping[str, Any],
+    restarted_status: Mapping[str, Any],
+    restarted_player_id: str,
+    resume_sync_seq: int,
+) -> dict[str, frozenset[str]]:
+    """Prove all server opportunities are covered by independent client evidence."""
+
+    stop_seq = _non_negative_int(marker.get("last_seq"), "stop marker last_seq")
+    _positive_int(resume_sync_seq, "resume_sync_seq")
+    _require(stop_seq < resume_sync_seq, "resume sync seq must be after stop seq")
+    _string(restarted_player_id, "restarted_player_id")
+    expected = expected_opportunities(ledger)
+    occurrences = {
+        (item.get("key"), item.get("seq")): item
+        for item in ledger.get("offer_occurrences", ())
+        if isinstance(item, Mapping)
+    }
+    expected_for_restart = {
+        key for key, item in expected.items() if item.get("player_id") == restarted_player_id
+    }
+    interrupted = frozenset(
+        key
+        for key, item in expected.items()
+        if item.get("player_id") == restarted_player_id
+        and stop_seq < item.get("seq", -1) <= resume_sync_seq
+    )
+    _require(bool(interrupted), "interrupted opportunity set must not be empty")
+    _require(
+        bool(expected_for_restart) and len(interrupted) < len(expected_for_restart),
+        "interrupted opportunity set must be a proper subset of restarted opportunities",
+    )
+
+    all_records: list[Mapping[str, Any]] = []
+    marker_records = marker.get("action_evidence", ())
+    _require(isinstance(marker_records, list), "stop marker action_evidence must be a list")
+    all_records.extend(item for item in marker_records if isinstance(item, Mapping))
+    for status in statuses:
+        _require(isinstance(status, Mapping), "status must be an object")
+        evidence = status.get("action_evidence", ())
+        _require(isinstance(evidence, list), "status action_evidence must be a list")
+        all_records.extend(item for item in evidence if isinstance(item, Mapping))
+
+    sent: set[str] = set()
+    invalid: list[str] = []
+    for record in all_records:
+        key = record.get("key")
+        source_seq = record.get("source_seq")
+        if not isinstance(key, str) or not isinstance(source_seq, int) or isinstance(source_seq, bool):
+            invalid.append(f"malformed evidence {record!r}")
+            continue
+        occurrence = occurrences.get((key, source_seq))
+        if occurrence is None:
+            invalid.append(f"no server occurrence for {key}@{source_seq}")
+            continue
+        for field in ("kind", "day", "phase"):
+            if record.get(field) != occurrence.get(field):
+                invalid.append(f"mismatched {field} for {key}@{source_seq}")
+        if record.get("kind") == "ability" and record.get("ability_id") != occurrence.get("ability_id"):
+            invalid.append(f"mismatched ability for {key}@{source_seq}")
+        outcome = record.get("outcome")
+        if outcome == "sent":
+            if not occurrence.get("selectable") or key not in expected:
+                invalid.append(f"sent evidence is not an expected selectable opportunity: {key}")
+            else:
+                sent.add(key)
+        elif outcome == "stale_before_send":
+            player_id = occurrence.get("player_id")
+            if not (
+                player_id == restarted_player_id
+                and key in interrupted
+                and stop_seq < source_seq <= resume_sync_seq
+            ):
+                invalid.append(f"stale evidence outside interruption window: {key}@{source_seq}")
+        elif outcome in {"deadline_suppressed", "no_legal_target", "send_error"}:
+            invalid.append(f"failed action outcome for {key}@{source_seq}: {outcome}")
+        else:
+            invalid.append(f"unknown action outcome: {outcome!r}")
+    _require(not invalid, "invalid action coverage: " + "; ".join(invalid[:8]))
+
+    required = frozenset(expected) - interrupted
+    _require(required <= sent <= frozenset(expected), "required/sent/expected coverage mismatch")
+    expected_players = {item.get("player_id") for item in expected.values()}
+    for player_id in expected_players - {restarted_player_id}:
+        player_expected = {
+            key for key, item in expected.items() if item.get("player_id") == player_id
+        }
+        _require(
+            {key for key in sent if key in player_expected} == player_expected,
+            f"non-restarted player coverage mismatch: {player_id}",
+        )
+
+    marker_sent = any(
+        item.get("outcome") == "sent"
+        and isinstance(item.get("source_seq"), int)
+        and item["source_seq"] <= stop_seq
+        for item in marker_records
+        if isinstance(item, Mapping)
+    )
+    _require(marker_sent, "stop marker must contain a sent action at or before stop_seq")
+    _require(
+        marker.get("player_id") == restarted_player_id,
+        "stop marker player does not match restarted player",
+    )
+    _require(
+        marker.get("pid") != restarted_status.get("pid"),
+        "replacement process must have a different pid",
+    )
+    post_resume_sent = False
+    for record in restarted_status.get("action_evidence", ()):
+        key = record.get("key") if isinstance(record, Mapping) else None
+        source_seq = record.get("source_seq") if isinstance(record, Mapping) else None
+        if (
+            isinstance(key, str)
+            and record.get("outcome") == "sent"
+            and record.get("after_resume") is True
+            and key in required
+            and isinstance(source_seq, int)
+            and source_seq > resume_sync_seq
+            and isinstance(occurrences.get((key, source_seq), {}).get("seq"), int)
+            and occurrences[key, source_seq]["seq"] > resume_sync_seq
+        ):
+            post_resume_sent = True
+            break
+    _require(post_resume_sent, "replacement process lacks a post-resume sent opportunity")
+    return {
+        "expected": frozenset(expected),
+        "interrupted": interrupted,
+        "required": required,
+        "sent": frozenset(sent),
+    }

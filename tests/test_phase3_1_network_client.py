@@ -35,6 +35,7 @@ from ai_client.network import (
     StaleActionError,
     VoteAction,
 )
+from ai_client.network.client import _TransientFailure
 
 
 def server_event(message_type: str, game_id: str, seq: int, payload: dict[str, object]) -> str:
@@ -1127,6 +1128,42 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(socket.sent, [])
         self.assertTrue(socket.closed)
         self.assertIsNone(client._sender_task)  # noqa: SLF001
+
+    async def test_stop_branch_closes_connector_result_after_stop_is_observed(self) -> None:
+        """The stop branch itself must close a connector that ignores cancellation."""
+
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+        release = asyncio.Event()
+        socket = FakeSocket([])
+
+        async def connector(_uri: str) -> FakeSocket:
+            started.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                # Model a connector that completes after cancellation was
+                # requested; this distinguishes the stop branch from its old
+                # result-discarding implementation.
+                cancelled.set()
+                await release.wait()
+            return socket
+
+        client = NetworkClient(
+            NetworkClientConfig("ws://fake", "game-1", "entry-token"),
+            MemoryStore(),
+            connector=connector,
+        )
+        open_task = asyncio.create_task(client._open_socket_or_stop())  # noqa: SLF001
+        await asyncio.wait_for(started.wait(), timeout=1)
+        client._stop_requested = True  # noqa: SLF001
+        client._stop_event.set()  # noqa: SLF001
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+        release.set()
+
+        with self.assertRaises(_TransientFailure):
+            await asyncio.wait_for(open_task, timeout=1)
+        self.assertTrue(socket.closed)
 
     async def test_connect_timeout_closes_socket_when_connector_resolves_during_cancel(self) -> None:
         started = asyncio.Event()

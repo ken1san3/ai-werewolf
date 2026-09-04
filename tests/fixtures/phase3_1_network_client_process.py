@@ -20,9 +20,11 @@ from ai_client.network import (
     ActionRejected,
     ChatAction,
     ClientExitReason,
+    ClientLifecycle,
     CoDeclareAction,
     FileCredentialStore,
     GameEnded,
+    LifecycleChanged,
     NetworkClient,
     NetworkClientConfig,
     ReconnectPolicy,
@@ -33,7 +35,7 @@ from ai_client.network import (
     VoteAction,
 )
 
-from completion_evidence import STATUS_SCHEMA_VERSION
+from completion_evidence import EVIDENCE_CONTRACT, STATUS_SCHEMA_VERSION
 
 
 def _action_key(player_id: str | None, action: object) -> str:
@@ -64,13 +66,30 @@ def _action_kind(action: object) -> str:
     raise TypeError(f"unsupported completion action: {type(action).__name__}")
 
 
-def _action_evidence(player_id: str, action: object, *, resumed: bool) -> dict[str, Any]:
+def _is_selectable(action: object) -> bool:
+    if isinstance(action, VoteAction):
+        return bool(action.valid_targets) or action.allows_abstain
+    if isinstance(action, AbilityAction):
+        return action.uses_remaining != 0 and len(action.valid_targets) >= action.target_count
+    if isinstance(action, CoDeclareAction):
+        return bool(action.claimed_role_ids)
+    return isinstance(action, ChatAction)
+
+
+def _action_evidence(
+    player_id: str,
+    action: object,
+    *,
+    source_seq: int,
+    resumed: bool,
+) -> dict[str, Any]:
     record: dict[str, Any] = {
         "key": _action_key(player_id, action),
         "kind": _action_kind(action),
         "day": action.day,
         "phase": action.phase,
         "action_generation": action.action_generation,
+        "source_seq": source_seq,
         "after_resume": resumed,
         "outcome": "sent",
     }
@@ -89,6 +108,40 @@ def _write_json_atomic(path: Path, payload: object) -> None:
     os.replace(temporary, path)
 
 
+def _write_observation(kind: str, player_id: str | None, seq: int) -> None:
+    """Write one private-free JSONL observation for the parent drain task."""
+
+    sys.stdout.write(
+        json.dumps(
+            {
+                "observation_version": "phase3.1-observation/v1",
+                "pid": os.getpid(),
+                "player_id": player_id,
+                "kind": kind,
+                "seq": seq,
+            },
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    sys.stdout.flush()
+
+
+class _ObservingCredentialStore:
+    """Test-only wrapper that observes a save only after delegation succeeds."""
+
+    def __init__(self, delegate: FileCredentialStore, player_id) -> None:
+        self._delegate = delegate
+        self._player_id = player_id
+
+    async def load(self):
+        return await self._delegate.load()
+
+    async def save(self, checkpoint) -> None:
+        await self._delegate.save(checkpoint)
+        _write_observation("checkpoint_saved", self._player_id(), checkpoint.last_seq)
+
+
 async def run_driver(
     uri: str,
     game_id: str,
@@ -97,6 +150,7 @@ async def run_driver(
     status_path: Path,
     stop_after: str | None = None,
     stop_marker_path: Path | None = None,
+    ready_path: Path | None = None,
     inject_rejection: bool = False,
     inject_driver_error: bool = False,
 ) -> int:
@@ -119,11 +173,20 @@ async def run_driver(
     result_reason: object | None = None
     driver_error: BaseException | None = None
     stop_written = False
+    consumed_seq = 0
+    last_action_state_seq: int | None = None
+    last_action_state_payload: Mapping[str, Any] | None = None
+    initial_sync_seq: int | None = None
+    ready_written = False
 
     try:
+        base_store = FileCredentialStore(credentials_path)
         client = NetworkClient(
             NetworkClientConfig(uri, game_id, entry_token),
-            FileCredentialStore(credentials_path),
+            _ObservingCredentialStore(
+                base_store,
+                lambda: client.snapshot().player_id if client is not None else None,
+            ),
             reconnect_policy=ReconnectPolicy(max_disconnected_seconds=10.0),
         )
 
@@ -135,106 +198,37 @@ async def run_driver(
         if inject_driver_error:
             raise RuntimeError("injected Phase 3.1 driver failure")
 
-        async for event in client.events():
-            events_received += 1
-            if isinstance(event, ActionRejected):
-                rejections.append(
-                    {
-                        "action": event.action,
-                        "reason": event.reason,
-                        "seq": event.seq,
-                        "after_resume": resumed,
-                    }
-                )
-                continue
-            if isinstance(event, SequenceGapDetected):
-                gap_pending = True
-                gap_events.append(
-                    {
-                        "expected_seq": event.expected_seq,
-                        "received_seq": event.received_seq,
-                        "recovered_seq": None,
-                    }
-                )
-                continue
-            if isinstance(event, SequenceGapRecovered):
-                gap_pending = False
-                for item in reversed(gap_events):
-                    if item["recovered_seq"] is None:
-                        item["recovered_seq"] = event.recovered_seq
-                        break
-                continue
-            if isinstance(event, GameEnded):
-                game_ended = True
-                continue
-            if isinstance(event, ServerEvent) and event.type == "session.resumed":
-                resumed = True
-                requested_last_seq = event.payload.get("last_seq")
-                if not isinstance(requested_last_seq, int) or isinstance(requested_last_seq, bool):
-                    raise RuntimeError("session.resumed omitted integer last_seq")
-                resume_events.append(
-                    {"seq": event.seq, "requested_last_seq": requested_last_seq}
-                )
-                continue
-            if isinstance(event, ServerEvent) and event.type == "chat.message":
-                message = event.payload.get("message")
-                sender = message.get("player_id") if isinstance(message, Mapping) else None
-                chat_messages_received.append(
-                    {"seq": event.seq, "sender_player_id": sender}
-                )
-                continue
-            if not isinstance(event, ServerEvent):
-                continue
-            if event.type == "game.state_sync":
-                state_sync_events.append(
-                    {
-                        "seq": event.seq,
-                        "after_resume": resumed,
-                        "after_gap": gap_pending,
-                    }
-                )
-            if event.type not in {"game.state_sync", "player.action_state"}:
-                continue
-
+        async def try_send_pending() -> None:
+            nonlocal actions_sent, chat_sent, rejection_injected, stop_written
+            if client is None or last_action_state_seq is None or last_action_state_payload is None:
+                return
             snapshot = client.snapshot()
+            if client.lifecycle is not ClientLifecycle.CONNECTED:
+                return
+            if consumed_seq != snapshot.last_seq or snapshot.action_state != last_action_state_payload:
+                return
             player_id = snapshot.player_id
             if not isinstance(player_id, str):
                 raise RuntimeError("action state arrived before authentication")
-
+            source_seq = last_action_state_seq
             for action in snapshot.actions:
                 if not isinstance(action, (VoteAction, AbilityAction, CoDeclareAction, ChatAction)):
                     continue
-                if stop_written:
-                    # The controller is interrupted, but the Network Client
-                    # receiver keeps consuming and checkpointing later replies.
+                if stop_written or not _is_selectable(action):
                     continue
                 key = _action_key(player_id, action)
                 if key in evidence_by_key:
                     continue
-
-                evidence = _action_evidence(player_id, action, resumed=resumed)
+                evidence = _action_evidence(
+                    player_id,
+                    action,
+                    source_seq=source_seq,
+                    resumed=resumed,
+                )
                 evidence_by_key[key] = evidence
-
-                if isinstance(action, AbilityAction) and (
-                    action.uses_remaining == 0
-                    or len(action.valid_targets) < action.target_count
-                ):
-                    evidence["outcome"] = "no_legal_target"
-                    continue
-                if isinstance(action, CoDeclareAction) and not action.claimed_role_ids:
-                    evidence["outcome"] = "no_legal_target"
-                    continue
-                if isinstance(action, VoteAction) and not action.valid_targets and not action.allows_abstain:
-                    evidence["outcome"] = "no_legal_target"
-                    continue
-
                 try:
                     if isinstance(action, CoDeclareAction):
-                        await client.send_co_declare(
-                            action,
-                            action.claimed_role_ids[0],
-                            "I claim this role.",
-                        )
+                        await client.send_co_declare(action, action.claimed_role_ids[0], "I claim this role.")
                         actions_sent += 1
                         if inject_rejection and not rejection_injected:
                             for _ in range(3):
@@ -254,55 +248,104 @@ async def run_driver(
                         await client.send_vote(action, target)
                         actions_sent += 1
                     elif isinstance(action, AbilityAction):
-                        await client.send_ability(
-                            action,
-                            list(action.valid_targets[: action.target_count]),
-                        )
+                        await client.send_ability(action, list(action.valid_targets[: action.target_count]))
                         actions_sent += 1
                 except StaleActionError:
                     evidence["outcome"] = "stale_before_send"
                 except Exception as error:
                     evidence["outcome"] = "send_error"
                     send_errors.append(
-                        {
-                            "type": type(error).__name__,
-                            "message": str(error),
-                            "evidence_key": key,
-                        }
+                        {"type": type(error).__name__, "message": str(error), "evidence_key": key}
                     )
                 if evidence["outcome"] != "sent":
                     continue
+                if (
+                    (stop_after == "action" and isinstance(action, VoteAction))
+                    or (stop_after == "chat" and isinstance(action, ChatAction))
+                ) and not stop_written:
+                    if stop_marker_path is None:
+                        raise RuntimeError("stop marker is required when stop_after is set")
+                    _write_json_atomic(
+                        stop_marker_path,
+                        {
+                            "schema_version": STATUS_SCHEMA_VERSION,
+                            "evidence_contract": EVIDENCE_CONTRACT,
+                            "initial_sync_seq": initial_sync_seq,
+                            "pid": os.getpid(),
+                            "player_id": player_id,
+                            "kind": "action" if isinstance(action, VoteAction) else "chat",
+                            "last_seq": consumed_seq,
+                            "action_evidence": list(evidence_by_key.values()),
+                        },
+                    )
+                    stop_written = True
+                    _write_observation("progress", player_id, consumed_seq)
 
-                if stop_after == "action" and isinstance(action, VoteAction) and not stop_written:
-                    if stop_marker_path is None:
-                        raise RuntimeError("stop marker is required when stop_after is set")
-                    _write_json_atomic(
-                        stop_marker_path,
-                        {
-                            "schema_version": STATUS_SCHEMA_VERSION,
-                            "pid": os.getpid(),
-                            "player_id": player_id,
-                            "kind": "action",
-                            "last_seq": client.snapshot().last_seq,
-                            "action_evidence": list(evidence_by_key.values()),
-                        },
-                    )
-                    stop_written = True
-                if stop_after == "chat" and isinstance(action, ChatAction) and not stop_written:
-                    if stop_marker_path is None:
-                        raise RuntimeError("stop marker is required when stop_after is set")
-                    _write_json_atomic(
-                        stop_marker_path,
-                        {
-                            "schema_version": STATUS_SCHEMA_VERSION,
-                            "pid": os.getpid(),
-                            "player_id": player_id,
-                            "kind": "chat",
-                            "last_seq": client.snapshot().last_seq,
-                            "action_evidence": list(evidence_by_key.values()),
-                        },
-                    )
-                    stop_written = True
+        async for event in client.events():
+            events_received += 1
+            if isinstance(event, ActionRejected):
+                rejections.append({"action": event.action, "reason": event.reason, "seq": event.seq, "after_resume": resumed})
+                continue
+            if isinstance(event, SequenceGapDetected):
+                gap_pending = True
+                gap_events.append({"expected_seq": event.expected_seq, "received_seq": event.received_seq, "recovered_seq": None})
+                continue
+            if isinstance(event, SequenceGapRecovered):
+                gap_pending = False
+                for item in reversed(gap_events):
+                    if item["recovered_seq"] is None:
+                        item["recovered_seq"] = event.recovered_seq
+                        break
+                continue
+            if isinstance(event, GameEnded):
+                game_ended = True
+                continue
+            if isinstance(event, LifecycleChanged):
+                await try_send_pending()
+                continue
+            if not isinstance(event, ServerEvent):
+                continue
+
+            consumed_seq = event.seq
+            if event.type == "session.resumed":
+                resumed = True
+                requested_last_seq = event.payload.get("last_seq")
+                if not isinstance(requested_last_seq, int) or isinstance(requested_last_seq, bool):
+                    raise RuntimeError("session.resumed omitted integer last_seq")
+                resume_events.append({"seq": event.seq, "requested_last_seq": requested_last_seq})
+            elif event.type == "chat.message":
+                message = event.payload.get("message")
+                sender = message.get("player_id") if isinstance(message, Mapping) else None
+                chat_messages_received.append({"seq": event.seq, "sender_player_id": sender})
+            if event.type == "game.state_sync":
+                state_sync_events.append({"seq": event.seq, "after_resume": resumed, "after_gap": gap_pending})
+                action_state = event.payload.get("action_state")
+                if isinstance(action_state, Mapping):
+                    last_action_state_seq = event.seq
+                    last_action_state_payload = action_state
+                    if initial_sync_seq is None:
+                        initial_sync_seq = event.seq
+            elif event.type == "player.action_state":
+                last_action_state_seq = event.seq
+                last_action_state_payload = event.payload
+
+            _write_observation("progress", client.snapshot().player_id, consumed_seq)
+            await try_send_pending()
+            if ready_path is not None and not ready_written and initial_sync_seq is not None:
+                player_id = client.snapshot().player_id
+                if not isinstance(player_id, str):
+                    raise RuntimeError("initial sync completed before authentication")
+                _write_json_atomic(
+                    ready_path,
+                    {
+                        "schema_version": STATUS_SCHEMA_VERSION,
+                        "evidence_contract": EVIDENCE_CONTRACT,
+                        "pid": os.getpid(),
+                        "player_id": player_id,
+                        "sync_seq": initial_sync_seq,
+                    },
+                )
+                ready_written = True
 
         result = await run_task
         result_reason = getattr(result, "reason", None)
@@ -323,6 +366,8 @@ async def run_driver(
         reason_value = getattr(result_reason, "value", result_reason)
         status = {
             "schema_version": STATUS_SCHEMA_VERSION,
+            "evidence_contract": EVIDENCE_CONTRACT,
+            "initial_sync_seq": initial_sync_seq,
             "pid": os.getpid(),
             "player_id": snapshot.player_id if snapshot is not None else None,
             "resumed": resumed,
@@ -382,6 +427,7 @@ def main() -> None:
     parser.add_argument("--status", required=True, type=Path)
     parser.add_argument("--stop-after", choices=("action", "chat"))
     parser.add_argument("--stop-marker", type=Path)
+    parser.add_argument("--ready", type=Path)
     parser.add_argument("--inject-rejection", action="store_true")
     parser.add_argument("--inject-driver-error", action="store_true")
     arguments = parser.parse_args()
@@ -395,6 +441,7 @@ def main() -> None:
                 arguments.status,
                 arguments.stop_after,
                 arguments.stop_marker,
+                arguments.ready,
                 arguments.inject_rejection,
                 arguments.inject_driver_error,
             )

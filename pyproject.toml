@@ -21,6 +21,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "completion: separate-process completion and driver integration tests",
+]
 
 [tool.setuptools.packages.find]
 include = ["server*", "ai_client*"]
