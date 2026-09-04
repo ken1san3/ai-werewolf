@@ -648,6 +648,7 @@ def assert_action_coverage(
     _positive_int(resume_sync_seq, "resume_sync_seq")
     _require(stop_seq < resume_sync_seq, "resume sync seq must be after stop seq")
     _string(restarted_player_id, "restarted_player_id")
+    status_list = tuple(statuses)
     expected = expected_opportunities(ledger)
     occurrences = {
         (item.get("key"), item.get("seq")): item
@@ -673,7 +674,7 @@ def assert_action_coverage(
     marker_records = marker.get("action_evidence", ())
     _require(isinstance(marker_records, list), "stop marker action_evidence must be a list")
     all_records.extend(item for item in marker_records if isinstance(item, Mapping))
-    for status in statuses:
+    for status in status_list:
         _require(isinstance(status, Mapping), "status must be an object")
         evidence = status.get("action_evidence", ())
         _require(isinstance(evidence, list), "status action_evidence must be a list")
@@ -726,6 +727,24 @@ def assert_action_coverage(
         _require(
             {key for key in sent if key in player_expected} == player_expected,
             f"non-restarted player coverage mismatch: {player_id}",
+        )
+    for status in status_list:
+        status_player_id = status.get("player_id")
+        if status_player_id == restarted_player_id:
+            continue
+        player_expected = {
+            key for key, item in expected.items() if item.get("player_id") == status_player_id
+        }
+        status_sent = {
+            record.get("key")
+            for record in status.get("action_evidence", ())
+            if isinstance(record, Mapping)
+            and record.get("outcome") == "sent"
+            and isinstance(record.get("key"), str)
+        }
+        _require(
+            status_sent == player_expected,
+            f"non-restarted status record mismatch: {status_player_id}",
         )
 
     marker_sent = any(

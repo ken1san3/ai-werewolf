@@ -263,6 +263,18 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             gate.release()
 
+    async def test_tick_only_spy_rejects_manual_core_transition(self) -> None:
+        game, _, server, _ = await self._start_completion_server()
+        try:
+            self.assertFalse(self._completion_manual_advance_phase.called)
+            self.assertIsNotNone(game.phase_ends_at)
+            game.advance_phase(game.phase_ends_at or 0)
+            with self.assertRaises(AssertionError):
+                self._assert_tick_only()
+        finally:
+            self._stop_tick_only_spies()
+            await server.close()
+
     def test_addendum_c_ledger_is_independent_and_seq_boundaries_are_exact(self) -> None:
         ledger: dict[str, object] = {"reply_headers": [], "offer_occurrences": []}
         record_server_reply(
@@ -375,6 +387,29 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                 resume_sync_seq=35,
             )
 
+        missing_non_restarted_record = [
+            {
+                **statuses[0],
+                # Keep the key globally present but remove it from its own seat.
+                # This isolates the per-status seat assertion from the global
+                # expected/sent cardinality check.
+                "action_evidence": [
+                    *statuses[0]["action_evidence"],
+                    statuses[1]["action_evidence"][0],
+                ],
+            },
+            {**statuses[1], "action_evidence": []},
+        ]
+        with self.assertRaises(EvidenceValidationError):
+            assert_action_coverage(
+                ledger,
+                missing_non_restarted_record,
+                marker=marker,
+                restarted_status=missing_non_restarted_record[0],
+                restarted_player_id="p0",
+                resume_sync_seq=35,
+            )
+
     async def test_nine_protocol_clients_complete_and_one_resumes(self) -> None:
         await self._run_restarted_process_scenario(
             replay_history_limit=128,
@@ -417,6 +452,18 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             rng=Random(0),
             started_at=self._completion_clock(),
         )
+        self._completion_manual_advance_phase_patch = patch.object(
+            game,
+            "advance_phase",
+            wraps=game.advance_phase,
+        )
+        self._completion_manual_resolve_votes_patch = patch.object(
+            game,
+            "resolve_votes",
+            wraps=game.resolve_votes,
+        )
+        self._completion_manual_advance_phase = self._completion_manual_advance_phase_patch.start()
+        self._completion_manual_resolve_votes = self._completion_manual_resolve_votes_patch.start()
         self._completion_game = game
         registry = GameRegistry({GAME_ID: game})
         sessions = SessionManager(
@@ -434,6 +481,19 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
         listener = await server.start("127.0.0.1", 0)
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         return game, registry, server, uri
+
+    def _assert_tick_only(self) -> None:
+        self._completion_manual_advance_phase.assert_not_called()
+        self._completion_manual_resolve_votes.assert_not_called()
+
+    def _stop_tick_only_spies(self) -> None:
+        for patcher_name in (
+            "_completion_manual_resolve_votes_patch",
+            "_completion_manual_advance_phase_patch",
+        ):
+            patcher = getattr(self, patcher_name, None)
+            if patcher is not None:
+                patcher.stop()
 
     async def _start_client_process(
         self,
@@ -602,6 +662,7 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             if process is not None and process.returncode is None:
                 process.terminate()
                 await process.wait()
+            self._stop_tick_only_spies()
             await server.close()
 
     def _completion_diagnostics(self, description: str) -> str:
@@ -945,6 +1006,7 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                     timeout=remaining(45),
                     description="server tick-only game completion",
                 )
+                self._assert_tick_only()
                 current_status_paths = {
                     player_id: self._completion_artifacts[(player_id, 2 if player_id == stopped_player else 1)]["status"]
                     for player_id in game.players
@@ -1088,6 +1150,7 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
             )
             failures = [result for result in cleanup_results if isinstance(result, Exception)]
             session._reply = original_reply
+            self._stop_tick_only_spies()
             await server.close()
             if failures:
                 raise AssertionError("client cleanup failures: " + " | ".join(map(str, failures)))
@@ -1152,6 +1215,7 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                     timeout=45,
                     description="rejection scenario server tick-only completion",
                 )
+                self._assert_tick_only()
                 status_paths = {
                     player_id: self._completion_artifacts[(player_id, 1)]["status"]
                     for player_id in game.players
@@ -1200,6 +1264,7 @@ class PhaseThreeOneCompletionTests(unittest.IsolatedAsyncioTestCase):
                 return_exceptions=True,
             )
             session._reply = original_reply
+            self._stop_tick_only_spies()
             await server.close()
             failures = [result for result in cleanup_results if isinstance(result, Exception)]
             if failures:
