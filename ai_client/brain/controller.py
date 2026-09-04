@@ -80,10 +80,15 @@ class BrainController:
         self.config = config
         self._active: _Invocation | None = None
         self._stopping = False
+        self._unresponsive = False
 
     @property
     def active(self) -> bool:
         return self._active is not None
+
+    @property
+    def unresponsive(self) -> bool:
+        return self._unresponsive
 
     def capture_input(self) -> BrainInput | None:
         """Synchronously capture a consistent, request-local World view."""
@@ -135,6 +140,13 @@ class BrainController:
         timeout = self._validate_timeout(timeout_seconds)
         if self._stopping:
             return self._outcome(request, DecisionStatus.CANCELLED)
+        if self._unresponsive:
+            return self._outcome(
+                request,
+                DecisionStatus.BRAIN_FAILED,
+                error_type="UnresponsiveBrain",
+                started=True,
+            )
         if self._active is not None:
             raise RuntimeError("BrainController supports only one active invocation")
         if not self._request_is_current(request):
@@ -200,7 +212,7 @@ class BrainController:
             if remaining <= 0:
                 invocation.cancel_status = DecisionStatus.TIMED_OUT
                 invocation.terminal = True
-                await self._cancel_task_with_grace(brain_task)
+                await self._cancel_brain_task(brain_task)
                 return self._outcome(
                     invocation.request, DecisionStatus.TIMED_OUT, started=True
                 )
@@ -212,7 +224,7 @@ class BrainController:
             if not done:
                 invocation.cancel_status = DecisionStatus.TIMED_OUT
                 invocation.terminal = True
-                await self._cancel_task_with_grace(brain_task)
+                await self._cancel_brain_task(brain_task)
                 return self._outcome(
                     invocation.request, DecisionStatus.TIMED_OUT, started=True
                 )
@@ -226,7 +238,7 @@ class BrainController:
                 ):
                     invocation.cancel_status = DecisionStatus.STALE
                     invocation.terminal = True
-                    await self._cancel_task_with_grace(brain_task)
+                    await self._cancel_brain_task(brain_task)
                     return self._outcome(
                         invocation.request, DecisionStatus.STALE, started=True
                     )
@@ -250,7 +262,7 @@ class BrainController:
             except Exception:
                 invocation.cancel_status = DecisionStatus.STALE
                 invocation.terminal = True
-                await self._cancel_task_with_grace(brain_task)
+                await self._cancel_brain_task(brain_task)
                 return self._outcome(
                     invocation.request, DecisionStatus.STALE, started=True
                 )
@@ -259,7 +271,7 @@ class BrainController:
             ):
                 invocation.cancel_status = DecisionStatus.STALE
                 invocation.terminal = True
-                await self._cancel_task_with_grace(brain_task)
+                await self._cancel_brain_task(brain_task)
                 return self._outcome(
                     invocation.request, DecisionStatus.STALE, started=True
                 )
@@ -559,15 +571,20 @@ class BrainController:
     async def _cancel_invocation_tasks(self, invocation: _Invocation) -> None:
         brain_task = invocation.brain_task
         if brain_task is not None:
-            await self._cancel_task_with_grace(brain_task)
+            await self._cancel_brain_task(brain_task)
         world_task = invocation.world_task
         if world_task is not None:
             await self._cancel_task_with_grace(world_task)
 
-    async def _cancel_task_with_grace(self, task: asyncio.Task[Any]) -> None:
+    async def _cancel_brain_task(self, task: asyncio.Task[Any]) -> None:
+        completed = await self._cancel_task_with_grace(task)
+        if not completed:
+            self._unresponsive = True
+
+    async def _cancel_task_with_grace(self, task: asyncio.Task[Any]) -> bool:
         if task.done():
             self._consume_task(task)
-            return
+            return True
         task.cancel()
         try:
             await asyncio.wait_for(
@@ -581,6 +598,7 @@ class BrainController:
             self._consume_task(task)
         else:
             task.add_done_callback(self._consume_task)
+        return task.done()
 
     async def _cleanup_invocation(self, invocation: _Invocation) -> None:
         if self._active is invocation:

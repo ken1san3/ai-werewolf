@@ -204,6 +204,22 @@ class _BlockingBrain:
         return self.result
 
 
+class _CancellationIgnoringBrain:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.calls = 0
+
+    async def decide(self, request: BrainInput) -> object:
+        self.calls += 1
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.15)
+            return ChatDecision("action:0", "late")
+        raise AssertionError("unreachable")
+
+
 def make_controller(
     kind: str = "chat", *, brain: object | None = None
 ) -> tuple[BrainController, _FakeWorld, _Sender, BrainInput]:
@@ -357,6 +373,28 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
             sender.error = error
             outcome = await controller.decide_and_send(request)
             self.assertEqual(outcome.status, expected)
+
+    async def test_unresponsive_brain_is_permanently_disabled(self) -> None:
+        brain = _CancellationIgnoringBrain()
+        controller, world, sender, request = make_controller(brain=brain)
+        controller.config = BrainRunConfig(
+            max_decision_seconds=0.02, cancellation_grace_seconds=0.005
+        )
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.TIMED_OUT)
+        self.assertTrue(controller.unresponsive)
+        world.update(
+            action=replace(action("chat"), phase="vote"), phase=(1, "vote")
+        )
+        next_request = controller.capture_input()
+        self.assertIsNotNone(next_request)
+        assert next_request is not None
+        next_outcome = await controller.decide_and_send(next_request)
+        self.assertEqual(next_outcome.status, DecisionStatus.BRAIN_FAILED)
+        self.assertEqual(brain.calls, 1)
+        self.assertEqual(sender.calls, [])
+        await asyncio.sleep(0.16)
+        self.assertEqual(sender.calls, [])
 
     async def test_replacement_brain_uses_same_controller_dispatch(self) -> None:
         scripted = _ScriptedBrain(ChatDecision("action:0", "hello"))
