@@ -168,7 +168,7 @@ class BrainController:
             outcome = self._validate_and_dispatch(request, decision)
             if outcome is not None:
                 return outcome
-            stale = self._stale_before_send(request)
+            stale = self._stale_before_send(request, decision.option_id)
             if stale:
                 return self._outcome(
                     request,
@@ -510,7 +510,7 @@ class BrainController:
             option_ids.add(option.option_id)
         return True
 
-    def _stale_before_send(self, request: BrainInput) -> bool:
+    def _stale_before_send(self, request: BrainInput, option_id: str) -> bool:
         if self._stopping:
             return True
         snapshot = self.world.snapshot()
@@ -524,9 +524,12 @@ class BrainController:
             and actions.network_last_seq == snapshot.last_applied_seq
         ):
             return True
-        handles = actions.actions
-        original = {option.handle for option in request.action_context.options}
-        return not original.intersection(handles)
+        selected = next(
+            option
+            for option in request.action_context.options
+            if option.option_id == option_id
+        )
+        return selected.handle not in actions.actions
 
     def _validate_timeout(self, timeout_seconds: float | None) -> float:
         timeout = (

@@ -116,11 +116,6 @@ class DecisionStatus(str, Enum):
     SEND_DELIVERY_UNKNOWN = "SEND_DELIVERY_UNKNOWN"
 
 
-# Keep the vocabulary in one enum while offering descriptive import names.
-DecisionOutcomeStatus = DecisionStatus
-OutcomeStatus = DecisionStatus
-
-
 @dataclass(frozen=True)
 class DecisionOutcome:
     """A redacted, observable result of one Brain invocation."""
@@ -133,14 +128,6 @@ class DecisionOutcome:
     receipt: SendReceipt | None = None
     error_type: str | None = None
     invocation_started: bool = False
-
-    @property
-    def sent_receipt(self) -> SendReceipt | None:
-        return self.receipt
-
-    @property
-    def failure_type(self) -> str | None:
-        return self.error_type
 
 
 @dataclass(frozen=True)

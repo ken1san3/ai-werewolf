@@ -31,6 +31,7 @@ async def run_driver(
     credentials_path: Path,
     status_path: Path,
     seed: int,
+    ready_path: Path | None = None,
 ) -> int:
     client = NetworkClient(
         NetworkClientConfig(uri, game_id, entry_token),
@@ -46,9 +47,46 @@ async def run_driver(
         config=BrainRunConfig(max_decision_seconds=0.5),
     )
     coordinator = PhaseBrainCoordinator(world=world, controller=controller)
+    decision_statuses: list[str] = []
+    original_decide_and_send = controller.decide_and_send
+
+    async def record_decision(request, *, timeout_seconds=None):
+        outcome = await original_decide_and_send(
+            request,
+            timeout_seconds=timeout_seconds,
+        )
+        decision_statuses.append(outcome.status.value)
+        return outcome
+
+    controller.decide_and_send = record_decision
+
+    async def write_ready_marker() -> None:
+        if ready_path is None:
+            return
+        while True:
+            snapshot = world.snapshot()
+            if (
+                snapshot.freshness is Freshness.CURRENT
+                and snapshot.is_caught_up
+                and snapshot.phase is not None
+            ):
+                ready_path.write_text(
+                    json.dumps(
+                        {
+                            "pid": os.getpid(),
+                            "version": snapshot.version,
+                            "last_applied_seq": snapshot.last_applied_seq,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return
+            await asyncio.sleep(0.01)
+
     client_task = asyncio.create_task(client.run())
     world_task = asyncio.create_task(world.run())
     coordinator_task = asyncio.create_task(coordinator.run())
+    ready_task = asyncio.create_task(write_ready_marker())
     try:
         coordinator_exit = await asyncio.wait_for(coordinator_task, 45.0)
         world_exit = await asyncio.wait_for(world_task, 10.0)
@@ -66,6 +104,7 @@ async def run_driver(
                     "world_exit": world_exit.reason.value,
                     "coordinator_exit": coordinator_exit.reason.value,
                     "brain_call_count": brain.call_count,
+                    "decision_statuses": decision_statuses,
                     "attempted_phases": [
                         {"day": phase.day, "phase": phase.phase}
                         for phase in coordinator_exit.attempted_phases
@@ -84,11 +123,15 @@ async def run_driver(
         )
         return 0 if client_exit.reason is ClientExitReason.GAME_ENDED else 1
     finally:
-        for task in (coordinator_task, world_task, client_task):
+        for task in (ready_task, coordinator_task, world_task, client_task):
             if not task.done():
                 task.cancel()
         await asyncio.gather(
-            coordinator_task, world_task, client_task, return_exceptions=True
+            ready_task,
+            coordinator_task,
+            world_task,
+            client_task,
+            return_exceptions=True,
         )
 
 
@@ -100,6 +143,7 @@ def main() -> None:
     parser.add_argument("--credentials", required=True, type=Path)
     parser.add_argument("--status", required=True, type=Path)
     parser.add_argument("--seed", required=True, type=int)
+    parser.add_argument("--ready", type=Path)
     arguments = parser.parse_args()
     raise SystemExit(
         asyncio.run(
@@ -110,6 +154,7 @@ def main() -> None:
                 arguments.credentials,
                 arguments.status,
                 arguments.seed,
+                arguments.ready,
             )
         )
     )

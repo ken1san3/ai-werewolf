@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import FrozenInstanceError, replace
+import random
+import time
 from typing import Any
 import unittest
+from unittest.mock import patch
 
 from ai_client.brain import (
     AbilityDecision,
@@ -314,6 +317,68 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(outcome.status, DecisionStatus.INVALID_DECISION)
                 self.assertEqual(sender.calls, [])
 
+    async def test_forbidden_vote_abstain_is_invalid_and_never_sends(self) -> None:
+        brain = _ScriptedBrain(VoteDecision("action:0", None))
+        controller, _world, sender, request = make_controller("vote", brain=brain)
+
+        outcome = await controller.decide_and_send(request)
+
+        self.assertEqual(outcome.status, DecisionStatus.INVALID_DECISION)
+        self.assertEqual(sender.calls, [])
+
+    async def test_decision_subtype_mismatch_is_invalid_and_never_sends(self) -> None:
+        brain = _ScriptedBrain(ChatDecision("action:0", "hello"))
+        controller, _world, sender, request = make_controller("vote", brain=brain)
+        vote_with_chat_type = replace(action("vote"), type="chat")
+        self.assertFalse(
+            controller._decision_matches_handle(
+                ChatDecision("action:0", "hello"), vote_with_chat_type
+            )
+        )
+
+        outcome = await controller.decide_and_send(request)
+
+        self.assertEqual(outcome.status, DecisionStatus.INVALID_DECISION)
+        self.assertEqual(sender.calls, [])
+
+    async def test_ability_target_count_mismatch_is_invalid_and_never_sends(self) -> None:
+        brain = _ScriptedBrain(AbilityDecision("action:0", ()))
+        controller, _world, sender, request = make_controller("ability", brain=brain)
+
+        outcome = await controller.decide_and_send(request)
+
+        self.assertEqual(outcome.status, DecisionStatus.INVALID_DECISION)
+        self.assertEqual(sender.calls, [])
+
+    async def test_incomplete_snapshot_prevents_brain_invocation(self) -> None:
+        brain = _ScriptedBrain(NoDecision())
+        controller, world, _sender, _request = make_controller(brain=brain)
+        world._snapshot = replace(world.snapshot(), unknown_event_count=1)
+
+        self.assertIsNone(controller.capture_input())
+        self.assertEqual(brain.calls, [])
+
+    async def test_stop_during_dispatch_cancels_without_sending(self) -> None:
+        controller, _world, sender, request = make_controller()
+        controller._stopping = True
+
+        outcome = await controller._dispatch(request, ChatDecision("action:0", "late"))
+
+        self.assertEqual(outcome.status, DecisionStatus.CANCELLED)
+        self.assertEqual(sender.calls, [])
+
+    async def test_explicit_stop_cancels_active_brain_without_sending(self) -> None:
+        brain = _BlockingBrain(ChatDecision("action:0", "late"))
+        controller, _world, sender, request = make_controller(brain=brain)
+        task = asyncio.create_task(controller.decide_and_send(request))
+        await asyncio.wait_for(brain.started.wait(), 0.2)
+
+        await controller.stop()
+        outcome = await task
+
+        self.assertEqual(outcome.status, DecisionStatus.CANCELLED)
+        self.assertEqual(sender.calls, [])
+
     async def test_stale_action_after_validation_does_not_send(self) -> None:
         brain = _BlockingBrain(ChatDecision("action:0", "hello"))
         controller, world, sender, request = make_controller(brain=brain)
@@ -322,6 +387,39 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
         world.update(action=replace(action("chat"), action_generation=2))
         brain.release.set()
         outcome = await task
+        self.assertEqual(outcome.status, DecisionStatus.STALE)
+        self.assertEqual(sender.calls, [])
+
+    async def test_stale_selected_action_is_not_hidden_by_another_option(self) -> None:
+        brain = _BlockingBrain(VoteDecision("action:1", "p2"))
+        controller, world, sender, _request = make_controller(brain=brain)
+        chat_handle = action("chat")
+        vote_handle = action("vote")
+        world._actions = replace(world._actions, actions=(chat_handle, vote_handle))
+        request = controller.capture_input()
+        self.assertIsNotNone(request)
+        assert request is not None
+
+        task = asyncio.create_task(controller.decide_and_send(request))
+        await asyncio.wait_for(brain.started.wait(), 0.2)
+        world._actions = replace(world._actions, actions=(chat_handle,))
+        brain.release.set()
+
+        outcome = await task
+
+        self.assertEqual(outcome.status, DecisionStatus.STALE)
+        self.assertIsNone(outcome.error_type)
+        self.assertEqual(sender.calls, [])
+
+    async def test_failed_world_invalidates_in_flight_invocation(self) -> None:
+        brain = _BlockingBrain(ChatDecision("action:0", "late"))
+        controller, world, sender, request = make_controller(brain=brain)
+        task = asyncio.create_task(controller.decide_and_send(request))
+        await asyncio.wait_for(brain.started.wait(), 0.2)
+
+        world.update(freshness=Freshness.FAILED)
+        outcome = await task
+
         self.assertEqual(outcome.status, DecisionStatus.STALE)
         self.assertEqual(sender.calls, [])
 
@@ -419,13 +517,34 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brain.call_count, 2)
         self.assertEqual(len(coordinator.attempted_phases), 2)
 
-    def test_dummy_brain_is_seeded_and_deterministic(self) -> None:
+    async def test_phase_coordinator_run_is_single_use_and_stop_is_idempotent(self) -> None:
+        controller, world, _sender, _request = make_controller(brain=DummyBrain(seed=4))
+        coordinator = PhaseBrainCoordinator(world=world, controller=controller)
+        task = asyncio.create_task(coordinator.run())
+        await asyncio.sleep(0.02)
+        world.update(freshness=Freshness.ENDED, action=None, phase=(1, "game_end"))
+        await asyncio.wait_for(task, 0.5)
+
+        with self.assertRaises(RuntimeError):
+            await coordinator.run()
+        await coordinator.stop()
+        await coordinator.stop()
+
+    async def test_dummy_brain_is_seeded_and_deterministic(self) -> None:
         controller, _world, _sender, request = make_controller()
         first = DummyBrain(seed=99)
         second = DummyBrain(seed=99)
         self.assertEqual(first.seed, second.seed)
         self.assertEqual(first.seed, 99)
         self.assertEqual(controller.brain.seed, 7)
+        with patch("random.random", wraps=random.random) as random_spy, \
+            patch("time.time", wraps=time.time) as time_spy:
+            first_result = await first.decide(request)
+            second_result = await second.decide(request)
+            self.assertEqual(first_result, second_result)
+            self.assertEqual(first_result, NoDecision())
+            random_spy.assert_not_called()
+            time_spy.assert_not_called()
 
 
 if __name__ == "__main__":
