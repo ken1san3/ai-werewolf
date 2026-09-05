@@ -42,6 +42,11 @@ Next Task に残す。ユーザーはそれをそのまま送ればよい。
 - **Reviewer は2 model いる（D053）。Sol の各レーンは別チャットで動く。**
   `_DESIGN.md` の `Status: APPROVED` だけは、設計を書いた model と別の model が付ける
   （Sol の設計は Claude が承認）。model の違いが見落としを捕まえた実績による（R-97）。
+- **どの role も、他 role の判定・承認・実測値を代筆しない**（R-20260905-04）。
+  レビュー結果 / 完了承認 / Blocking 判定 / `Status: APPROVED` は、
+  **その判定を実際に行った role の署名でのみ記録する。**
+  実測値には必ず実行環境（Local Windows / Reviewer VM）を書く。
+  `CURRENT_STATE.md` の Next Task に次の role の結論を先取りして書かない。
 - Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。
 - 仕様・ルールの最終決定権はユーザーにある。各役割とも決定を `Docs/ai/decisions/` へ記録する。
 

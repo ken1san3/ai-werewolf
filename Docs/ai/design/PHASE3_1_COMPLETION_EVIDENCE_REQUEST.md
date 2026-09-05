@@ -10,7 +10,7 @@ Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RU
 DESIGN: REQUIRED
 ```
 
-Request status: OPEN
+Request status: CLOSED — 対応設計の承認、実装、両環境5回連続の検証が完了（2026-09-04、R-20260903-02）。
 
 設計は APPROVED だが R-20260903-02 / 06 が未解決で、実装と検証は完了していないため
 REQUEST を OPEN に戻した。R-20260903-07 の修正により、Addendum B の設計要求と
@@ -188,3 +188,135 @@ assert を通すための逐次的な削りである。**
 - 再起動した席の回復が、送信0のままでも成立する形になっている
 - `ai_client/` または `server/` の変更を前提にしている
 - 関数内部まで書いてある（コードの二重管理）
+
+---
+
+## Addendum C — 開始タイミングの決定論化と、中断免除の一般化（2026-09-03、R-20260903-02）
+
+Issued by: ユーザー（仕様・ルールの最終決定権者）。Reviewer / Claude が Design Gate として本 REQUEST へ収録した。
+**この Addendum は本 REQUEST の一部である。** `PHASE3_1_COMPLETION_EVIDENCE_DESIGN.md` は
+`DRAFT` へ戻す。新しいファイルを作らず同じ `_DESIGN.md` を改訂し `Status: IN_REVIEW` にする。
+承認は Claude が付ける（D053）。
+
+### 方針（決定済み。設計で覆さないこと）
+
+**R-02 は `tests/` だけで直す。`server/` は変更しない。**
+**「timeout を伸ばす」「sleep を増やす」で直さない。** それをやると Reviewer 環境では通って
+Windows では落ちる状態が続く。
+
+### C1. 開始タイミングを決定論にする（P0）
+
+現状は `server.start()` → ticker 開始 → player-0..8 を**逐次**起動、である。
+プロセス生成が遅い環境では player-8 の接続前に Night → Day 1 まで進む。
+Reviewer 環境で `test_separate_process_rejection_and_production_import_guard` が
+5回中3回落ちたのはこれである（注入席が day1 の CO 機会をそもそも受け取らない）。
+
+決めること:
+
+- **`.ready` バリア。** Phase 3.2 完走テストと同じく、各クライアントが初回 `game.state_sync` を
+  消費したら `.ready` を書き、親テストが9個そろうまで待つ
+- **test-only gated clock。** `.ready` だけでは足りない。ticker は待機中も進むからである。
+  `TickDriver` は `clock: Clock = monotonic_seconds` を受け取り
+  `now = timestamp(self._clock())` → `game.advance_if_due(now)` とするので、
+  テスト専用の gate 付き clock を注入すれば開始時刻を完全に握れる。
+  `WebSocketGameServer(..., ticker=TickDriver(registry, clock=gate))` で注入できる
+- **`GameState.started_at` も同じ clock から取ること。** 現在の完走テストは
+  `started_at=monotonic_seconds()` を渡している。ticker だけ gate して `started_at` が実時計だと、
+  RELEASE の瞬間に全 phase が期限切れになり意味が無い。**同一の clock を通すこと**
+- **gate の形。** RELEASE 前は固定値 t0 を返し、RELEASE 後は t0 + (RELEASE からの実経過) を返す。
+  RELEASE 後は実時間で進み、2秒 phase の締切競合はそのまま踏む
+- **9プロセスは `asyncio.gather` 相当で並列起動する。** 逐次起動をやめる
+
+`manual_advance.assert_not_called()`（server tick only）の契約は維持する。
+gated clock は tick を止めるのではなく、tick が見る時刻を決めるだけである。
+
+### C2. 中断免除を vote から全 action へ一般化する（P0）
+
+現在は vote だけ `stop_seq < round_start_seq <= resume_sync_seq` で免除される。
+ability / co_declare / chat には同じ仕組みが無いため、再起動直後に
+`stale_before_send` になっただけで落ちる。**vote だけを特別扱いする設計をやめる。**
+
+- **server opportunity ledger を作る。** 親テストは既に `session._reply` を差し替えて
+  vote round の開始 seq を記録している（`round_replies`）。これを一般化し、
+  停止対象 player へサーバが送った `game.state_sync` / `player.action_state` から
+  `{seq, player_id, day, phase, kind[, ability_id]}` の**送信機会一覧**を作る
+- **免除は seq で判定する。** `stop_seq < opportunity.seq <= resume_sync_seq` の機会だけを
+  再起動席の送信義務から外す。例:
+
+```text
+  stop_seq = 30, resume_sync_seq = 35
+    seq=31 ability|protect  -> 免除
+    seq=35 co_declare       -> 免除
+    seq=36 chat             -> 免除しない
+```
+
+### C3. eligible をクライアント証拠から作らない（P0）
+
+現在 `eligible` は `action_evidence` から作られている。つまり
+**クライアントが機会を観測できなかった場合、その機会は eligible にも入らない。**
+「送るべきだったのに送っていない」を検出できない。今回の
+「player-8 が day1 の CO / chat 機会を受け取っていない」もこれで隠れる。
+
+- `expected` = **サーバが実際に player へ提示した機会**（C2 の ledger）
+- `actual` = クライアントの `action_evidence`
+- 判定: `required = expected - interrupted` として `required <= sent <= expected`
+- **非再起動の8席は `sent == expected`**（厳密一致）
+
+### C4. `stale_before_send` を成功扱いにしない（P0）
+
+免除するのは **再起動席 かつ その機会の seq が中断 window 内** のときだけ。
+
+```text
+  player-8 / stop=30 / resume=35
+    seq=33 stale_before_send -> OK（送信義務免除）
+    seq=38 stale_before_send -> FAIL
+```
+
+window 外の `stale_before_send` は今までどおり失敗させる。実不具合を隠さない。
+
+### C5. 「免除しすぎ」を禁じる（P1）
+
+vote で既にやっている考え方を全 action へ広げる。最低限、次を FAIL とする。
+
+- 免除された機会が **0件** — 再起動テストとして成立していない
+- 免除された機会が **再起動席の全機会** — 再起動席を丸ごと検証対象外にしている
+
+さらに「中断前に最低1回成功 → 中断区間あり → Resume 後に最低1回成功」を要求する。
+`sent → interruption → resume → sent` の証拠が必ず残る形にする。
+
+### C6. timeout 時の診断を強化する（P1）
+
+現在の `_wait_for()` は `timed out waiting for ...` しか出さない。
+`diagnostics=lambda: {...}` のような仕組みを持たせ、timeout 時に
+elapsed / game の day・phase・result / 各クライアントの生死と return code /
+`.ready` の数 / 各席の last_seq / `stop_seq`・`resume_sync_seq` / 直近の機会一覧
+までを自動で出す。
+
+### C7. 高速テストと完走テストを運用上分ける（P2）
+
+`pytest -q -m "not completion"` で数秒、`-m completion` で重いものだけ、
+`pytest -q` で全部、と分ける。**既定の全件実行から完走テストを外さない。**
+分類するだけである。marker は `pyproject.toml` の
+`[tool.pytest.ini_options]` に登録し、未登録 marker の警告を出さないこと。
+
+### Acceptance（変更しない）
+
+- Reviewer 環境で5回連続成功
+- Windows で5回連続成功
+- 各回120秒以内
+
+### Out of scope
+
+- `server/` / `protocol/` / ゲームコア / content の変更
+- `ai_client/` の変更（本体に問題があると判断したら設計へ書かず Reviewer へ報告する）
+- Addendum B で決めた wire 順序と終了境界の変更
+- timeout を伸ばす、sleep を足す、phase を長くする類の回避
+
+### この設計が承認されない条件
+
+- gated clock を入れたのに `GameState.started_at` が別の時計から来ている
+- 免除が seq ではなく day / phase の粗い単位のままである
+- `expected` をクライアント証拠から作っている
+- 中断 window 外の `stale_before_send` が成功扱いになっている
+- 免除0件 / 全件を禁じる assert が無い
+- `server/` を変更している

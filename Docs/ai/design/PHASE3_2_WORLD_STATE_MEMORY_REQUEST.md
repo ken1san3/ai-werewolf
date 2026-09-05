@@ -10,6 +10,8 @@ Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RU
 DESIGN: REQUIRED
 ```
 
+Request status: CLOSED — 対応設計（Addendum A を含む）の承認、実装、検証が完了（2026-09-04、Phase 3.2 完了）。
+
 ## Reason
 
 `ai_client` に新しい module を足し、**3.3〜3.5 が使う public API を新設する。**

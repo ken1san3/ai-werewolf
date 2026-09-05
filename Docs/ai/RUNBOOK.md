@@ -173,6 +173,10 @@ Verification:
 - 長い解説を書かない
 - Reviewer 側の文書（DESIGN.md / TEST_POLICY.md）に原因がある指摘は、
   **その旨を明記し、修正は Reviewer が行うと書く**
+- **Reviewer 名義の記録は Reviewer セッションだけが書く**（R-20260905-04）。
+  `review_archive/` の「Reviewer 確認」節、完了承認、Blocking 判定は、
+  実際にそのセッションで走らせた実測とミューテーション結果に対応していなければならない。
+  他 role が書いた Reviewer 名義の記述を見つけたら、訂正したうえで起票する
 - 終了時に `CURRENT_STATE.md` の Latest Review と Test Status を更新する
 - `python scripts/check_docs.py` を実行する。**DESIGN / ROADMAP / TEST_POLICY を
   書き換えたら必ず走らせる。** 実装より先に書いたルールは DESIGN §5 の該当行へ

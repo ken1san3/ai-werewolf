@@ -7,146 +7,17 @@
 
 ---
 
-# Phase 1 — Game Core（LLM不使用）
+# Phase 1 — Game Core（LLM不使用）✅ 完了
 
-## 1.1 データモデルと content ローダー ✅ 完了
+1.1 データモデルと content ローダー / 1.2 GameState・Player・Event Bus・ログ /
+1.3 Phase Manager / 1.4 投票と処刑 / 1.5 夜行動の予約と Action Resolver /
+1.6 WinCondition 評価と勝敗 / 1.7 get_available_actions /
+1.8 13役職の動作確認と完走テスト
 
-## 1.2 GameState / Player / Event Bus / ログ
+完了条件: 13役職の standard_9 preset が LLM 無しで完走し、勝敗が確定する。
 
-含む:
-- `GameState`（プレイヤー、生死、日番号、現在フェーズ、pending actions の保持枠）
-- `Player`（player_id / display_name / Role / Modifiers / 生死）
-- Event Bus（イベントの発行と購読）
-- イベント定義と、`public` / `private` / `ai` の3系統へのログ出力
-- 乱数を `game.rng` に一元化し、テストで注入可能にする
-- 役職配布（`role_missing` を含む）と `ROLE_ASSIGNED` イベント
-
-含まない:
-- フェーズ遷移そのもの（1.3）
-- 投票・夜行動・勝敗判定
-- ネットワーク
-
-完了条件:
-- 13役職と standard_9 プリセットから1ゲーム分の初期状態を構築できる
-- 役職配布の結果がイベントとして記録される
-- `public.jsonl` に秘匿情報が出ないことをテストで確認できる
-
-参照: DESIGN.md §3 §4 §10 / TEST_POLICY §13
-
-## 1.3 Phase Manager
-
-含む:
-- `Setup → Night0 → Dawn → Day → Vote → [Runoff] → Execution → Night → …` の状態機械
-- 条件つきフェーズ（Night0 / Runoff）の仕組み
-- 日番号の採番（Night0 → Dawn 1 → Day 1）
-- `phase_ends_at` と `chat_enabled_at` の算出（15秒ルール、延長）
-- `available_from_night` による能力の有効／無効
-
-含まない:
-- 投票の集計（1.4）、夜行動の解決（1.5）
-- 実時間のタイマー駆動（テストは論理時刻で進める）
-
-完了条件:
-- Night0 から GameEnd まで、フェーズだけを空回しで一巡できる
-- Night0 で人狼の襲撃能力が無効になる
-- `runoff: true/false` で Runoff の有無が変わる
-
-参照: DESIGN.md §6.1 §6.2 / TEST_POLICY §3
-
-## 1.4 投票と処刑
-
-含む:
-- 投票の予約と締切での確定
-- 決選投票 / 同数時のランダム処刑 / 処刑見送り / 無効票 / 自己投票
-- `VoteResult`（処刑あり / 処刑なし / 決選投票へ）
-- 処刑による死亡（`DeathCause.lynched`）
-- `TIE_RESOLVED_RANDOM` などランダム結果のイベント記録
-
-含まない:
-- 猫又の道連れ（1.5 の Passive 側で扱う）
-- 勝敗判定（1.6）
-
-完了条件:
-- D006 の投票設定がすべて動き、それぞれ両方の値でテストが通る
-- 投票同数の4パターンが再現できる
-
-参照: DESIGN.md §5 §6.3 / TEST_POLICY §11
-
-## 1.5 夜行動の予約と Action Resolver
-
-含む:
-- `submit_action`（予約）と `resolve_pending_actions`（解決）の分離
-- 予約の上書き。使用回数は解決時に消費
-- priority 順の解決（DESIGN.md §7.1 の表）
-- Effect の実装（Protect / Inspect / Attack / Kill / InspectRole / PublicNotify / MediumInspect）
-- Passive の実装（`retaliate_on_death` / `on_inspected` / `public_notify_if_alive`）
-- `DeathCause` と公開死因の導出、死亡連鎖（深さ上限は設けない。D027）
-- 能力結果の通知範囲（DESIGN.md §7.4）
-- 未選択フォールバック `no_selection`、`PUBLIC_NOTIFY`、`wolf_attack.random`、
-  `no_self_target` restriction（D027）
-
-含まない:
-- 勝敗判定（1.6）
-- Modifier の具体実装（Phase 8）
-
-完了条件:
-- TEST_POLICY §4 §5 §6 §7 §9 が通る
-- 呪殺・護衛・襲撃・道連れの相互作用がすべてテストされている
-- 内部死因がクライアント向けイベントに出ない
-
-参照: DESIGN.md §7 §6.3 §4.2 §5 / TEST_POLICY §4 §5 §6 §7 §9 §10 / D024 / D027
-
-## 1.6 WinCondition 評価と勝敗
-
-含む:
-- 3型（`eliminate_role_tag` / `count_parity` / `survive_when_others_win`）の評価
-- `win_evaluation_order` に従う評価と便乗型の適用
-- 生存者0人 → `draw`（全員敗北）
-- `GAME_ENDED` イベントと `GameResult`
-- 判定を走らせる位置（Execution 内・Night 内の各1回）
-- 評価は `GameState` へ追記せず、専用サービス（`WinEvaluator` 等）として置く（D025）
-
-含まない:
-- レーティング、戦績
-
-完了条件: TEST_POLICY §8 が通る
-
-参照: DESIGN.md §8 / TEST_POLICY §8 / D025
-
-## 1.7 get_available_actions
-
-含む:
-- `game.get_available_actions(player_id)`
-- 制約宣言（`target` / `restrictions` / `uses` / `available_from_night`）から
-  検証と列挙の両方を導く
-- プレイヤー視点で組み立てる（そのプレイヤーが知ってよい情報のみ）
-- 各フェーズの行動（チャット / CO / 投票 / 夜能力）
-- 列挙と検証も `GameState` へ追記せず、専用サービスとして置く（D025）。
-  `_phase_action_kinds` はここで公開 API へ置き換える
-
-含まない:
-- ネットワーク送信（Phase 2）
-
-完了条件: TEST_POLICY §10 が通る
-
-参照: DESIGN.md §9.4 §6.3 / TEST_POLICY §10 / D025
-
-## 1.8 13役職の動作確認と完走テスト
-
-含む:
-- Dummy 操作による標準9人村の完走。夜行動も `get_available_actions` から選ぶ
-- 妖狐入り構成、猫又入り構成、狂人系3種を含む構成での完走
-- Phase 1 が担当する TEST_POLICY 節（§1〜§11 §13 §14。§12 は Phase 2.4）の通過確認
-
-完了条件:
-- 標準9人村を Dummy 操作だけで最後まで進行できる
-- 13役職すべてが content の YAML だけで動作する
-- 狂人 / 狂信者 / 囁く狂人 がコアの分岐なしに区別される
-- **Phase 1 完了。`handoffs/PHASE1_HANDOFF.md` を作成する**
-
-参照: TEST_POLICY 全体
-
----
+サブPhaseごとの 含む / 含まない / 完了条件は
+`Docs/ai/roadmap_archive/PHASE1_SCOPE.md` に退避した（内容は当時のまま）。
 
 # Phase 2 — Network Server
 
@@ -199,10 +70,9 @@
 
 Phase 3 全体の完了条件: RuleBased AI 9人でゲーム完走
 
-3.3 Brain Interface と Dummy Brain / 3.4 Reaction・Chat Controller /
-3.5 Vote・Ability Controller の 含む / 含まない / 完了条件は未確定（R-20260901-82）。
-**3.2 の完了後に書く。** 先に書かないのは、3.2 の公開 API が
-3.3〜3.5 の境界を実物で決めるためである。
+3.3〜3.5 の境界は 3.2 完了後に確定した（R-20260901-82、2026-09-04）。
+判断の差し替え境界を 3.3 で1つ作り、3.4 が「いつ喋るか」、3.5 が「誰に投票し誰に能力を使うか」を
+受信した列挙だけから決める。**内容の質と推論は Phase 6、LLM は Phase 4。**
 
 ## 3.1 Network Client
 
@@ -308,6 +178,100 @@ Network Client が渡す検証済みイベントと本人視点 snapshot から�
 参照: ROADMAP §3.1、`design/PHASE3_1_NETWORK_CLIENT_DESIGN.md` の Public Interfaces
 参照: DESIGN.md §9.3 §9.4（サーバが送る内容。クライアント側の構造は定めていない）
 参照: TEST_POLICY「ネットワーク Phase の検証の所在」（節番号は持たない）
+
+## 3.3 Brain Interface と Dummy Brain
+
+World State の読み取りと Network Client の送信の間に、**判断を差し替えられる境界を1つ**作る。
+LLM 無しで動く Dummy Brain を置き、Phase 4 の LLM Brain が同じ境界へ入れるようにする。
+
+含む:
+- Brain が受け取る入力の型。世界像は 3.2 の読み取り API から、行動の選択肢は
+  `current_actions()` の handle から渡す。raw payload を Brain へ渡さない
+- Brain が返す判断の型。**送信は Controller が行い、Brain は handle を自作しない**
+- LLM を使わない Dummy Brain。seed から再現できる決定論
+- Brain を呼ぶ単位と、応答が遅れた・返らないときの既定行動
+- Brain を別実装へ差し替えられることを示すテスト
+
+含まない:
+- 発言内容の生成方針（3.4）、投票・能力の選択方針（3.5）
+- LLM backend、プロンプト、structured output（Phase 4）
+- Belief / Suspicion / 信頼度・ライン・反応スコア（Phase 6）
+- ゲームコアの import、サーバの可否判定のクライアント側での再実装
+- 役職名・チャネルID・死因IDのクライアントへの直書き
+
+完了条件:
+- Dummy Brain だけで9プロセスが完走する（LLM 無し）
+- Brain を差し替えても World State と Controller を変更せずに動く
+- Brain が列挙に無い行動を返したとき、Controller が送信せず、そのことを観測できる
+- 同じ seed と同じ入力から同じ判断が出る
+- `server.aiwolf_core` と `server.network` を import していない
+
+**Phase 3.3 の詳細設計で決定する事項。ROADMAP では決めない（D051）:**
+- Brain の入出力の型と、`WorldSnapshot.version` の渡し方
+- 同期か非同期か。応答の締切と、締切を過ぎたときの既定行動
+- 1フェーズあたりの呼び出し回数
+- 差し替えの単位（プロセス起動時か実行時か）
+
+参照: ROADMAP §3.1 §3.2、`design/PHASE3_2_WORLD_STATE_MEMORY_DESIGN.md` の Public Interfaces
+
+## 3.4 Reaction・Chat Controller
+
+昼の会話で**いつ喋るか**を決める。何を喋るかは Brain が返し、その質は Phase 6 で扱う。
+
+含む:
+- 発話の間隔と1フェーズあたりの上限。締切前の打ち切り
+- 他人の発言を受けて喋る起点。固定の発言順を作らない（Design invariant 3）
+- CO 宣言を出す起点
+- 送信失敗と `action.rejected` の扱い。握り潰さない
+
+含まない:
+- 文章そのものの生成（Phase 4）
+- 説得力・整合性・議論品質の評価（Phase 6）
+- 投票と能力の選択（3.5）
+
+完了条件:
+- 9人が同時に喋っても各フェーズの締切内に収まる
+- 1人が黙っても他の席が進む
+- 発話が特定の席に偏らないことを観測できる
+- `action.rejected` を受けたことがテストから観測でき、握り潰されない
+- LLM 無しでテストが完走する
+
+**Phase 3.4 の詳細設計で決定する事項。ROADMAP では決めない（D051）:**
+- 発話間隔の決め方と、上限の単位（フェーズごとか日ごとか）
+- 反応の起点をどのイベントから取るか
+- 締切前どこで打ち切るか
+
+参照: ROADMAP §3.3、DESIGN.md §9.3
+
+## 3.5 Vote・Ability Controller
+
+**受信した列挙だけ**から投票先と夜行動の対象を決めて送る。
+
+含む:
+- 投票・runoff・棄権の選択と送信
+- 能力の対象選択と送信。対象数と使用回数は受信した handle から取る
+- 締切前に送る。締切をまたいだ拒否の扱い
+- seed から再現できる決定論
+
+含まない:
+- 誰が怪しいかの推論、占い結果の真偽判定（Phase 6）
+- 役職固有の分岐（Design invariant 4）
+- サーバの可否判定の再実装。対象の妥当性はサーバが決める
+
+完了条件:
+- 生存する全席が各 vote / runoff round で投票を送る
+- 能力を持つ席が、その夜に使える能力を送る
+- 13役職の standard_9 preset で9プロセスが完走する
+- 同じ seed から同じ選択が出る
+- 列挙に無い対象を選ばない。拒否を受けたことを観測できる
+- LLM 無しでテストが完走する
+
+**Phase 3.5 の詳細設計で決定する事項。ROADMAP では決めない（D051）:**
+- 複数の有効対象があるときの選び方
+- 棄権を選ぶ条件
+- 締切と送信の余裕をどう取るか
+
+参照: ROADMAP §3.3 §3.4、DESIGN.md §9.4
 
 # Phase 4 — Local LLM
 
