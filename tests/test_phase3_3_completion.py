@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from server.aiwolf_core import (
+    GamePhase,
     GameState,
     InMemoryEventSink,
     PlayerConfig,
@@ -171,7 +172,7 @@ class PhaseThreeThreeCompletionTests(unittest.IsolatedAsyncioTestCase):
                     (event.payload["day"], event.payload["phase"])
                     for event in game.event_bus.events
                     if event.type == "PHASE_STARTED"
-                    and event.payload["phase"] != "game_end"
+                    and event.payload["phase"] != GamePhase.GAME_END.value
                 ]
                 self.assertGreaterEqual(len(server_phases), 2)
                 self.assertEqual(len(server_phases), len(set(server_phases)))
