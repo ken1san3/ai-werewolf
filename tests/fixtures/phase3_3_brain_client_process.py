@@ -13,7 +13,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client.brain import DummyBrain, BrainController, BrainRunConfig, PhaseBrainCoordinator
+from ai_client.brain import (
+    BrainController,
+    BrainRunConfig,
+    DummyBrain,
+    PhaseBrainCoordinator,
+)
 from ai_client.network import (
     ClientExitReason,
     FileCredentialStore,
@@ -47,7 +52,17 @@ async def run_driver(
         config=BrainRunConfig(max_decision_seconds=0.5),
     )
     coordinator = PhaseBrainCoordinator(world=world, controller=controller)
+    brain_decisions: list[str] = []
     decision_statuses: list[str] = []
+    original_decide = brain.decide
+
+    async def record_brain_decision(request):
+        decision = await original_decide(request)
+        brain_decisions.append(type(decision).__name__)
+        return decision
+
+    brain.decide = record_brain_decision
+
     original_decide_and_send = controller.decide_and_send
 
     async def record_decision(request, *, timeout_seconds=None):
@@ -104,6 +119,7 @@ async def run_driver(
                     "world_exit": world_exit.reason.value,
                     "coordinator_exit": coordinator_exit.reason.value,
                     "brain_call_count": brain.call_count,
+                    "brain_decisions": brain_decisions,
                     "decision_statuses": decision_statuses,
                     "attempted_phases": [
                         {"day": phase.day, "phase": phase.phase}

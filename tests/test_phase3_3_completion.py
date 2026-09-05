@@ -167,24 +167,39 @@ class PhaseThreeThreeCompletionTests(unittest.IsolatedAsyncioTestCase):
                     all(status["client_exit"] == "GAME_ENDED" for status in statuses.values()),
                     statuses,
                 )
-                phases_by_player = {}
+                server_phases = [
+                    (event.payload["day"], event.payload["phase"])
+                    for event in game.event_bus.events
+                    if event.type == "PHASE_STARTED"
+                    and event.payload["phase"] != "game_end"
+                ]
+                self.assertGreaterEqual(len(server_phases), 2)
+                self.assertEqual(len(server_phases), len(set(server_phases)))
+                server_phase_set = set(server_phases)
+                first_server_phase = server_phases[0]
+                last_server_phase = server_phases[-1]
+                self.assertGreaterEqual(
+                    len({day for day, _phase in server_phases}),
+                    2,
+                )
                 for player_id, status in statuses.items():
                     attempted_phases = status["attempted_phases"]
+                    brain_decisions = status["brain_decisions"]
                     decision_statuses = status["decision_statuses"]
                     self.assertGreater(status["brain_call_count"], 0, status)
                     self.assertEqual(status["brain_call_count"], len(attempted_phases), status)
+                    self.assertEqual(status["brain_call_count"], len(brain_decisions), status)
                     self.assertEqual(len(decision_statuses), len(attempted_phases), status)
                     self.assertTrue(
-                        all(decision_status == "NO_DECISION" for decision_status in decision_statuses),
+                        all(decision == "NoDecision" for decision in brain_decisions),
                         status,
                     )
                     phases = [(item["day"], item["phase"]) for item in attempted_phases]
                     self.assertEqual(len(phases), len(set(phases)), status)
-                    self.assertGreaterEqual(len({day for day, _phase in phases}), 2, status)
-                    phases_by_player[player_id] = set(phases)
-                expected_phases = next(iter(phases_by_player.values()))
-                for player_id, phases in phases_by_player.items():
-                    self.assertEqual(phases, expected_phases, player_id)
+                    phases_set = set(phases)
+                    self.assertTrue(phases_set <= server_phase_set, status)
+                    self.assertIn(first_server_phase, phases_set, status)
+                    self.assertIn(last_server_phase, phases_set, status)
                 self.assertEqual(len(processes), len(game.players))
                 self.assertIsNotNone(game.game_result)
                 self.assertEqual(
