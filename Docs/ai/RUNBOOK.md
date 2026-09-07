@@ -1,6 +1,6 @@
 # Runbook
 
-ユーザーが打つ言葉は3つだけ。各セッションは
+通常のゲーム開発でユーザーが打つ言葉は4つ。各セッションは
 `python scripts/ai_status.py <role>` が出力する対応節で手順を決める。
 
 | ユーザーの指示 | 送る先 | 手順 |
@@ -13,6 +13,11 @@
 フェーズ番号が指定されなかった場合は `CURRENT_STATE.md` の Next Task に従う。
 **次にどれを送るかは Reviewer が決め、Next Task に名指しで書く**（D051）。
 方向性の変更や新しい仕様判断は、この4つのどれでもない。ユーザーが別途指示する。
+
+Qwen中心の実装・修正はD057に従う。基盤の入口は `python scripts/ai_status.py infra`、
+実行・再開・一括処理・利用枠/効率集計は `Docs/ai/spec/LOCAL_IMPLEMENTATION_RUNNER.md`。
+上位担当が契約を確定し、通常の工程管理をrunnerへ移す。Geminiは通常工程に入れない。
+基盤承認はゲームDesign Gateの代わりにならない。
 
 ---
 
@@ -107,12 +112,13 @@ Docs/ai/TEST_POLICY.md
 どれを読むかの絞り込みにローカルLLMを使ってよいが、
 **差分に含まれるファイルは減らさず全部開く**（D034）。
 
-**Reviewer 環境からローカルLLMへは到達できない。** Reviewer が動く Linux VM は
+**別ホストのReviewer VMからWindows localhostへは到達できない。** Reviewer が動く Linux VM は
 Windows とは別ホストであり、llama-server が bind している Windows 側の
 `127.0.0.1:8080` は VM からは別物である（`Network is unreachable`）。
-したがって Reviewer の報告では
-ローカルLLMは常に「環境から到達不可のため未使用」であり、
+したがってこの別ホストVMでのReviewer報告では
+ローカルLLMは「環境から到達不可のため未使用」であり、
 **サーバが起動しているかどうかとは無関係である。**
+Local Windowsで動くReviewerはこのVM前提を流用せず、実際の接続結果を記録する。
 ただし **VM から PyPI へは出られる。「ネットワークが無い」ではない。**
 
 **Reviewer VM には実行時依存が入っていないことがある。** 素の状態では

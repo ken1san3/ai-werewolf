@@ -497,6 +497,11 @@ def check_session_context_size() -> None:
 
 
 def main() -> int:
+    if (DOCS / 'infra' / 'runner.json').exists():
+        from infra_status import check_gate
+        valid, detail = check_gate(ROOT)
+        if not valid:
+            fail('infra-gate', detail)
     for check in (
         check_design_sections,
         check_decision_refs,

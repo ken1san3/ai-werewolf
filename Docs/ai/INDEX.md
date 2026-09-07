@@ -43,6 +43,7 @@ AIエージェントが「どのファイルを読むか」だけを決める詳
 | 元仕様への指摘 | `SPEC_REVIEW.md` |
 | 元仕様の原文 | `spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
 | 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
+| Qwen実装runner・利用枠・コスパ集計 | `spec/LOCAL_IMPLEMENTATION_RUNNER.md`（入口: `../../scripts/ai_status.py infra`） |
 | 詳細設計と DESIGN REQUEST（canonical ではない） | `design/` |
 | ロードマップ全体 | `ROADMAP.md` |
 | 文書と実装の不整合検査 | `../../scripts/check_docs.py` |

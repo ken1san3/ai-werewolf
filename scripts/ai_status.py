@@ -329,14 +329,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "role",
         nargs="?",
-        choices=tuple(ROLE_SECTIONS),
+        choices=(*ROLE_SECTIONS, 'infra'),
         help="append only the matching RUNBOOK section",
     )
-    return parser.parse_args()
+    parser.add_argument('--run', type=Path, help='infra only: read a local runner state')
+    args = parser.parse_args()
+    if args.run and args.role != 'infra':
+        parser.error('--run requires infra')
+    return args
 
 
 def main() -> int:
     args = parse_args()
+    if args.role == 'infra':
+        from infra_status import display
+        return display(ROOT, args.run)
     state = read(AI / "CURRENT_STATE.md")
     inbox = read(AI / "REVIEW_INBOX.md")
     questions = read(AI / "OPEN_QUESTIONS.md")

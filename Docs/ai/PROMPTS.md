@@ -19,6 +19,11 @@ Phase X.Y を詳細設計して
 
 フェーズ番号を省略すると `ai_status.py` の出力にある Next Task が使われる。
 
+通常の実装モデルはQwen（D057）。上位モデルは必要な設計・独立レビュー・難問を担当し、
+日常の実行/修正ループはrunnerに任せる。基盤入口は `python scripts/ai_status.py infra`。
+複数の承認済み契約は `task_batch.py` で逐次実行・再開できる。
+詳細手順: `Docs/ai/spec/LOCAL_IMPLEMENTATION_RUNNER.md`。Geminiは例外補助のみ。
+
 方向性の変更・新しい仕様判断・スコープの変更は、この4つの外側であり、
 ユーザーが個別に指示する。
 

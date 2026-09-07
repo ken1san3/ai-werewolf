@@ -10,8 +10,8 @@
 |---|---|---|
 | 「レビューして」 | Reviewer / Claude または Sol | `python scripts/ai_status.py review` |
 | 「Phase X.Y を詳細設計して」 | Detailed Design / Sol | `python scripts/ai_status.py design` |
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer / Luna | `python scripts/ai_status.py implement` |
-| 「レビュー内容を確認して修正して」 | Implementer / Luna | `python scripts/ai_status.py fix` |
+| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer / Qwen（上位が契約確定） | `python scripts/ai_status.py implement` |
+| 「レビュー内容を確認して修正して」 | Implementer / Qwen | `python scripts/ai_status.py fix` |
 
 **どれを送るかは Reviewer が決める。** 迷ったら「レビューして」を Reviewer へ送る。
 Reviewer が Design Gate（D051）で次の1手を名指しし、`CURRENT_STATE.md` の
@@ -31,7 +31,7 @@ Next Task に残す。ユーザーはそれをそのまま送ればよい。
 
 | 役割 | default model | やること |
 |---|---|---|
-| Implementer / Local-LLM Orchestrator | Luna | 実装 / テスト / ローカルLLMの運用 / CURRENT_STATE・handoff・decision・failure の更新 |
+| Implementer / Local-LLM Orchestrator | Qwen / 決定的runner | 契約内の実装・修正・テスト。重要判断はGPT/Claude。状態・handoff等は証拠に基づき更新 |
 | Detailed Design | Sol | Reviewer が必要と判定したタスクの詳細設計（D051） |
 | Reviewer / Design Gate（通常） | Claude, Sol | 詳細設計の要否判定 / 詳細設計レビュー / 仕様整合レビュー / REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備（D053） |
 | Reviewer（深掘り） | Sol | 同上。対象を絞って深く見る（D053） |
@@ -48,6 +48,10 @@ Next Task に残す。ユーザーはそれをそのまま送ればよい。
   実測値には必ず実行環境（Local Windows / Reviewer VM）を書く。
   `CURRENT_STATE.md` の Next Task に次の role の結論を先取りして書かない。
 - Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。
+- Qwen中心の開発基盤はD056/D057。入口は `python scripts/ai_status.py infra`。
+  Geminiは他の3モデルへ任せる合理性が低い作業だけに使う。通常工程の依存にしない。
+  Greenは機械検証、Yellowはfreshレビュー追加、Redは上位承認、Hard Redは上位実装。
+  READYやQwenの自己申告をDesign Gate・正式完了承認へ読み替えない。
 - 仕様・ルールの最終決定権はユーザーにある。各役割とも決定を `Docs/ai/decisions/` へ記録する。
 
 ## Start of session
