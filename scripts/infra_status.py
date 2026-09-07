@@ -37,6 +37,8 @@ def display(root: Path, run: Path | None = None) -> int:
     print('Guide: Docs/ai/spec/LOCAL_IMPLEMENTATION_RUNNER.md')
     print('Unattended campaign: python scripts/autodev.py doctor --manifest <trusted-campaign.json>')
     print('Campaign guide: Docs/ai/spec/AUTONOMOUS_DEVELOPMENT.md')
+    print('Continuous workpackage: python scripts/run_overnight.py doctor --package <trusted-workpackage.json>')
+    print('Workpackage guide: Docs/ai/spec/OVERNIGHT_DEVELOPMENT.md')
     print('Game Phase gate: separate; this does not approve game implementation.')
     if run:
         try:

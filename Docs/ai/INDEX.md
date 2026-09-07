@@ -45,6 +45,7 @@ AIエージェントが「どのファイルを読むか」だけを決める詳
 | 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
 | Qwen実装runner・利用枠・コスパ集計 | `spec/LOCAL_IMPLEMENTATION_RUNNER.md`（入口: `../../scripts/ai_status.py infra`） |
 | 有限キューの無人開発・独立レビュー・再開 | `spec/AUTONOMOUS_DEVELOPMENT.md` / `handoffs/INFRA_AUTONOMOUS_HANDOFF.md` |
+| 新しい設計判断までの連続実装 | `spec/OVERNIGHT_DEVELOPMENT.md` / `infra/OVERNIGHT_PACKAGE_GUIDE.md`（`../../Run-Overnight.cmd`） |
 | 詳細設計と DESIGN REQUEST（canonical ではない） | `design/` |
 | ロードマップ全体 | `ROADMAP.md` |
 | 文書と実装の不整合検査 | `../../scripts/check_docs.py` |
