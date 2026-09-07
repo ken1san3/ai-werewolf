@@ -52,6 +52,7 @@ Next Task に残す。ユーザーはそれをそのまま送ればよい。
   Geminiは他の3モデルへ任せる合理性が低い作業だけに使う。通常工程の依存にしない。
   Greenは機械検証、Yellowはfreshレビュー追加、Redは上位承認、Hard Redは上位実装。
   READYやQwenの自己申告をDesign Gate・正式完了承認へ読み替えない。
+  有限キューの無人実行はD058。`Docs/ai/spec/AUTONOMOUS_DEVELOPMENT.md`を参照する。
 - 仕様・ルールの最終決定権はユーザーにある。各役割とも決定を `Docs/ai/decisions/` へ記録する。
 
 ## Start of session
