@@ -13,9 +13,35 @@
 
 ## 操作
 
+### まとめて起動する
+
+ルートの `Run-Autodev.cmd` が起動用。初回に `autodev.example.json` を
+`autodev.local.json` としてコピーし、manifestを**実在する承認済みcampaign設定**へ変更する。
+その後はダブルクリックでdoctor→start→reportまで1回実行する。終了画面はキーを押すまで残る。
+Qwen devサーバと上位CLIのログインは事前に用意する。
+
+継続する場合は、表示されたパスを使って設定を `{"campaign":"C:/.../campaign-..."}` にする。
+するとstatus→必要な場合だけresume→reportを実行する。完了・要判断のterminalは再実行しない。
+**manifest設定のまま再起動すると新しいcampaignを作る**。継続にはcampaign設定を使う。
+設定ファイルはGit管理外で、スクリプトはその内容・期限・予算を変更しない。
+新しいゲームタスクのmanifestは設計と範囲を確定した上位担当が用意する。見本はゲーム実行許可ではない。
+
+```powershell
+.\Run-Autodev.cmd --check
+.\Run-Autodev.cmd --manifest "C:/work/approved-campaign.json"
+.\Run-Autodev.cmd --campaign "C:/.../campaign-..."
+```
+
+`--check`はdoctor/statusだけを実行し、LLMを呼ばない。
+任意の作業ディレクトリから `python C:/AIwolf/scripts/run_autodev.py` でも利用できる。
+ラッパーは出力を逐次表示する。start直後に表示されるcampaignパスから実行中の記録を参照できる。
+stopの自動解除、常駐、定期再送はしない。既存CLIの停止理由とexitを保持する。
+
+### 個別コマンド
+
 Python、既存AIagent v1、起動済み共有Qwen devサーバ、利用する上位CLIの保存済みログインが必要。
 manifestの`agent_root`は例として `C:/AIagent/agent`。実行記録はrepo外に置く。
-WindowsのCLIは`.cmd`ではなく、インストール済みネイティブ`.exe`の絶対パスを指定する。
+上位モデルのCLIには、`.cmd`ではなくインストール済みネイティブ`.exe`の絶対パスを指定する。
 作業ディレクトリは `C:/AIwolf`。
 
 ```powershell
