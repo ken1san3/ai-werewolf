@@ -12,12 +12,20 @@
 毎回同じコマンドで同じ実行を参照する。完了済みなら完了状態を表示し、別の作業を勝手に始めない。
 Qwenサーバが稼働していることは必要で、このコマンドはサーバを起動しない。
 
-2026-09-08のローカル初期設定: 承認済みPhase 3.4の型・設定・決定的乱数処理の1件。
+2026-09-08の現状: 初回1件は公開API契約不足でNEEDS_DESIGNに停止した後、
+補足を実Reviewer Solが独立承認。修正版を登録しdoctorが成功した。
+同じコマンドで `.infra-runs/overnight-ready-v2/workpackage.json` の1件を開始する。
+残り上位6回/Qwen8回、終了期限は元runと同じ**2026-09-08 16:26:53 JST**。
+旧runと25,016tokensの消費記録は保持。以下の初回設定は修正前の記録。
+詳細は `../failures/2026-09-08_OVERNIGHT_UNSPECIFIED_API.md`。
+
+初回設定: 承認済みPhase 3.4の型・設定・決定的乱数処理の1件。
 `C:/AIwolf/.infra-runs/overnight-ready/workpackage.json` を `C:/AIwolf/overnight.local.json` に登録済み。
 最大8時間、上位モデル7回、Qwen8回。計画はGPT-5.5、独立レビューはSol、実装はQwen。
 利用枠残量は未取得のため、残量20%の確保を保証する設定ではなく呼出回数で制限する。
 作業設定の有効期限は2026-09-09 08:17:45 JST。実行中もこの期限を超えない。
-doctorはLocal Windowsでready=true / provider_calls=0。ゲーム実装はまだ開始していない。
+事前doctorはLocal Windowsでready=true / provider_calls=0だったが、契約の意味的な完全性は検査しない。
+初回実行後は上位1回、Qwen0回、ゲームコード変更なし。修正版の実装結果はまだ未確認。
 
 `No workpackage configured` は `C:/AIwolf/overnight.local.json` がないという意味。
 担当エージェントが `../infra/OVERNIGHT_PACKAGE_GUIDE.md` に従って実在する作業設定を作り、
