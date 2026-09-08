@@ -1,55 +1,23 @@
-# 承認済み作業を人の入力なしで連続実行する（D059）
+# 承認済み作業の無人実行
 
-## まず何をすればよいか（利用者向け）
-
-**作業設定を準備したPCでは、PowerShellに打つのはこの1行だけ。**
+利用者向けの最新の操作・停止条件は **[OVERNIGHT_QUICKSTART.md](../infra/OVERNIGHT_QUICKSTART.md)** を参照する。
 
 ```powershell
 & "C:\AIwolf\Run-Overnight.cmd"
 ```
 
-開始後は作業一覧を順番に処理する。一つの作業が終わっただけでは終了しない。
-毎回同じコマンドで同じ実行を参照する。完了済みなら完了状態を表示し、別の作業を勝手に始めない。
-Qwenサーバが稼働していることは必要で、このコマンドはサーバを起動しない。
+D060の新規workpackageはversion 2。Qwenが計画/テスト案を作り、上位は計画承認と
+最終候補承認の2回/単位、適用後の完了確認は機械テストで行う。
+起動途中のpointer置換失敗は、既存runを検証して復旧する。重複候補や壊れた証拠は停止する。
+詳細な契約は `../design/INFRA_EFFICIENT_OVERNIGHT_DESIGN.md`。
+旧runの期限・予算・証拠は新方式に変更しない。
 
-2026-09-08の現状: 初回1件は公開API契約不足でNEEDS_DESIGNに停止した後、
-補足を実Reviewer Solが独立承認。修正版を登録しdoctorが成功した。
-同じコマンドで `.infra-runs/overnight-ready-v2/workpackage.json` の1件を開始する。
-残り上位6回/Qwen8回、終了期限は元runと同じ**2026-09-08 16:26:53 JST**。
-旧runと25,016tokensの消費記録は保持。以下の初回設定は修正前の記録。
-詳細は `../failures/2026-09-08_OVERNIGHT_UNSPECIFIED_API.md`。
+## version 1互換方式の記録
 
-初回設定: 承認済みPhase 3.4の型・設定・決定的乱数処理の1件。
-`C:/AIwolf/.infra-runs/overnight-ready/workpackage.json` を `C:/AIwolf/overnight.local.json` に登録済み。
-最大8時間、上位モデル7回、Qwen8回。計画はGPT-5.5、独立レビューはSol、実装はQwen。
-利用枠残量は未取得のため、残量20%の確保を保証する設定ではなく呼出回数で制限する。
-作業設定の有効期限は2026-09-09 08:17:45 JST。実行中もこの期限を超えない。
-事前doctorはLocal Windowsでready=true / provider_calls=0だったが、契約の意味的な完全性は検査しない。
-初回実行後は上位1回、Qwen0回、ゲームコード変更なし。修正版の実装結果はまだ未確認。
+以下はD059 version 1の設定担当向け詳細。既存runの再読・復旧用であり、
+新規作業の上位2回方式を説明するものではない。
 
-`No workpackage configured` は `C:/AIwolf/overnight.local.json` がないという意味。
-担当エージェントが `../infra/OVERNIGHT_PACKAGE_GUIDE.md` に従って実在する作業設定を作り、
-doctorで検証してからこのファイルに登録する。利用者がJSONや仮のファイル名を手入力する必要はない。
 
-## いつ終了するか（利用者向け）
-
-**次のいずれかに最初に達したところで止まる。朝まで必ず動き続ける設定ではない。**
-
-| 止まる条件 | 表示 | 次にすること |
-|---|---|---|
-| 用意した作業一覧をすべて完了 | COMPLETE | 正常終了。次の作業一覧はSolが準備する |
-| 承認済み設計だけでは判断できない問題が出た | NEEDS_DESIGN | 上位担当が設計判断する |
-| 設定した終了時刻・実行時間に到達 | LIMIT_REACHED | 終了。再開しても期限は延びない |
-| 呼出上限、利用枠条件、規定回数の修正・レビューで進めない | LIMIT_REACHED / PAUSED_QUOTA / BLOCKED | 停止理由を確認する |
-| 入力や承認の不整合、応答が保存されない等の異常 | INVALID / UNKNOWN_DELIVERY / BLOCKED | 自動再送せず、上位担当が記録を確認する |
-| 利用者がCtrl+Cで中断、またはstopを発行 | PAUSED | 状態を確認し、同じ実行を再開する |
-
-実行時間のシステム上限は8時間。**実際の期限と呼出上限は登録した作業設定で決まる。**
-COMPLETEは「今回の作業一覧が終わった」という意味で、ゲーム全体の完成とは限らない。
-Ctrl+Cは通常PAUSEDになるが、応答が未保存なら再開時にUNKNOWN_DELIVERYとなり、自動再送しない。
-stopコマンドで止めた場合は明示的な--clear-stopが必要。詳しい管理コマンドは後半にある。
-
-以下は設定担当向けの詳細。
 
 2026-09-08: 開発基盤の設計・実装を独立承認済み。新基盤48件、既存369件と612サブテストが成功。
 実モデルの2単位連続実行も完了した。証拠は `../handoffs/OVERNIGHT_HANDOFF.md` と

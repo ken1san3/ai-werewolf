@@ -12,7 +12,7 @@ from autodev_lib.engine import Campaign, Pause
 from autodev_lib.policy import check_design as check_child_design
 from . import provider
 from .policy import (Error, ACTIVE, PAUSED, TERMINAL, PHASES, digest, loads, validate, check_design,
-                     allocation, universe, head, proposal, test_files, runtime_paths)
+                     allocation, universe, head, proposal, test_files, runtime_paths, check_version)
 from .evidence import Evidence
 
 
@@ -37,6 +37,7 @@ class Controller(Evidence):
     def __init__(self, directory, cloud=None, child_cloud=None, runner=None, ready=None):
         self.path = Path(directory).resolve(strict=True)
         self.m = self.read('package.json'); self.b = validate(self.m, initial=False)
+        check_version(self.m)
         self.repo = Path(self.m['repo_root']).resolve()
         self.b['task_contract'].safe_path(self.path.parent, self.path.name)
         if self.path.is_relative_to(self.repo) or self.path.is_relative_to(Path(self.m['agent_root']).resolve()):
@@ -65,6 +66,7 @@ class Controller(Evidence):
     def start(cls, source, runs_root, _held_repo=None, **hooks):
         check_design(); check_child_design()
         source = Path(source).resolve(strict=True); raw = source.read_bytes(); m = loads(raw); b = validate(m)
+        check_version(m)
         repo = Path(m['repo_root']).resolve(); agent = Path(m['agent_root']).resolve()
         root = Path(runs_root).absolute()
         runtime_paths(m, root)
@@ -92,13 +94,17 @@ class Controller(Evidence):
             return cls(path, **hooks)
 
     @classmethod
-    def launch(cls, source, runs_root, on_created=None, **hooks):
-        m = loads(Path(source).read_bytes()); b = validate(m); repo = Path(m['repo_root']).resolve()
+    def launch(cls, source, runs_root, on_created=None, local_pointer=None, prepare_only=False, **hooks):
+        from .pointer import find_run
+        m = loads(Path(source).read_bytes()); b = validate(m, initial=False); repo = Path(m['repo_root']).resolve()
+        check_version(m)
         with b['task_state'].lock(cls.lock_path(m)):
-            c = cls.start(source, runs_root, _held_repo=repo, **hooks)
+            c = find_run(cls, source, runs_root, local_pointer, **hooks)
+            if c is None and prepare_only: raise Error('ORPHAN_RUN_NOT_FOUND: recover never creates a new run')
+            if c is None: c = cls.start(source, runs_root, _held_repo=repo, **hooks)
             print(json.dumps({'run': str(c.path)}, ensure_ascii=False), flush=True)
             if on_created: on_created(c.path)
-            c.drive(_held_repo=repo)
+            if not prepare_only: c.drive(_held_repo=repo)
             return c
 
     def write(self): self.b['task_state'].write_json(self.path / 'state.json', self.s)
@@ -188,12 +194,14 @@ class Controller(Evidence):
         step = s['calls'].get(key); directory = self.artifact('calls/' + key)
         if step is None:
             if not self.ready(): raise Halt('BLOCKED', 'Qwen health/tokenizer unavailable; no cloud dispatch')
-            if not provider.quota(self.m, config, self.b): raise Halt('PAUSED_QUOTA', 'provider quota missing/exhausted under policy')
+            local = config['provider'] == 'qwen'
+            if not local and not provider.quota(self.m, config, self.b): raise Halt('PAUSED_QUOTA', 'provider quota missing/exhausted under policy')
             a = s['allocations'][self.m['units'][i]['id']]
-            if a['upper_spent'] + 1 > a['upper_max']: raise Halt('LIMIT_REACHED', 'unit allocation exhausted')
+            spent, maximum = ('qwen_spent', 'qwen_max') if local else ('upper_spent', 'upper_max')
+            if a[spent] + 1 > a[maximum]: raise Halt('LIMIT_REACHED', 'unit allocation exhausted')
             self.b['task_state'].atomic_bytes(directory / 'packet.json', data)
             step = {'status': 'INTENT', 'provider': config['provider'], 'model': config['model'], 'packet_sha256': digest(data), 'raw_sha256': None}
-            a['upper_spent'] += 1; s['calls'][key] = step; self.mark()
+            a[spent] += 1; s['calls'][key] = step; self.mark()
             try:
                 raw = self.cloud(config['provider'], config, packet, directory, self.remaining(), self.m['limits']['output_bytes'])
             except Exception as error: raise Halt('UNKNOWN_DELIVERY', 'provider returned no durable response: ' + str(error)) from error
@@ -304,6 +312,7 @@ class Controller(Evidence):
 
     def drive(self, _held_repo=None, clear_stop=False):
         check_design(); check_child_design()
+        check_version(self.m)
         runtime_paths(self.m, self.path.parent)
         if _held_repo is not None and _held_repo != self.repo: raise Error('held repo mismatch')
         with (nullcontext() if _held_repo is not None else self.b['task_state'].lock(self.lock_path(self.m))):

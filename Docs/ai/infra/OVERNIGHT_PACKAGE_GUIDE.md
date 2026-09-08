@@ -4,12 +4,20 @@ D059 controllerは承認済みworkpackage内を連続処理する。仕様やPha
 最初の準備は、ユーザーが選んだ上位担当がこのガイドと承認済み設計を使って行う。
 準備後の実装ループには人間のチャット入力は不要。
 
+D060以降の新規設定はversion 2を使う。上位計画と3回の子レビューを使うversion 1は
+旧run互換用。利用者の操作は `OVERNIGHT_QUICKSTART.md` にまとめる。
+version 2: plannerはprovider=qwen/model=local-qwen/executable=現在のPython絶対パス、
+plan_attempts=1、上位予約は2/unit、Qwen予約は1+runner_launches*2*(max_fixes+1)。
+最初の1は計画/テスト案生成。上位Reviewerは設定済みupper_review_modelsから選ぶ。
+入力はtokenizerで事前確認し、Qwenの出力長との合計が上限内に入るunitとする。
+レビューの否認や曖昧な判断を追加上位呼出しで自動再試行しない。
+
 ## 担当への依頼例
 
 > AGENTS.mdを読み、ai_status.py implement / infraから現行の承認済み範囲を確認する。
-> D059の承認済み設計に従い、この範囲のordered workpackageを作成する。
+> D060の承認済み設計に従い、この範囲のversion 2 ordered workpackageを作成する。
 > 仕様に未決の判断が必要な部分は含めず、OPEN_QUESTIONSへ記録する。
-> 実装はQwen、通常の計画はSol、独立承認は別modelを使う。Astraを通常運転へ割り当てない。
+> 実装と計画/テスト案はQwen、通常の上位承認はSolを使う。Astraを通常運転へ割り当てない。
 > 作業単位のacceptance/invariants/既存baseline tests/書込み範囲を先に固定し、
 > 各単位に空のtest_slotと有限runner_launchesを割り当てる。
 > 送信が許可された範囲だけをprovider別cloud_readへ列挙する。
@@ -21,7 +29,8 @@ Solが書いた詳細設計にStatus: APPROVEDを付けるのは別modelのRevie
 
 ## 固定する内容
 
-正確なキー、型、hashと復旧規則は `../design/OVERNIGHT_SUPERVISOR_DESIGN.md` が唯一の契約。
+共通のキー、型、hashは `../design/OVERNIGHT_SUPERVISOR_DESIGN.md`、
+version 2の差分と復旧規則は `../design/INFRA_EFFICIENT_OVERNIGHT_DESIGN.md` を参照する。
 unit.templateは既存v1のfull contract。riskはred。初期read_list/allow_edit/既存testsは実在し、
 allow_newとtest_slotは未存在。test_slotは宣言済み既存testディレクトリ下の新規Pythonファイル。
 既存testsや基盤scripts、Docs/ai、AGENTS、設定は編集させない。

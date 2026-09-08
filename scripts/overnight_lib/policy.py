@@ -5,6 +5,7 @@ import copy
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from autodev_lib.policy import (Error, ROOT, digest, exact, integer, number,
@@ -61,9 +62,32 @@ def deny_write(name):
 
 
 def allocation(m, unit):
+    if m['version'] == 2:
+        return {'upper_max': 2, 'qwen_max': 1 + unit['runner_launches'] * 2 * (unit['template']['limits']['max_fixes'] + 1),
+                'upper_spent': 0, 'qwen_spent': 0}
     return {'upper_max': 2 * m['limits']['plan_attempts'] + 3,
             'qwen_max': unit['runner_launches'] * 2 * (unit['template']['limits']['max_fixes'] + 1),
             'upper_spent': 0, 'qwen_spent': 0}
+
+
+def check_version(m):
+    if m['version'] == 1: return
+    safe = load_agent(Path(m['agent_root']))['task_contract'].safe_path
+    meta = loads(safe(ROOT, 'Docs/ai/infra/efficient.json').read_bytes())
+    exact(meta, 'design review design_sha256 review_sha256')
+    for kind in ('design', 'review'):
+        name = meta[kind]
+        if not isinstance(name,str) or '\\' in name or '..' in name.split('/') or Path(name).is_absolute():
+            raise Error('D060 approval path invalid')
+        sha(meta[kind + '_sha256'])
+        p = safe(ROOT, meta[kind])
+        if p.suffix != '.md' or not p.is_file() or digest(p.read_bytes()) != meta[kind + '_sha256']:
+            raise Error('D060 independent approval bytes changed')
+    review = (ROOT/meta['review']).read_text(encoding='utf-8')
+    if (not re.fullmatch(r'Status: APPROVED(?:\s+—.*)?', (ROOT/meta['design']).read_text(encoding='utf-8').splitlines()[0]) or
+            not re.search(r'^Verdict: APPROVED\s*$',review,re.M) or meta['design'] not in review or
+            meta['design_sha256'] not in review.lower() or not re.search(r'^Actual reviewer: Reviewer / Sol \(`gpt-5\.6-sol`\)\s*$',review,re.M)):
+        raise Error('D060 approval missing')
 
 
 def runtime_paths(m, runs_root):
@@ -91,7 +115,7 @@ def inputs(unit):
 
 def validate(m, initial=True):
     exact(m, 'version issuer repo_root agent_root not_before expires_at limits providers quota_policy units')
-    integer(m['version'], 1, 1); nonempty(m['issuer'])
+    integer(m['version'], 1, 2); nonempty(m['issuer'])
     for key in ('not_before', 'expires_at'): number(m[key], 0, 1e12)
     if m['not_before'] >= m['expires_at']: raise Error('invalid authorization interval')
     repo = Path(m['repo_root']); agent = Path(m['agent_root'])
@@ -104,11 +128,16 @@ def validate(m, initial=True):
                       ('plan_attempts', 1, 3), ('packet_bytes', 1024, 262144), ('output_bytes', 1024, 1048576)]:
         integer(limits[k], lo, hi)
     exact(m['providers'], 'planner reviewer')
-    for config in m['providers'].values():
+    for role, config in m['providers'].items():
         exact(config, 'provider model executable cloud_read')
-        if config['provider'] not in ('gpt', 'claude'): raise Error('invalid provider')
-        if not isinstance(config['model'], str) or not re.fullmatch(
-                ('gpt-' if config['provider'] == 'gpt' else 'claude-') + r'[a-z0-9][a-z0-9.-]*', config['model']):
+        local = m['version'] == 2 and role == 'planner'
+        if local:
+            if config['provider'] != 'qwen' or config['model'] != 'local-qwen': raise Error('v2 requires Qwen planner')
+            if Path(config['executable']).resolve() != Path(sys.executable).resolve(): raise Error('local planner requires current Python')
+            if limits['plan_attempts'] != 1: raise Error('v2 has one plan approval attempt')
+        elif config['provider'] not in ('gpt', 'claude'): raise Error('invalid provider')
+        if not local and (not isinstance(config['model'], str) or not re.fullmatch(
+                ('gpt-' if config['provider'] == 'gpt' else 'claude-') + r'[a-z0-9][a-z0-9.-]*', config['model'])):
             raise Error('explicit model ID required')
         exe = Path(config['executable'])
         if not exe.is_absolute() or not exe.is_file() or exe.suffix.lower() in ('.cmd', '.bat', '.ps1'):

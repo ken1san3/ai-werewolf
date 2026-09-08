@@ -55,9 +55,12 @@ class Evidence:
             previous = self.raw(f'u{index}-a{attempt-1}-reviewer')['result']
             if previous['verdict'] != 'REVISE': raise Error('retry lacks REVISE')
             feedback = previous['reason']
+        completed = self.s['receipts'][:index]
+        if self.m['version'] == 2:
+            completed = [{k:r[k] for k in ('unit_id', 'outputs', 'child_state_sha256', 'post_sha256')} for r in completed]
         value = {'version': 1, 'stage': stage, 'package_sha256': self.s['package_sha256'],
                  'unit_id': self.m['units'][index]['id'], 'index': index, 'attempt': attempt,
-                 'unit': self.m['units'][index], 'completed': self.s['receipts'][:index],
+                 'unit': self.m['units'][index], 'completed': completed,
                  'feedback': feedback, 'files': files, 'source_sha256': digest(self.source_before(index))}
         if stage == 'reviewer': value['proposal'] = proposed
         return value
@@ -211,20 +214,25 @@ class Evidence:
                 if h is not None: raise Error('future file was not initially absent')
             else: sha(h)
         if not isinstance(s['receipts'], list) or len(s['receipts']) != s['index']: raise Error('receipt/index mismatch')
-        if not isinstance(s['calls'], dict) or len(s['calls']) > self.m['limits']['upper_calls']: raise Error('invalid calls')
+        cap = self.m['limits']['upper_calls'] + (len(self.m['units']) if self.m['version'] == 2 else 0)
+        if not isinstance(s['calls'], dict) or len(s['calls']) > cap: raise Error('invalid calls')
         spent = {u['id']: allocation(self.m, u) for u in self.m['units']}
         for key, call in s['calls'].items():
-            i = self.verify_call(key, call); spent[self.m['units'][i]['id']]['upper_spent'] += 1
+            i = self.verify_call(key, call)
+            spent[self.m['units'][i]['id']]['qwen_spent' if call['provider'] == 'qwen' else 'upper_spent'] += 1
         expected = dict(self.initial['expected'])
         for i, receipt in enumerate(s['receipts']):
-            exact(receipt, 'unit_id proposal child outputs child_state_sha256')
+            exact(receipt, 'unit_id proposal child outputs child_state_sha256' +
+                  (' post_sha256' if self.m['version'] == 2 else ''))
+            if self.m['version'] == 2 and digest(self.artifact(f'children/u{i}/post.json').read_bytes()) != receipt['post_sha256']:
+                raise Error('completed post evidence changed')
             if receipt['unit_id'] != self.m['units'][i]['id']: raise Error('receipt order changed')
             self.verify_proposal(receipt['proposal'], i, True)
             c = self.verify_child(receipt['child'], i, receipt['proposal'])
             if c is None or digest((c.path / 'state.json').read_bytes()) != receipt['child_state_sha256']: raise Error('completed child state changed')
             if receipt['outputs'] != self.child_outputs(c, i, receipt['proposal']): raise Error('receipt outputs changed')
             expected.update(receipt['outputs'])
-            spent[receipt['unit_id']]['upper_spent'] += 3
+            spent[receipt['unit_id']]['upper_spent'] += receipt['child']['upper_grant']
             spent[receipt['unit_id']]['qwen_spent'] += receipt['child']['qwen_grant']
         active = s['resume_phase'] if s['phase'] in PAUSED else s['phase']
         if s['proposal'] is not None:
@@ -238,7 +246,7 @@ class Evidence:
         if s['child'] is not None:
             if s['proposal'] is None or s['proposal']['approval'] is None: raise Error('child lacks approval')
             self.verify_child(s['child'], s['index'], s['proposal'])
-            a = spent[self.m['units'][s['index']]['id']]; a['upper_spent'] += 3; a['qwen_spent'] += s['child']['qwen_grant']
+            a = spent[self.m['units'][s['index']]['id']]; a['upper_spent'] += s['child']['upper_grant']; a['qwen_spent'] += s['child']['qwen_grant']
         if s['expected'] != expected: raise Error('expected source hashes not reconstructible')
         if not isinstance(s['allocations'], dict) or set(s['allocations']) != set(spent): raise Error('invalid allocation records')
         for a in s['allocations'].values():
