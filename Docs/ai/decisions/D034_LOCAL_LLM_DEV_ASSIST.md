@@ -2,7 +2,9 @@
 
 ## Status
 
-Superseded by D057（2026-09-07、用途制限とモデル割当）。以下は当時の履歴。
+Historical development-helper record. The local implementation runner was removed by D065 on
+2026-09-09. The configuration facts below are retained as optional migration evidence and
+are not an active instruction to start or use a local model.
 生ログでの成否判定、対象を勝手に減らさない原則、LLM非依存のゲーム/CIは継続する。
 
 ## Context

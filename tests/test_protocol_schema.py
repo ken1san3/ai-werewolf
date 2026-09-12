@@ -7,10 +7,24 @@ import unittest
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
+from server.network.protocol import (
+    PROTOCOL_VERSION,
+    SCHEMA_PATH as ACTIVE_SERVER_SCHEMA_PATH,
+    ProtocolMessageValidator,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json"
+LEGACY_SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
+REQUEST_EVENT_ID = "123e4567-e89b-12d3-a456-426614174002"
+NON_CANONICAL_REQUEST_IDS = (
+    "123e4567e89b12d3a456426614174002",
+    "{123e4567-e89b-12d3-a456-426614174002}",
+    "urn:uuid:123e4567-e89b-12d3-a456-426614174002",
+    "123E4567-E89B-12D3-A456-426614174002",
+    "not-a-uuid",
+)
 
 
 class ProtocolSchemaTests(unittest.TestCase):
@@ -19,17 +33,36 @@ class ProtocolSchemaTests(unittest.TestCase):
         self.client_validator = self.make_validator("client_request")
         self.server_validator = self.make_validator("server_event")
 
-    def test_schema_declares_language_independent_protocol_version_policy(self) -> None:
+    def test_schema_declares_exact_language_independent_protocol_version(self) -> None:
         self.assertEqual(
             self.schema["$schema"], "https://json-schema.org/draft/2020-12/schema"
         )
-        self.assertEqual(self.schema["$id"], "urn:aiwolf:protocol:1.0")
-        self.assertIn("major versions", self.schema["description"])
+        self.assertEqual(self.schema["$id"], "urn:aiwolf:protocol:1.1")
+        self.assertIn("exact protocol version 1.1", self.schema["description"])
         self.assertIn("only by seq", self.schema["description"])
         self.assertEqual(
-            self.schema["$defs"]["protocol_version"]["pattern"],
-            "^[0-9]+\\.[0-9]+$",
+            self.schema["$defs"]["protocol_version"]["const"],
+            "1.1",
         )
+        self.assertEqual(PROTOCOL_VERSION, "1.1")
+        self.assertEqual(ACTIVE_SERVER_SCHEMA_PATH, SCHEMA_PATH)
+        self.assertEqual(
+            self.schema["$defs"]["uuid"]["pattern"],
+            "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        )
+
+    def test_legacy_1_0_schema_still_validates_recorded_envelopes(self) -> None:
+        legacy_schema = json.loads(LEGACY_SCHEMA_PATH.read_text(encoding="utf-8"))
+        legacy_validator = self.make_validator("server_event", legacy_schema)
+        recorded = self.make_server_event(
+            event_type="session.ready",
+            payload={"player_id": "player-0", "ready": True},
+            protocol_version="1.0",
+        )
+
+        self.assert_valid(legacy_validator, recorded)
+        self.assert_invalid(self.server_validator, recorded)
+        ProtocolMessageValidator(schema_path=LEGACY_SCHEMA_PATH).validate_server(recorded)
 
     def test_server_event_requires_common_envelope_and_positive_seq(self) -> None:
         event = self.make_server_event()
@@ -81,17 +114,88 @@ class ProtocolSchemaTests(unittest.TestCase):
     def test_action_rejected_requires_machine_readable_action_and_reason(self) -> None:
         rejected = self.make_server_event(
             event_type="action.rejected",
-            payload={"action": "ability.use", "reason": "invalid_target"},
+            payload={
+                "action": "ability.use",
+                "reason": "invalid_target",
+                "request_event_id": REQUEST_EVENT_ID,
+            },
         )
         self.assert_valid(self.server_validator, rejected)
         self.assert_invalid(
             self.server_validator,
-            dict(rejected, payload={"action": "ability.use"}),
+            dict(
+                rejected,
+                payload={"action": "ability.use", "request_event_id": REQUEST_EVENT_ID},
+            ),
         )
         self.assert_invalid(
             self.server_validator,
-            dict(rejected, payload={"action": "", "reason": "invalid_target"}),
+            dict(
+                rejected,
+                payload={
+                    "action": "",
+                    "reason": "invalid_target",
+                    "request_event_id": REQUEST_EVENT_ID,
+                },
+            ),
         )
+
+    def test_phase3_5_acceptance_and_rejection_payloads_are_strict(self) -> None:
+        accepted = self.make_server_event(
+            event_type="action.accepted",
+            payload={"action": "vote.cast", "request_event_id": REQUEST_EVENT_ID},
+        )
+        rejected = self.make_server_event(
+            event_type="action.rejected",
+            payload={
+                "action": "vote.cast",
+                "reason": "action_deadline_passed",
+                "request_event_id": None,
+            },
+        )
+        self.assert_valid(self.server_validator, accepted)
+        self.assert_valid(self.server_validator, rejected)
+
+        for invalid_payload in (
+            {"action": "vote.cast"},
+            {"action": "vote.cast", "request_event_id": None},
+            {"action": "chat.send", "request_event_id": REQUEST_EVENT_ID},
+            {
+                "action": "vote.cast",
+                "request_event_id": REQUEST_EVENT_ID,
+                "extra": True,
+            },
+            *(
+                {"action": "vote.cast", "request_event_id": event_id}
+                for event_id in NON_CANONICAL_REQUEST_IDS
+            ),
+        ):
+            with self.subTest(accepted_payload=invalid_payload):
+                self.assert_invalid(
+                    self.server_validator, dict(accepted, payload=invalid_payload)
+                )
+
+        for invalid_payload in (
+            {"action": "vote.cast", "reason": "invalid_target"},
+            *(
+                {
+                    "action": "vote.cast",
+                    "reason": "invalid_target",
+                    "request_event_id": event_id,
+                }
+                for event_id in NON_CANONICAL_REQUEST_IDS
+            ),
+            {
+                "action": "vote.cast",
+                "reason": "invalid_target",
+                "request_event_id": REQUEST_EVENT_ID,
+                "extra": True,
+            },
+        ):
+            with self.subTest(rejected_payload=invalid_payload):
+                self.assert_invalid(
+                    self.server_validator, dict(rejected, payload=invalid_payload)
+                )
 
     def test_common_identifiers_version_and_timestamp_are_validated(self) -> None:
         event = self.make_server_event()
@@ -112,11 +216,14 @@ class ProtocolSchemaTests(unittest.TestCase):
 
     @staticmethod
     def make_server_event(
-        *, event_type: str = "player.list", payload: dict[str, object] | None = None
+        *,
+        event_type: str = "player.list",
+        payload: dict[str, object] | None = None,
+        protocol_version: str = "1.1",
     ) -> dict[str, object]:
         return {
             "type": event_type,
-            "protocol_version": "1.0",
+            "protocol_version": protocol_version,
             "event_id": "123e4567-e89b-12d3-a456-426614174000",
             "game_id": "123e4567-e89b-12d3-a456-426614174001",
             "seq": 1,
@@ -128,8 +235,8 @@ class ProtocolSchemaTests(unittest.TestCase):
     def make_client_request(*, event_type: str = "ability.use") -> dict[str, object]:
         return {
             "type": event_type,
-            "protocol_version": "1.0",
-            "event_id": "123e4567-e89b-12d3-a456-426614174002",
+            "protocol_version": "1.1",
+            "event_id": REQUEST_EVENT_ID,
             "game_id": "123e4567-e89b-12d3-a456-426614174001",
             "timestamp": 0,
             "payload": {},

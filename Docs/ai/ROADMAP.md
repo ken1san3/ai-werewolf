@@ -285,6 +285,9 @@ LLM 無しで動く Dummy Brain を置き、Phase 4 の LLM Brain が同じ境�
 
 完了条件: AI 9人で自動ゲーム完走。OPEN_QUESTIONS Q8 の実測を行う
 
+Status: **COMPLETE** — T154 exact canonical-9B standard Q8 PASS; T155 fresh closure review APPROVED.
+Phase 6 work begins only after the user-authorized Phase 5 Git checkpoint is committed and pushed.
+
 # Phase 6 — 議論品質
 
 Belief / Suspicion / Strategy / 重要イベント記憶 / 反応スコア /

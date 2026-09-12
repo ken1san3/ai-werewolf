@@ -11,6 +11,84 @@ from scripts import ai_status, check_docs
 
 
 class DesignGateTests(unittest.TestCase):
+    def test_integrator_bootstrap_sections_exist(self) -> None:
+        state = ai_status.read(ai_status.AI / "CURRENT_STATE.md")
+        for heading in (
+            "Current Phase",
+            "Current Target",
+            "Current Blockers",
+            "Test Status",
+            "Next Integration Action",
+        ):
+            self.assertTrue(ai_status.section(state, heading), heading)
+
+    def test_t001_packet_declares_approved_design_gate(self) -> None:
+        packet = ai_status.read(
+            ai_status.AI / "tasks" / "T001_PHASE3_4_REACTION_CHAT.md"
+        )
+        self.assertIn("Task ID: T001", packet)
+        self.assertIn("Design Gate status: APPROVED", packet)
+
+    def test_all_responsibility_entries_map_to_runbook_sections(self) -> None:
+        self.assertEqual(
+            ai_status.ROLE_SECTIONS,
+            {
+                "integrate": "1",
+                "architect": "2",
+                "design": "2",
+                "implement": "3",
+                "review": "4",
+                "fix": "5",
+                "test": "6",
+                "investigate": "7",
+            },
+        )
+
+    def test_task_records_are_model_neutral_board_records(self) -> None:
+        board = (
+            "## T001\n\n"
+            "Task ID: T001\n"
+            "Title: bounded work\n"
+            "Role: Implementer\n"
+            "State: READY\n"
+            "Task packet: `Docs/ai/tasks/T001.md`\n"
+        )
+        self.assertEqual(
+            ai_status.task_records(board),
+            [
+                {
+                    "Header ID": "T001",
+                    "Task ID": "T001",
+                    "Title": "bounded work",
+                    "Role": "Implementer",
+                    "State": "READY",
+                    "Task packet": "`Docs/ai/tasks/T001.md`",
+                }
+            ],
+        )
+
+    def test_decision_required_remains_visible_without_blocking_ready_tasks(self) -> None:
+        board = (
+            "## T001\n\nTask ID: T001\nTitle: waiting\nRole: Architect\n"
+            "State: DECISION_REQUIRED\nTask packet: `Docs/ai/tasks/T001.md`\n\n"
+            "## T002\n\nTask ID: T002\nTitle: independent\nRole: Tester\n"
+            "State: READY\nTask packet: `Docs/ai/tasks/T002.md`\n"
+        )
+        live = [
+            record["Task ID"]
+            for record in ai_status.task_records(board)
+            if record.get("State") in ai_status.LIVE_TASK_STATES
+        ]
+        self.assertEqual(live, ["T001", "T002"])
+
+    def test_current_task_board_passes_consistency_checks(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+
+        check_docs.check_task_board()
+
+        self.assertEqual(check_docs.problems, [])
+
     def test_status_requires_exact_vocabulary(self) -> None:
         path = Path("design.md")
         for value in ("APPROVED 待ち", "DESIGN REVIEW: APPROVED", "おはよう"):
@@ -144,6 +222,19 @@ class DesignGateTests(unittest.TestCase):
             check_docs.check_design_target()
         self.assertEqual(check_docs.problems, [])
 
+    def test_docs_checker_accepts_top_level_phase_heading(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        with (
+            patch.object(check_docs, "read", return_value="# Phase 4 — Local LLM\n"),
+            patch.object(check_docs.ai_status, "target_subphase", return_value="4"),
+            patch.object(check_docs.ai_status, "design_gate", return_value="REQUIRED"),
+            patch.object(check_docs.ai_status, "design_gate_documents", return_value=[]),
+        ):
+            check_docs.check_design_target()
+        self.assertFalse(any("ROADMAP 節が無い" in problem for problem in check_docs.problems))
+        self.assertTrue(any("REQUEST が無い" in problem for problem in check_docs.problems))
+
     def test_docs_checker_rejects_gate_request_mismatches(self) -> None:
         check_docs.problems.clear()
         self.addCleanup(check_docs.problems.clear)
@@ -251,6 +342,32 @@ class DesignGateTests(unittest.TestCase):
         self.assertIn("approved: yes", rendered)
         self.assertIn("implementation: allowed", rendered)
 
+    def test_print_design_gate_omits_historical_executor_attribution(self) -> None:
+        output = io.StringIO()
+        request = Path("PHASE3_4_REACTION_CHAT_REQUEST.md")
+        design = Path("PHASE3_4_REACTION_CHAT_DESIGN.md")
+        state = (
+            "Target subphase: 3.4\n"
+            "Target design: PHASE3_4_REACTION_CHAT_DESIGN.md\n"
+            "Design gate: REQUIRED\n"
+        )
+        with (
+            patch.object(ai_status, "design_gate_documents", return_value=[request]),
+            patch.object(ai_status, "target_design_request", return_value=request),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(
+                ai_status,
+                "design_status",
+                return_value=("APPROVED — Reviewer / ExampleModel", True),
+            ),
+            redirect_stdout(output),
+        ):
+            ai_status.print_design_gate(state)
+
+        rendered = output.getvalue()
+        self.assertIn("Status: APPROVED", rendered)
+        self.assertNotIn("ExampleModel", rendered)
+
     def test_required_gate_without_named_target_design_is_blocked(self) -> None:
         output = io.StringIO()
         with patch.object(ai_status, "design_gate_documents", return_value=[Path("request.md")]):
@@ -293,6 +410,8 @@ class DesignGateTests(unittest.TestCase):
                 return state
             if path == check_docs.DOCS / "REVIEW_INBOX.md":
                 return "## Open\n\n現在、OPEN / IN_PROGRESS の指摘はありません。\n"
+            if path == check_docs.TASK_BOARD:
+                return "# Task Board\n"
             raise AssertionError(f"unexpected read: {path}")
 
         with patch.object(check_docs, "read", side_effect=read):
@@ -311,6 +430,29 @@ class DesignGateTests(unittest.TestCase):
                 return state
             if path == check_docs.DOCS / "REVIEW_INBOX.md":
                 return inbox
+            raise AssertionError(f"unexpected read: {path}")
+
+        with patch.object(check_docs, "read", side_effect=read):
+            check_docs.check_known_failures_have_active_review()
+
+        self.assertEqual(check_docs.problems, [])
+
+    def test_docs_checker_accepts_known_failure_with_live_investigator(self) -> None:
+        check_docs.problems.clear()
+        self.addCleanup(check_docs.problems.clear)
+        state = "## Test Status\nKnown failing: T003 completion\n\n## Latest Review\n"
+        board = (
+            "## T003\n\nTask ID: T003\nTitle: isolate\nRole: Investigator\n"
+            "State: IN_PROGRESS\nTask packet: `Docs/ai/tasks/T003.md`\n"
+        )
+
+        def read(path: Path) -> str:
+            if path == check_docs.CURRENT_STATE:
+                return state
+            if path == check_docs.DOCS / "REVIEW_INBOX.md":
+                return "## Open\n"
+            if path == check_docs.TASK_BOARD:
+                return board
             raise AssertionError(f"unexpected read: {path}")
 
         with patch.object(check_docs, "read", side_effect=read):

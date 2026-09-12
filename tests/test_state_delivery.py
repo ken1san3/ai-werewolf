@@ -9,6 +9,7 @@ from websockets.asyncio.client import connect
 
 from server.aiwolf_core import EventVisibility, GameEvent, GamePhase
 from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGameServer
+from server.network.delivery import EventDeliveryRouter
 from server.network.protocol import ProtocolMessageValidator, ProtocolValidationError
 from server.network.session import UnaddressableRequest
 from tests.test_network_sessions import GAME_ID, client_message, join_message, make_game
@@ -99,13 +100,14 @@ class PlayerViewTests(unittest.TestCase):
         game = make_game()
         wolf = role_player(game, "werewolf")
         villager = role_player(game, "villager")
-        game.submit_chat(wolf, "wolf", "private chat")
+        game.submit_chat(game.phase_started_at, wolf, "wolf", "private chat")
         game._enter_phase(GamePhase.DAY, 10)
-        game.submit_chat(villager, "public", "public chat")
+        game.submit_chat(11, villager, "public", "public chat")
         for player_id, expected in ((wolf, ["private chat", "public chat"]), (villager, ["public chat"])):
             chats = [entry["payload"]["message"]["message"] for entry in game.get_state_sync(player_id)["history"]
                      if entry["type"] == "chat.message"]
             self.assertEqual(chats, expected)
+
 
     def test_phase_actions_match_core_including_guard_constraints_and_dead_players(self):
         game = make_game()
@@ -125,6 +127,41 @@ class PlayerViewTests(unittest.TestCase):
         game._enter_phase(GamePhase.NIGHT, 20)
         game._record_player_death(guard, "attacked")
         self.assertEqual(game.get_action_state(guard)["actions"], [])
+
+
+class DeliveryMetadataTests(unittest.TestCase):
+    def test_chat_acceptance_is_internal_metadata_and_server_publication_has_none(self):
+        game = make_game()
+        game.day = 1
+        game._enter_phase(GamePhase.DAY, 10)
+        submission = game.submit_chat(11, "player-0", "public", "hello")
+        router = EventDeliveryRouter(
+            {game.game_id: game},
+            connected_player_ids=lambda game_id: tuple(game.players),
+        )
+
+        router.queue_channel_message(
+            game.game_id,
+            submission.channel_id,
+            submission.message,
+            acceptance=submission.acceptance,
+        )
+        accepted_delivery = router.drain()[0]
+        self.assertIs(accepted_delivery.acceptance, submission.acceptance)
+        self.assertEqual(
+            accepted_delivery.payload,
+            {"channel": "public", "message": submission.message},
+        )
+        self.assertNotIn("accepted_at", json.dumps(accepted_delivery.payload))
+        self.assertNotIn("phase_deadline", json.dumps(accepted_delivery.payload))
+
+        router.queue_channel_message(game.game_id, "public", {"text": "server message"})
+        server_delivery = router.drain()[0]
+        self.assertIsNone(server_delivery.acceptance)
+        self.assertEqual(
+            server_delivery.payload,
+            {"channel": "public", "message": {"text": "server message"}},
+        )
 
 
 class StateSchemaTests(unittest.TestCase):
@@ -214,7 +251,19 @@ class StateWebSocketTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(messages[-1]["payload"], self.game.get_action_state(player_id))
             await first.send(json.dumps(client_message("ability.use", {"ability_id": "protect", "target_player_ids": [wolf]})))
             await first.send(json.dumps(client_message("session.ready", {})))
-            self.assertEqual((await self.receive(first))["type"], "session.ready")
+            accepted = await self.receive(first)
+            self.assertEqual(accepted["type"], "action.accepted")
+            self.assertEqual(accepted["seq"], 7)
+            self.assertEqual(
+                accepted["payload"],
+                {
+                    "action": "ability.use",
+                    "request_event_id": "123e4567-e89b-12d3-a456-426614174101",
+                },
+            )
+            ready = await self.receive(first)
+            self.assertEqual(ready["type"], "session.ready")
+            self.assertEqual(ready["seq"], 8)
             self.assertIn(guard, self.game.pending_actions)
             with self.assertRaises(asyncio.TimeoutError):
                 await asyncio.wait_for(first.recv(), timeout=0.03)
@@ -236,8 +285,10 @@ class StateWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.game.submit_action(11, seer, "inspect", (villager,))
         self.game.advance_if_due(self.game.phase_ends_at)
         self.game._enter_phase(GamePhase.DAY, self.game.phase_ends_at)
-        self.game.declare_co(seer, "seer", "my claim")
-        self.game.report_co(seer, "inspect_result", villager, "not_wolf")
+        self.game.declare_co(self.game.phase_started_at, seer, "seer", "my claim")
+        self.game.report_co(
+            self.game.phase_started_at, seer, "inspect_result", villager, "not_wolf"
+        )
         self.game._record_player_death(villager, "sudden_death")
         await self.server.publish_channel_message(GAME_ID, "public", {"text": "offline public"})
         await self.server.publish_channel_message(GAME_ID, "wolf", {"text": "offline wolves"})

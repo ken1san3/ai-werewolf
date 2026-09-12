@@ -14,12 +14,21 @@ from referencing import Registry, Resource
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
+LEGACY_SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json"
+_SCHEMA_PATHS_BY_VERSION = {
+    "1.0": LEGACY_SCHEMA_PATH,
+    "1.1": PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json",
+}
 _VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+$")
 
 
 class ProtocolValidationError(ValueError):
     """A message does not satisfy the canonical language-independent schema."""
+
+
+class ProtocolVersionMismatchError(ProtocolValidationError):
+    """A validly encoded envelope names a version other than this validator's."""
 
 
 class ProtocolMessageValidator:
@@ -43,10 +52,16 @@ class ProtocolMessageValidator:
         self.reject_unknown_types = reject_unknown_types
         self.client_definitions = _message_definitions(loaded, "client_request")
         self.server_definitions = _message_definitions(loaded, "server_event")
-        # action.rejected is declared by the server_event conditional in the
-        # canonical schema rather than as a separate allOf definition.
+        self._payload_definitions = {
+            message_type: definition
+            for message_type, definition in (
+                ("action.accepted", "action_accepted_payload"),
+                ("action.rejected", "action_rejected_payload"),
+            )
+            if definition in loaded.get("$defs", {})
+        }
         self._known_server_types = frozenset(
-            {*self.server_definitions, "action.rejected"}
+            {*self.server_definitions, *self._payload_definitions}
         )
         self._registry = Registry().with_resource(
             schema_id, Resource.from_contents(loaded)
@@ -54,7 +69,7 @@ class ProtocolMessageValidator:
         definitions = {
             "client_request",
             "server_event",
-            "action_rejected_payload",
+            *self._payload_definitions.values(),
             *self.client_definitions.values(),
             *self.server_definitions.values(),
         }
@@ -66,6 +81,20 @@ class ProtocolMessageValidator:
             )
             for definition in definitions
         }
+
+    @classmethod
+    def for_version(
+        cls,
+        protocol_version: str,
+        *,
+        reject_unknown_types: bool = True,
+    ) -> ProtocolMessageValidator:
+        """Select a recorded protocol schema by exact declared version."""
+
+        return cls(
+            schema_path=schema_path_for_version(protocol_version),
+            reject_unknown_types=reject_unknown_types,
+        )
 
     @property
     def protocol_version(self) -> str:
@@ -83,6 +112,7 @@ class ProtocolMessageValidator:
         return self._known_server_types
 
     def validate_client(self, message: Mapping[str, Any]) -> None:
+        self._raise_if_explicit_version_mismatch(message)
         self._validate("client_request", message)
         message_type = message.get("type")
         definition = self.client_definitions.get(message_type)
@@ -93,12 +123,14 @@ class ProtocolMessageValidator:
         self._validate(definition, message)
 
     def validate_server(self, message: Mapping[str, Any]) -> None:
+        self._raise_if_explicit_version_mismatch(message)
         self._validate("server_event", message)
         message_type = message.get("type")
         definition = self.server_definitions.get(message_type)
         if definition is None:
-            if message_type == "action.rejected":
-                self._validate("action_rejected_payload", message["payload"])
+            payload_definition = self._payload_definitions.get(message_type)
+            if payload_definition is not None:
+                self._validate(payload_definition, message["payload"])
                 return
             if self.reject_unknown_types:
                 raise ProtocolValidationError(f"unknown server message type: {message_type!r}")
@@ -126,6 +158,16 @@ class ProtocolMessageValidator:
         errors = list(self._validators[definition].iter_errors(message))
         if errors:
             raise ProtocolValidationError(best_match(errors).message)
+
+    def _raise_if_explicit_version_mismatch(self, message: Mapping[str, Any]) -> None:
+        received_version = message.get("protocol_version")
+        if (
+            isinstance(received_version, str)
+            and received_version != self.protocol_version
+        ):
+            raise ProtocolVersionMismatchError(
+                f"expected protocol {self.protocol_version}, got {received_version}"
+            )
 
 
 def make_client_request(
@@ -156,6 +198,21 @@ def make_client_request(
 
 def same_major_version(left: str, right: str) -> bool:
     return left.partition(".")[0] == right.partition(".")[0]
+
+
+def schema_path_for_version(protocol_version: str) -> Path:
+    """Return the canonical schema path for one exact recorded version."""
+
+    if not isinstance(protocol_version, str) or not _VERSION_PATTERN.fullmatch(
+        protocol_version
+    ):
+        raise ProtocolValidationError("protocol version must be major.minor")
+    try:
+        return _SCHEMA_PATHS_BY_VERSION[protocol_version]
+    except KeyError as error:
+        raise ProtocolValidationError(
+            f"unsupported recorded protocol version: {protocol_version}"
+        ) from error
 
 
 def _message_definitions(schema: Mapping[str, Any], direction: str) -> dict[str, str]:
@@ -207,9 +264,12 @@ PROTOCOL_VERSION = ProtocolMessageValidator().protocol_version
 
 __all__ = [
     "PROTOCOL_VERSION",
+    "LEGACY_SCHEMA_PATH",
     "ProtocolMessageValidator",
     "ProtocolValidationError",
+    "ProtocolVersionMismatchError",
     "SCHEMA_PATH",
     "make_client_request",
+    "schema_path_for_version",
     "same_major_version",
 ]

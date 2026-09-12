@@ -26,6 +26,7 @@ class ClientExitReason(str, Enum):
     STOPPED = "STOPPED"
     RECONNECT_EXHAUSTED = "RECONNECT_EXHAUSTED"
     INCOMPATIBLE_PROTOCOL = "INCOMPATIBLE_PROTOCOL"
+    INCOMPATIBLE_PROTOCOL_CHECKPOINT = "INCOMPATIBLE_PROTOCOL_CHECKPOINT"
     INVALID_SERVER_MESSAGE = "INVALID_SERVER_MESSAGE"
     AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
     JOIN_OUTCOME_UNKNOWN = "JOIN_OUTCOME_UNKNOWN"
@@ -55,6 +56,38 @@ class NotDeliveredError(ClientError):
 
 class DeliveryUnknownError(ClientError):
     """The socket failed after a command crossed the send boundary."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        request_event_id: str | None = None,
+        action: str | None = None,
+        connection_generation: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        supplied = (
+            request_event_id is not None,
+            action is not None,
+            connection_generation is not None,
+        )
+        if any(supplied) and not all(supplied):
+            raise ValueError("delivery-unknown attempt identity must be complete")
+        if request_event_id is not None and (
+            not isinstance(request_event_id, str) or not request_event_id
+        ):
+            raise ValueError("request_event_id must be a non-empty string")
+        if action is not None and (not isinstance(action, str) or not action):
+            raise ValueError("action must be a non-empty string")
+        if connection_generation is not None and (
+            isinstance(connection_generation, bool)
+            or not isinstance(connection_generation, int)
+            or connection_generation < 0
+        ):
+            raise ValueError("connection_generation must be a non-negative integer")
+        self.request_event_id = request_event_id
+        self.action = action
+        self.connection_generation = connection_generation
 
 
 class ConsumerOverrunError(ClientError):
@@ -140,12 +173,15 @@ class ReconnectPolicy:
 class SessionCheckpoint:
     connection_token: str
     last_seq: int
+    protocol_version: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.connection_token, str) or not self.connection_token:
             raise ValueError("connection_token must be a non-empty string")
         if isinstance(self.last_seq, bool) or not isinstance(self.last_seq, int) or self.last_seq < 0:
             raise ValueError("last_seq must be a non-negative integer")
+        if not _valid_protocol_version(self.protocol_version):
+            raise ValueError("protocol_version must be major.minor")
 
 
 class CredentialStore(Protocol):
@@ -296,17 +332,163 @@ class SequenceGapRecovered:
 
 
 @dataclass(frozen=True)
+class ActionAccepted:
+    action: str
+    request_event_id: str
+    seq: int
+    observation_connection_generation: int
+    observed_at_monotonic: float
+
+    def __post_init__(self) -> None:
+        _require_non_empty_string("action", self.action)
+        _require_non_empty_string("request_event_id", self.request_event_id)
+        _require_non_negative_int("seq", self.seq)
+        _require_non_negative_int(
+            "observation_connection_generation",
+            self.observation_connection_generation,
+        )
+        _require_finite_number("observed_at_monotonic", self.observed_at_monotonic)
+
+    @property
+    def connection_generation(self) -> int:
+        """Compatibility-shaped access shared with existing transport notices."""
+
+        return self.observation_connection_generation
+
+
+@dataclass(frozen=True)
 class ActionRejected:
     action: str
     reason: str
     seq: int
+    connection_generation: int
+    observed_at_monotonic: float
+    request_event_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_string("action", self.action)
+        _require_non_empty_string("reason", self.reason)
+        _require_non_negative_int("seq", self.seq)
+        _require_non_negative_int("connection_generation", self.connection_generation)
+        _require_finite_number("observed_at_monotonic", self.observed_at_monotonic)
+        if self.request_event_id is not None:
+            _require_non_empty_string("request_event_id", self.request_event_id)
+
+    @property
+    def observation_connection_generation(self) -> int:
+        """Name the observation generation without breaking Phase 3.4 callers."""
+
+        return self.connection_generation
+
+
+@dataclass(frozen=True)
+class ResumeRecoveryCompleted:
+    """Network facts for one replay/resume/sync recovery barrier."""
+
+    connection_generation: int
+    requested_last_seq: int
+    replay_first_seq: int | None
+    replay_last_seq: int | None
+    replay_contiguous: bool
+    replay_gap_or_floor: bool
+    resumed_seq: int
+    state_sync_seq: int
+    complete: bool = True
+
+    def __post_init__(self) -> None:
+        for name in (
+            "connection_generation",
+            "requested_last_seq",
+            "resumed_seq",
+            "state_sync_seq",
+        ):
+            _require_non_negative_int(name, getattr(self, name))
+        for name in ("replay_first_seq", "replay_last_seq"):
+            value = getattr(self, name)
+            if value is not None:
+                _require_non_negative_int(name, value)
+        if (self.replay_first_seq is None) != (self.replay_last_seq is None):
+            raise ValueError("replay range endpoints must both be present or both be absent")
+        if (
+            self.replay_first_seq is not None
+            and self.replay_last_seq is not None
+            and self.replay_first_seq > self.replay_last_seq
+        ):
+            raise ValueError("replay_first_seq must not exceed replay_last_seq")
+        for name in ("replay_contiguous", "replay_gap_or_floor", "complete"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} must be bool")
+        if self.replay_gap_or_floor and self.replay_contiguous:
+            raise ValueError("a replay cannot be both contiguous and gap/floor recovery")
+        if self.resumed_seq <= self.requested_last_seq:
+            raise ValueError("resumed_seq must follow requested_last_seq")
+        if self.state_sync_seq <= self.resumed_seq:
+            raise ValueError("state_sync_seq must follow resumed_seq")
+        if self.replay_contiguous:
+            if self.replay_first_seq is None:
+                if self.resumed_seq != self.requested_last_seq + 1:
+                    raise ValueError("empty contiguous replay must be followed by its ACK")
+            elif (
+                self.replay_first_seq != self.requested_last_seq + 1
+                or self.replay_last_seq != self.resumed_seq - 1
+            ):
+                raise ValueError("contiguous replay range must span checkpoint to ACK")
+        elif not self.replay_gap_or_floor:
+            raise ValueError("non-contiguous recovery must identify a replay gap/floor")
+        if self.replay_gap_or_floor and self.replay_first_seq is not None:
+            raise ValueError("gap/floor recovery must not publish a partial replay range")
+        if not self.complete:
+            raise ValueError("only completed recovery barriers are published")
+
+
+@dataclass(frozen=True)
+class PhaseTimingMapped:
+    phase: str
+    day: int
+    source_seq: int
+    connection_generation: int
+    action_generation: int
+    server_timestamp: int
+    phase_ends_at: int | None
+    mapped_at_monotonic: float
+    local_deadline_monotonic: float | None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_string("phase", self.phase)
+        for name in (
+            "day",
+            "source_seq",
+            "connection_generation",
+            "action_generation",
+            "server_timestamp",
+        ):
+            _require_non_negative_int(name, getattr(self, name))
+        if self.phase_ends_at is not None:
+            _require_non_negative_int("phase_ends_at", self.phase_ends_at)
+        _require_finite_number("mapped_at_monotonic", self.mapped_at_monotonic)
+        if self.local_deadline_monotonic is not None:
+            _require_finite_number(
+                "local_deadline_monotonic", self.local_deadline_monotonic
+            )
 
 
 @dataclass(frozen=True)
 class PhaseDeadlineReached:
     phase: str
     day: int
+    connection_generation: int
     action_generation: int
+    local_deadline_monotonic: float
+    reached_at_monotonic: float
+
+    def __post_init__(self) -> None:
+        _require_non_empty_string("phase", self.phase)
+        for name in ("day", "connection_generation", "action_generation"):
+            _require_non_negative_int(name, getattr(self, name))
+        _require_finite_number(
+            "local_deadline_monotonic", self.local_deadline_monotonic
+        )
+        _require_finite_number("reached_at_monotonic", self.reached_at_monotonic)
 
 
 @dataclass(frozen=True)
@@ -339,7 +521,10 @@ ClientEvent = (
     | LifecycleChanged
     | SequenceGapDetected
     | SequenceGapRecovered
+    | ActionAccepted
     | ActionRejected
+    | ResumeRecoveryCompleted
+    | PhaseTimingMapped
     | PhaseDeadlineReached
     | NotDelivered
     | DeliveryUnknown
@@ -363,9 +548,31 @@ class ClientExit:
     detail: str | None = None
 
 
-def _valid_protocol_version(value: str) -> bool:
+def _valid_protocol_version(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
     major, dot, minor = value.partition(".")
     return bool(dot and major.isdigit() and minor.isdigit())
+
+
+def _require_non_empty_string(name: str, value: object) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be a non-empty string")
+
+
+def _require_non_negative_int(name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+
+
+def _require_finite_number(name: str, value: object) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"{name} must be a finite non-negative number")
 
 
 def _thaw(value: Any) -> Any:

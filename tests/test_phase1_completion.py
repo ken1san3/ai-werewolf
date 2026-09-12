@@ -248,7 +248,7 @@ class PhaseOneCompletionTests(unittest.TestCase):
                 if target_player_id in vote_action.valid_targets
                 else vote_action.valid_targets[0]
             )
-            game.submit_vote(player_id, selected_target)
+            game.submit_vote(game.phase_ends_at - 1, player_id, selected_target)
 
     def submit_dummy_night_actions(self, game: GameState) -> None:
         """Submit the first selectable ability for every actor's one-action reservation."""

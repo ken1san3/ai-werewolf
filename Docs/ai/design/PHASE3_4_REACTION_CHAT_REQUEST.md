@@ -6,7 +6,7 @@ Status: REQUESTED — 成果物 `PHASE3_4_REACTION_CHAT_DESIGN.md` が
 Reviewer の `DESIGN REVIEW: APPROVED` を得るまで実装へ渡らない（RUNBOOK §4.3）。
 **承認は Claude が付ける**（D053。設計を書いた model と別の model が承認する）。
 
-Request status: OPEN
+Request status: CLOSED
 
 **2026-09-05 改訂（Reviewer / Claude）。** 初版は Constraints と Q2 / Q6 が両立せず、
 Sol が `DESIGN BLOCKED` で正しく止めた（R-20260905-07）。**原因は Reviewer にある。**

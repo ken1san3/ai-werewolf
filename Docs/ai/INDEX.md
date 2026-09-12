@@ -1,71 +1,73 @@
 # AI Documentation Index
 
-AIエージェントが「どのファイルを読むか」だけを決める詳細索引。
-内容そのものはここに書かない。セッションの動的入口は必ず
-`python scripts/ai_status.py <role>` を使い、この索引を毎回は読まない。
+This is the routing index for repository-backed external memory. A new session reads in
+this order and stops when it has the task-specific context it needs:
 
-## Session entry
+```text
+AGENTS.md
+  -> python scripts/ai_status.py <entry>
+  -> CURRENT_STATE.md
+  -> TASKS.md and the named task packet
+  -> relevant ARCHITECTURE.md section and role contract
+  -> only the canonical/design/decision/handoff files named by that packet
+```
 
-- bootstrap / 恒久ルール: `../../AGENTS.md`
-- 動的状態と役割別手順: `../../scripts/ai_status.py`
+Do not preload the entire documentation tree.
 
-`ai_status.py` が `CURRENT_STATE.md` / `REVIEW_INBOX.md` / `OPEN_QUESTIONS.md` の
-必要部分と、指定roleの `RUNBOOK.md` 節を直接出力する。
+The `ai_status.py` entry names the responsibility of the current session. A Main session
+uses `integrate`; a dispatched worker uses the entry matching the task record's `Role`.
+Do not switch to the active task's worker role merely because an Integrator is inspecting it.
 
-## 実装に入る前に読む
+## Live coordination memory
 
-- `spec/DESIGN.md` — 設計の結論。**まずこれを読む**
-- `TEST_POLICY.md` — 検証項目。各節の見出しが担当 Phase を示す
-
-`decisions/` は「なぜそう決めたか」の記録。
-設計を変えたくなったとき、または DESIGN.md の意図が読み取れないときだけ開く。
-
-## Current phase
-
-**ここには書かない。** 現在フェーズと次にやることは `CURRENT_STATE.md` にだけ置く。
-2箇所に書くと必ず片方が古くなる。
-
-どのフェーズでも参照するもの:
-
-- `spec/DESIGN.md`
-- `TEST_POLICY.md`
-- `spec/JUDGMENT_REFERENCE.md`（参照実装の事実。**再調査せずここを見る**）
-- `OPEN_QUESTIONS.md`
-
-## Read only if needed
-
-| 目的 | ファイル |
+| Purpose | Source of truth |
 |---|---|
-| 設計判断の理由 | `decisions/` |
-| 過去のレビュー指摘の本文 | `review_archive/<年-月>.md` |
-| 過去のレビューの判断と観察 | `review_archive/REVIEW_LOG.md` |
-| 各 Phase で何を作ったかの経緯 | `review_archive/BUILD_LOG.md` |
-| 元仕様への指摘 | `SPEC_REVIEW.md` |
-| 元仕様の原文 | `spec/AI_WEREWOLF_CODEX_HANDOFF.md` |
-| 運用ルールの根拠 | `spec/CODEX_TOKEN_EFFICIENT_WORKFLOW.md` |
-| Qwen実装runner・利用枠・コスパ集計 | `spec/LOCAL_IMPLEMENTATION_RUNNER.md`（入口: `../../scripts/ai_status.py infra`） |
-| 有限キューの無人開発・独立レビュー・再開 | `spec/AUTONOMOUS_DEVELOPMENT.md` / `handoffs/INFRA_AUTONOMOUS_HANDOFF.md` |
-| 新しい設計判断までの連続実装 | `spec/OVERNIGHT_DEVELOPMENT.md` / `infra/OVERNIGHT_PACKAGE_GUIDE.md`（`../../Run-Overnight.cmd`） |
-| 起動・停止・復旧・利用量（利用者向け） | `infra/OVERNIGHT_QUICKSTART.md` |
-| D060基盤の検証・引継ぎ | `handoffs/EFFICIENT_OVERNIGHT_HANDOFF.md` |
-| 詳細設計と DESIGN REQUEST（canonical ではない） | `design/` |
-| ロードマップ全体 | `ROADMAP.md` |
-| 文書と実装の不整合検査 | `../../scripts/check_docs.py` |
-| Phase引継ぎ | `handoffs/` |
-| 過去の失敗 | `failures/` |
+| Current facts, active target, tests, critical path | `CURRENT_STATE.md` |
+| Current task board | `TASKS.md` |
+| Multi-chat lifecycle and conflict rules | `WORKFLOW.md` |
+| Stable system and coordination boundaries | `ARCHITECTURE.md` |
+| Delegation, escalation, recovery, and long-test procedures | `OPERATIONS.md` |
+| Current operational model choices only | `MODEL_ASSIGNMENTS.md` |
+| Responsibility procedures | `RUNBOOK.md` |
+| User-facing entry prompts | `PROMPTS.md` |
+| Main Integrator first-session prompt | `MAIN_INTEGRATOR_PROMPT.md` |
+| Model-neutral role contracts | `roles/` |
+| One worker assignment | `tasks/T*.md` |
+| One completed worker result | `handoffs/tasks/T*.md` |
+| Active review findings | `REVIEW_INBOX.md` |
+| Unresolved user decisions | `OPEN_QUESTIONS.md` |
 
-`review_archive/` は**過去の記録**であり、当時の節番号・ファイル構成・ルール名を
-そのまま保存する。現在の文書との一致は求めず、`check_docs.py` も検査しない。
-**現在の状態を書き足さない。** FIXED / REJECTED / DEFERRED の指摘は
-ここへ退避し、現在の状態は `CURRENT_STATE.md` にだけ置く。
-ただし月別レビュー記録の `R-YYYYMMDD-NN` 採番だけは、重複防止のため
-`check_docs.py` の検査対象になる。
+## Canonical game material
 
-## Phaseごとの主読込範囲
+- `spec/DESIGN.md` — canonical design conclusions
+- `ROADMAP.md` — phase scope and completion criteria
+- `TEST_POLICY.md` — required verification categories
+- `spec/JUDGMENT_REFERENCE.md` — already-researched reference behavior
+- `decisions/` — accepted rationale and authority boundaries
+- `design/` — requests, detailed designs, and design-review evidence
 
-| Phase | 読むもの | 読まないもの |
-|---|---|---|
-| 1 ゲームコア | Role / Team / Ability / Effect / GameState / WinCondition / tests | AI Client 仕様 |
-| 2 ネットワーク | CURRENT_STATE / PHASE1_HANDOFF / Protocol / Session / 公開・非公開状態 | LLM詳細 |
-| 3 AI Skeleton | Protocol / Client / WorldState / Dummy Brain | Roleエンジン内部（必要時のみ） |
-| 4 Local LLM | Brain Interface / LLM Backend / Structured Output | ゲームコア内部 |
+## Evidence and history
+
+| Purpose | Path |
+|---|---|
+| Phase completion handoffs | `handoffs/PHASE*_HANDOFF.md` |
+| Repeatable failures | `failures/` |
+| Historical review evidence | `review_archive/` |
+| Historical roadmap scope | `roadmap_archive/` |
+| Original source specification | historical handoff under `spec/` (read only when needed) |
+| Autodev archive/removal record | `decisions/D065_AUTODEV_FREEZE_AND_REMOVAL.md` |
+| Responsibility/model separation | `decisions/D066_ROLE_MODEL_SEPARATION.md` |
+
+Historical status lines, actor/model names, old paths, and old routing statements remain
+evidence of what happened at the time. They are not current workflow authority.
+
+## Repository classification
+
+- **ACTIVE:** this index, the live coordination-memory table, canonical game material,
+  `ARCHITECTURE.md`, `OPERATIONS.md`, and `roles/`.
+- **ARCHIVE / HISTORICAL:** `review_archive/`, `roadmap_archive/`, old phase handoffs,
+  `SPEC_REVIEW.md`, the original handoff under `spec/`, and documents whose header marks
+  them historical. Read only when a current packet points there or evidence is needed.
+- **OBSOLETE:** the deleted Autodev/overnight runtime, controller documents, and tests
+  recorded by D065. Do not restore them into the active tree.
+- **UNKNOWN:** classify and route through the Integrator before treating it as authority.

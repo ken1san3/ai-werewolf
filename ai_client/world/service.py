@@ -8,6 +8,7 @@ from contextlib import suppress
 from typing import Protocol
 
 from ai_client.network import (
+    ActionAccepted,
     ActionRejected,
     ClientEvent,
     ClientLifecycle,
@@ -18,6 +19,8 @@ from ai_client.network import (
     LifecycleChanged,
     NotDelivered,
     PhaseDeadlineReached,
+    PhaseTimingMapped,
+    ResumeRecoveryCompleted,
     SequenceGapDetected,
     SequenceGapRecovered,
     ServerEvent,
@@ -25,18 +28,28 @@ from ai_client.network import (
 
 from .model import (
     AbilityResultView,
+    ActionAcceptedObservation,
+    ActionRejectionObservation,
     CoView,
+    CurrentPhaseDeadline,
     CurrentActionsView,
     Freshness,
     HistoryQuery,
     HistoryView,
+    PhaseDeadlineReachedObservation,
+    PhaseTimingObservation,
     RevealedRoleView,
+    ResumeRecoveryBarrier,
+    TransportObservationQuery,
+    TransportObservationRetention,
+    TransportObservationView,
     WorldSnapshot,
     WorldStateConfig,
     WorldStateExit,
     WorldStateExitReason,
 )
 from .reducer import WorldReducer
+from .transport import TransportObservationStore
 
 
 class NetworkEventSource(Protocol):
@@ -48,6 +61,7 @@ class NetworkEventSource(Protocol):
 
 
 _KNOWN_NOTICE_TYPES = (
+    ActionAccepted,
     ActionRejected,
     DeliveryUnknown,
     FatalTermination,
@@ -55,6 +69,8 @@ _KNOWN_NOTICE_TYPES = (
     LifecycleChanged,
     NotDelivered,
     PhaseDeadlineReached,
+    PhaseTimingMapped,
+    ResumeRecoveryCompleted,
     SequenceGapDetected,
     SequenceGapRecovered,
 )
@@ -68,10 +84,17 @@ class WorldState:
         source: NetworkEventSource,
         *,
         config: WorldStateConfig = WorldStateConfig(),
+        transport_retention: TransportObservationRetention = TransportObservationRetention(),
     ) -> None:
+        if not isinstance(transport_retention, TransportObservationRetention):
+            raise TypeError("transport_retention must be TransportObservationRetention")
         self._source = source
         self.config = config
+        self.transport_retention = transport_retention
         self._reducer = WorldReducer(config)
+        self._transport = TransportObservationStore(transport_retention)
+        self._next_transport_order = 1
+        self._current_deadline: CurrentPhaseDeadline | None = None
         self._freshness = Freshness.EMPTY
         self._version = 0
         self._has_sync = False
@@ -185,6 +208,20 @@ class WorldState:
         records = tuple(self._reducer.memory.query(query))
         return AbilityResultView(records, retention.complete, retention)
 
+    def transport_observations(
+        self, query: TransportObservationQuery = TransportObservationQuery()
+    ) -> TransportObservationView:
+        if not isinstance(query, TransportObservationQuery):
+            raise TypeError("query must be TransportObservationQuery")
+        return TransportObservationView(
+            world_version=self._version,
+            first_retained_order=self._transport.first_retained_order,
+            last_order=self._transport.last_order,
+            gap_before_first=self._transport.gap_before_first(query.after_order),
+            observations=self._transport.query(query),
+            current_deadline=self._current_deadline,
+        )
+
     async def wait_for_update(self, after_version: int) -> WorldSnapshot:
         """Wait until a committed version is newer than ``after_version``."""
 
@@ -200,7 +237,20 @@ class WorldState:
 
     def _consume(self, event: ClientEvent) -> None:
         if isinstance(event, ServerEvent):
+            if event.type == "action.accepted":
+                # This is a transport receipt fact, not semantic history.  Keep
+                # the reducer's drain cursor coherent without creating an
+                # unknown or history record; the following typed notice carries
+                # the queryable correlation data.
+                self._reducer.last_applied_seq = max(
+                    self._reducer.last_applied_seq,
+                    event.seq,
+                )
+                self._commit()
+                return
             result = self._reducer.apply_server_event(event)
+            if self._server_event_invalidates_deadline(event):
+                self._current_deadline = None
             if result.state_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._has_sync = True
                 self._last_committed_sync_seq = event.seq
@@ -219,6 +269,100 @@ class WorldState:
             return
         if isinstance(event, LifecycleChanged):
             self._apply_lifecycle(event.current)
+            self._commit()
+            return
+        if isinstance(event, ActionAccepted):
+            self._transport.append(
+                ActionAcceptedObservation(
+                    order=self._take_transport_order(),
+                    world_version=self._version + 1,
+                    action=event.action,
+                    request_event_id=event.request_event_id,
+                    seq=event.seq,
+                    observation_connection_generation=(
+                        event.observation_connection_generation
+                    ),
+                    observed_at_monotonic=event.observed_at_monotonic,
+                )
+            )
+            self._commit()
+            return
+        if isinstance(event, ActionRejected):
+            order = self._take_transport_order()
+            self._transport.append(
+                ActionRejectionObservation(
+                    order=order,
+                    world_version=self._version + 1,
+                    action=event.action,
+                    reason=event.reason,
+                    seq=event.seq,
+                    connection_generation=event.connection_generation,
+                    observed_at_monotonic=event.observed_at_monotonic,
+                    request_event_id=event.request_event_id,
+                )
+            )
+            self._commit()
+            return
+        if isinstance(event, ResumeRecoveryCompleted):
+            if self._reducer.last_applied_seq < event.state_sync_seq:
+                raise ValueError("resume recovery barrier preceded its state sync")
+            self._transport.append(
+                ResumeRecoveryBarrier(
+                    order=self._take_transport_order(),
+                    world_version=self._version + 1,
+                    connection_generation=event.connection_generation,
+                    requested_last_seq=event.requested_last_seq,
+                    replay_first_seq=event.replay_first_seq,
+                    replay_last_seq=event.replay_last_seq,
+                    replay_contiguous=event.replay_contiguous,
+                    replay_gap_or_floor=event.replay_gap_or_floor,
+                    resumed_seq=event.resumed_seq,
+                    state_sync_seq=event.state_sync_seq,
+                    complete=event.complete,
+                )
+            )
+            self._commit()
+            return
+        if isinstance(event, PhaseTimingMapped):
+            order = self._take_transport_order()
+            observation = PhaseTimingObservation(
+                order=order,
+                world_version=self._version + 1,
+                phase=event.phase,
+                day=event.day,
+                source_seq=event.source_seq,
+                connection_generation=event.connection_generation,
+                action_generation=event.action_generation,
+                server_timestamp=event.server_timestamp,
+                phase_ends_at=event.phase_ends_at,
+                mapped_at_monotonic=event.mapped_at_monotonic,
+                local_deadline_monotonic=event.local_deadline_monotonic,
+            )
+            self._transport.append(observation)
+            if self._timing_is_current(event):
+                self._current_deadline = CurrentPhaseDeadline(
+                    mapping_order=order,
+                    phase=event.phase,
+                    day=event.day,
+                    connection_generation=event.connection_generation,
+                    action_generation=event.action_generation,
+                    local_deadline_monotonic=event.local_deadline_monotonic,
+                )
+            self._commit()
+            return
+        if isinstance(event, PhaseDeadlineReached):
+            self._transport.append(
+                PhaseDeadlineReachedObservation(
+                    order=self._take_transport_order(),
+                    world_version=self._version + 1,
+                    phase=event.phase,
+                    day=event.day,
+                    connection_generation=event.connection_generation,
+                    action_generation=event.action_generation,
+                    local_deadline_monotonic=event.local_deadline_monotonic,
+                    reached_at_monotonic=event.reached_at_monotonic,
+                )
+            )
             self._commit()
             return
         if isinstance(event, SequenceGapDetected):
@@ -265,6 +409,7 @@ class WorldState:
             ClientLifecycle.RECONNECT_WAIT,
             ClientLifecycle.STOPPING,
         }:
+            self._current_deadline = None
             self._recovery_sync_accepted = False
             if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._freshness = Freshness.STALE
@@ -276,9 +421,11 @@ class WorldState:
                     else Freshness.STALE
                 )
         elif lifecycle is ClientLifecycle.ENDED:
+            self._current_deadline = None
             if self._recovery_sync_accepted:
                 self._freshness = Freshness.ENDED
         elif lifecycle is ClientLifecycle.FAILED:
+            self._current_deadline = None
             self._freshness = Freshness.FAILED
 
     def _commit(self) -> None:
@@ -326,6 +473,35 @@ class WorldState:
             return self._source.snapshot().lifecycle
         except Exception:
             return None
+
+    def _timing_is_current(self, event: PhaseTimingMapped) -> bool:
+        try:
+            network = self._source.snapshot()
+        except Exception:
+            return False
+        phase = self._reducer.phase
+        return (
+            network.lifecycle is ClientLifecycle.CONNECTED
+            and network.connection_generation == event.connection_generation
+            and network.action_generation == event.action_generation
+            and self._reducer.last_applied_seq == event.source_seq
+            and phase is not None
+            and phase.phase == event.phase
+            and phase.day == event.day
+        )
+
+    @staticmethod
+    def _server_event_invalidates_deadline(event: ServerEvent) -> bool:
+        if event.type in {"game.state_sync", "player.action_state"}:
+            return True
+        if event.type != "game.event":
+            return False
+        return event.payload.get("event_type") in {"DAY_EXTENDED", "DAY_SHORTENED"}
+
+    def _take_transport_order(self) -> int:
+        order = self._next_transport_order
+        self._next_transport_order += 1
+        return order
 
     def _query_complete(self, query: HistoryQuery, retention) -> bool:
         if retention.complete:

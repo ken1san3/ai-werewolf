@@ -4,6 +4,19 @@
 
 Accepted（ユーザー決定 2026-09-01）
 
+## Historical / Superseded applicability note
+
+この文書のmodel assignment、およびmodel名に依存する運用記述は、D051採択当時の
+歴史的記録として原文を保持している。Decision内のdefault model表とConsequences内の
+`AGENTS.md`二列表・通常Implementerに関する記述を含め、これらをcurrent workflow
+authorityとして使用してはならない。
+
+`D066_ROLE_MODEL_SEPARATION.md` と `D067_STANDARD_MULTI_AGENT_ROLES.md` により
+model-specificな割当・routingはsupersedeされ、
+現行割当は `Docs/ai/MODEL_ASSIGNMENTS.md` だけに置く。Design Gate、Detailed Designを
+必要とする条件、canonical sourceの優先順位、独立review・self-approval禁止という
+model-independentな原則は引き続き有効である。
+
 ## Context
 
 実装タスクの規模が Phase ごとに大きく振れる。局所的な bug fix と、
@@ -27,6 +40,8 @@ Reviewer が判定
 
 役割と、その役割に現在割り当てているモデルは別物とする。
 モデルを差し替えても役割の定義は変わらない。
+
+以下の表は上記Historical noteに従い、当時の割当記録として保持する。
 
 | 役割 | default model |
 |---|---|

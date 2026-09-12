@@ -165,6 +165,36 @@ class NetworkClient:
 - outbound の `NotDelivered` / `DeliveryUnknown`
 - `GameEnded` / fatal termination
 
+Phase 3.4 の D055 拡張として、transport observation 用 notice は次の immutable
+metadata を持つ。これは Phase 3.1 の送受信責務や retry 方針を変更しない。
+
+```text
+ActionRejected
+  action / reason / seq / connection_generation / observed_at_monotonic
+
+PhaseTimingMapped
+  phase / day / source_seq / connection_generation / action_generation
+  server_timestamp / phase_ends_at / mapped_at_monotonic
+  local_deadline_monotonic
+
+PhaseDeadlineReached
+  phase / day / connection_generation / action_generation
+  local_deadline_monotonic / reached_at_monotonic
+```
+
+`player.action_state`、`game.state_sync.action_state`、および
+`DAY_EXTENDED` / `DAY_SHORTENED` を受信した時点で、次式を一度だけ評価する。
+
+```text
+local_deadline_monotonic =
+  mapped_at_monotonic + max(0, phase_ends_at - server_timestamp)
+```
+
+`phase_ends_at` が `None` なら local deadline も `None` である。同じ受信 payload
+について raw `ServerEvent` を先に公開し、その後 `PhaseTimingMapped` を公開する。
+timer replacement は旧 task を cancel・回収し、current source/generation の worker
+だけが `PhaseDeadlineReached` を公開する。Network は notice を根拠に自動 retry しない。
+
 `SendReceipt` は request の `event_id` と「WebSocket の send が完了した」ことだけを示す。
 サーバによる受理を示さない。action request には応答相関IDが無いため、
 `action.rejected` と特定 request の1対1対応を API として約束しない。
@@ -232,8 +262,10 @@ any nonterminal ── fatal error / reconnect budget exhausted ─> FAILED
   復旧中の replay / sync.history 内の終了は Addendum B2 に従い、全量 sync の commit より
   前に終了しない。終端 sync では一時的にも `CONNECTED` へ移らない。
 - `phase_ends_at` がある場合、受信 envelope の server `timestamp` との差を待ち時間とする。
-  client monotonic clock は sleep のためだけに使い、締切や行動可否を確定しない。
-  新しい action state、再同期、切断、終了で以前の timer generation を cancel する。
+  Phase 3.4 以降は同じ受信時点の injected monotonic clock との対応を
+  `PhaseTimingMapped` として World へ渡す。Network 自身は締切や行動可否を確定しない。
+  新しい action state、再同期、timing change、切断、終了で以前の timer generation を
+  cancel・回収する。
 
 ## Main Control Flow
 
@@ -280,7 +312,8 @@ Network Client は受信と再接続を継続し、代替発言を生成しな�
 
 ### Action rejection and partial send
 
-- `action.rejected` は state に握り潰さず、action / reason / seq を上位へ通知する。
+- `action.rejected` は state に握り潰さず、action / reason / seq に加えて
+  connection generation と受信 monotonic 時刻を上位へ通知する。
   Network Client は自動再試行せず、current action state も推測で変更しない。
 - disconnect 時、まだ send を開始していない旧 generation の command は `NotDelivered` として破棄する。
   send 開始後に接続が失われた command は server 受理の有無を判定できないため

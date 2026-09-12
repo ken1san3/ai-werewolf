@@ -28,12 +28,21 @@ class FileCredentialStore:
             value = json.loads(raw)
         except json.JSONDecodeError as error:
             raise CredentialError("credential file is not valid JSON") from error
-        if not isinstance(value, dict) or set(value) != {"connection_token", "last_seq"}:
+        if not isinstance(value, dict):
+            raise CredentialError("credential file has an invalid shape")
+        fields = set(value)
+        if fields == {"connection_token", "last_seq"}:
+            # Preserve the historical checkpoint as identifiable 1.0 data.  The
+            # active client decides whether that version may be resumed.
+            protocol_version = "1.0"
+        elif fields == {"connection_token", "last_seq", "protocol_version"}:
+            protocol_version = value.get("protocol_version")
+        else:
             raise CredentialError("credential file has an invalid shape")
         token = value.get("connection_token")
         last_seq = value.get("last_seq")
         try:
-            return SessionCheckpoint(token, last_seq)
+            return SessionCheckpoint(token, last_seq, protocol_version)
         except (TypeError, ValueError) as error:
             raise CredentialError("credential file has invalid values") from error
 
@@ -52,6 +61,7 @@ class FileCredentialStore:
                         {
                             "connection_token": checkpoint.connection_token,
                             "last_seq": checkpoint.last_seq,
+                            "protocol_version": checkpoint.protocol_version,
                         },
                         stream,
                         ensure_ascii=False,

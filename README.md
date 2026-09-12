@@ -76,10 +76,10 @@ Phase 1 の合格条件にしています。
 
 | | |
 |---|---|
-| Phase | 1.2（ゲームコア構築中） |
-| 完了 | Phase 1.1 — データモデルと content ローダー |
+| Phase | 3.4 Reaction Chat（実装着手前） |
+| 完了 | Phase 1、Phase 2、Phase 3.1〜3.3 |
 | 実装済み役職 | 13種（すべて YAML 定義） |
-| テスト | 21 passed |
+| 通常テスト | 310 passed（2026-09-09 Local Windows） |
 
 詳細は [`Docs/ai/CURRENT_STATE.md`](Docs/ai/CURRENT_STATE.md)。
 
@@ -128,30 +128,29 @@ Docs/ai/              設計ドキュメントと開発運用の記録
 
 ## 開発の進め方
 
-このプロジェクトは **AIエージェントに実装させ、別のAIエージェントがレビューする**
-体制で進めています。役割を分けているのは、実装したAIが自分の設計前提を引きずるためです。
+このプロジェクトは、Integrator が作業を分解し、短命な Worker が実装・詳細設計・
+調査を担当し、独立した Reviewer が検証する体制で進めます。
 
-| 役割 | 担当 |
+| Responsibility | Purpose |
 |---|---|
-| Implementer | Codex |
-| Reviewer | Claude |
-| 仕様の決定 | 人間 |
+| Integrator | 現在地・critical path・task分解・統合・次waveの管理 |
+| Architect | Design Gate対象のinterface・lifecycle・acceptance設計 |
+| Implementer | 承認済みcontract内の実装とテスト |
+| Reviewer | design / implementation / tests / diff の独立確認 |
+| Tester | focused / integration / completion / regression の独立実測 |
+| Investigator | 原因不明・E2E・並行性問題の再現と原因特定 |
+| 仕様の決定 | 人間が最終決定 |
+
+具体的な実行モデルは責務と分離され、現在の運用設定だけを
+[`Docs/ai/MODEL_ASSIGNMENTS.md`](Docs/ai/MODEL_ASSIGNMENTS.md) に置きます。
 
 会話履歴を長期記憶にせず、**リポジトリを記憶装置として使う**のが方針です。
-セッションが途中で切れても、次のエージェントが以下を読めば作業を再開できます。
+入口は [`AGENTS.md`](AGENTS.md) → `python scripts/ai_status.py <entry>` →
+task packetです。現在地は [`Docs/ai/CURRENT_STATE.md`](Docs/ai/CURRENT_STATE.md)、
+task boardは [`Docs/ai/TASKS.md`](Docs/ai/TASKS.md)、複数チャット運用は
+[`Docs/ai/WORKFLOW.md`](Docs/ai/WORKFLOW.md) を参照してください。
 
-| ファイル | 役割 |
-|---|---|
-| [`AGENTS.md`](AGENTS.md) | 恒久ルール、レビュー観点、指示の振り分け |
-| [`Docs/ai/RUNBOOK.md`](Docs/ai/RUNBOOK.md) | 実装 / レビュー / 修正の手順 |
-| [`Docs/ai/spec/DESIGN.md`](Docs/ai/spec/DESIGN.md) | 設計書（結論） |
-| [`Docs/ai/decisions/`](Docs/ai/decisions/) | なぜそう決めたか（D001〜D019） |
-| [`Docs/ai/REVIEW_INBOX.md`](Docs/ai/REVIEW_INBOX.md) | レビュー指摘の作業キュー |
-| [`Docs/ai/ROADMAP.md`](Docs/ai/ROADMAP.md) | 各サブPhaseの含む / 含まない / 完了条件 |
-| [`Docs/ai/TEST_POLICY.md`](Docs/ai/TEST_POLICY.md) | 検証項目 |
-
-`decisions/` には却下した案とその理由も残しています。次のセッションが同じ案を
-再提案して同じ失敗をするのを防ぐためです。
+`decisions/` には却下した案と理由も残し、別セッションが同じ失敗を繰り返すのを防ぎます。
 
 詳しくは [CONTRIBUTING.md](CONTRIBUTING.md)。
 

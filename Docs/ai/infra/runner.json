@@ -1,8 +1,0 @@
-{
-  "design_gate": "REQUIRED",
-  "design": "Docs/ai/design/INFRA_QWEN_RUNNER_DESIGN.md",
-  "design_sha256": "dd4fabd48a4c398f44d220a0f072dcc6894518d315281b7c1464adf69866f505",
-  "review": "Docs/ai/design/reviews/INFRA_QWEN_RUNNER_REVIEW.md",
-  "review_sha256": "3444bcefb8b5cb298027eb14fab980bcd163960bce0f0e71e2bd419cd69ca75a",
-  "reviewer_model": "gpt-5.6-sol"
-}

@@ -70,6 +70,7 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                     "--game-id", GAME_ID,
                     "--entry-token", registry.entry_tokens_for(GAME_ID)[player_id],
                     "--credentials", str(state_root / f"{player_id}.credentials.json"),
+                    "--readiness", str(state_root / f"{player_id}.readiness.json"),
                     "--status", str(state_root / f"{player_id}.status.json"),
                     cwd=str(PROJECT_ROOT),
                     stdout=asyncio.subprocess.PIPE,
@@ -79,14 +80,23 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                 return process
 
             try:
-                for player_id in game.players:
-                    processes[player_id] = await start_client(player_id)
+                started = await asyncio.gather(
+                    *(start_client(player_id) for player_id in game.players)
+                )
+                processes.update(zip(game.players, started, strict=True))
                 await self._wait_for(
-                    lambda: all((state_root / f"{player_id}.credentials.json").exists()
+                    lambda: all((state_root / f"{player_id}.readiness.json").exists()
                                 for player_id in game.players),
                     timeout=10,
-                    description="all clients to store their connection token",
+                    description="all clients to publish authentication readiness",
+                    fail_if_exited=processes,
                 )
+                for player_id, process in processes.items():
+                    readiness = json.loads(
+                        (state_root / f"{player_id}.readiness.json").read_text(encoding="utf-8")
+                    )
+                    self.assertEqual(readiness["pid"], process.pid)
+                    self.assertFalse(readiness["resumed"])
 
                 # R-75: the launcher keeps the credential file and gives it to a new process.
                 restarted_player = next(iter(game.players))
@@ -94,8 +104,23 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                 first_pid = first_process.pid
                 first_process.kill()
                 await first_process.wait()
+                readiness_path = state_root / f"{restarted_player}.readiness.json"
+                readiness_path.unlink()
                 processes[restarted_player] = await start_client(restarted_player)
                 self.assertNotEqual(first_pid, processes[restarted_player].pid)
+                await self._wait_for(
+                    readiness_path.exists,
+                    timeout=10,
+                    description="the replacement client to publish resume readiness",
+                    fail_if_exited={restarted_player: processes[restarted_player]},
+                )
+                replacement_readiness = json.loads(
+                    readiness_path.read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    replacement_readiness["pid"], processes[restarted_player].pid
+                )
+                self.assertTrue(replacement_readiness["resumed"])
 
                 await self._wait_for(
                     lambda: game.phase is GamePhase.GAME_END,
@@ -128,6 +153,11 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertTrue(any(status["co_declared"] for status in statuses.values()), statuses)
                 self.assertTrue(statuses[restarted_player]["resumed"])
+                self.assertGreater(
+                    sum(status["action_timing"]["sent"] for status in statuses.values()),
+                    0,
+                    statuses,
+                )
                 self.assertEqual(len(observed_pids), len(game.players) + 1)
                 self.assertNotIn(os.getpid(), observed_pids)
                 self.assertIsNotNone(game.game_result)
@@ -148,9 +178,49 @@ class PhaseTwoCompletionTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await server.close()
 
-    async def _wait_for(self, condition, *, timeout: float, description: str) -> None:
+    async def test_wait_for_reports_child_exit_before_readiness_timeout(self) -> None:
+        class ExitedClient:
+            pid = 4321
+            returncode = 7
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return b"fixture stdout", b"fixture stderr"
+
+        started = asyncio.get_running_loop().time()
+        with self.assertRaises(AssertionError) as raised:
+            await self._wait_for(
+                lambda: False,
+                timeout=10,
+                description="fixture readiness",
+                fail_if_exited={"player-x": ExitedClient()},  # type: ignore[dict-item]
+            )
+
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.5)
+        message = str(raised.exception)
+        self.assertIn("player-x (4321) exited 7 before fixture readiness", message)
+        self.assertIn("fixture stdout", message)
+        self.assertIn("fixture stderr", message)
+
+    async def _wait_for(
+        self,
+        condition,
+        *,
+        timeout: float,
+        description: str,
+        fail_if_exited: dict[str, asyncio.subprocess.Process] | None = None,
+    ) -> None:
         async def wait() -> None:
             while not condition():
+                for player_id, process in (fail_if_exited or {}).items():
+                    if process.returncode is None:
+                        continue
+                    stdout, stderr = await process.communicate()
+                    self.fail(
+                        f"dummy client {player_id} ({process.pid}) exited "
+                        f"{process.returncode} before {description}: "
+                        f"stdout={stdout.decode(errors='replace')!r} "
+                        f"stderr={stderr.decode(errors='replace')!r}"
+                    )
                 await asyncio.sleep(0.02)
 
         try:

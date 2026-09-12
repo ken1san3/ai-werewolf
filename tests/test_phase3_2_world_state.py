@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import json
 
 import pytest
 from websockets.asyncio.client import connect
 
 from ai_client.network import (
+    ActionAccepted,
+    ActionRejected,
     ChatAction,
     ClientLifecycle,
     ClientExitReason,
@@ -16,12 +18,17 @@ from ai_client.network import (
     LifecycleChanged,
     NetworkClient,
     NetworkClientConfig,
+    PhaseTimingMapped,
+    PROTOCOL_VERSION,
+    ResumeRecoveryCompleted,
     SequenceGapDetected,
     ServerEvent,
     SessionCheckpoint,
 )
 from ai_client.network.types import immutable_mapping
 from ai_client.world import (
+    ActionAcceptedObservation,
+    ActionRejectionObservation,
     AbilityResultRecord,
     ChatRecord,
     CoDeclarationRecord,
@@ -36,7 +43,11 @@ from ai_client.world import (
     PhaseTimingChangedRecord,
     PhaseTransitionRecord,
     RevealedRoleView,
+    ResumeRecoveryBarrier,
     TieResolvedRandomRecord,
+    TransportObservationQuery,
+    TransportObservationKind,
+    TransportObservationRetention,
     UnknownEventRecord,
     VoteRevealRecord,
     VoteResultRecord,
@@ -51,7 +62,7 @@ from tests.test_network_sessions import GAME_ID, client_message, join_message, m
 def event(message_type: str, seq: int, payload: dict) -> ServerEvent:
     return ServerEvent(
         type=message_type,
-        protocol_version="1.0",
+        protocol_version=PROTOCOL_VERSION,
         event_id=f"event-{seq}",
         game_id="game-1",
         seq=seq,
@@ -122,6 +133,140 @@ class BlockingSource:
         yield None  # pragma: no cover
 
 
+def test_transport_observation_extension_is_versioned_bounded_and_generation_aware() -> None:
+    source = ListSource([], last_seq=1, lifecycle=ClientLifecycle.CONNECTED)
+    action = ChatAction(1, 1, "day", 1, "chat", "public")
+    source._snapshot = replace(  # noqa: SLF001 - explicit source contract fixture
+        source._snapshot,
+        connection_generation=1,
+        action_generation=1,
+        actions=(action,),
+    )
+    world = WorldState(
+        source,
+        transport_retention=TransportObservationRetention(max_records=1, max_bytes=1),
+    )
+    world._consume(event("game.state_sync", 1, sync_payload()))  # noqa: SLF001
+    world._consume(  # noqa: SLF001
+        PhaseTimingMapped("day", 1, 1, 1, 1, 1, 120, 5.0, 124.0)
+    )
+    self_timing_version = world.snapshot().version
+    self_deadline = world.transport_observations().current_deadline
+    assert self_deadline is not None
+    assert self_deadline.mapping_order == 1
+
+    source._snapshot = replace(source._snapshot, last_seq=2)  # noqa: SLF001
+    world._consume(event("action.rejected", 2, {"action": "chat.send", "reason": "late"}))  # noqa: SLF001
+    world._consume(ActionRejected("chat.send", "late", 2, 1, 6.0))  # noqa: SLF001
+    view = world.transport_observations(TransportObservationQuery(after_order=0))
+    assert view.world_version == self_timing_version + 2
+    assert view.gap_before_first
+    assert len(view.observations) == 1
+    assert isinstance(view.observations[0], ActionRejectionObservation)
+    assert view.observations[0].world_version == view.world_version
+    assert world.snapshot().complete
+    assert world.snapshot().history_retention.complete
+
+
+def test_acceptance_rejection_and_resume_barrier_are_exact_bounded_world_facts() -> None:
+    source = ListSource([], last_seq=5, lifecycle=ClientLifecycle.CONNECTED)
+    source._snapshot = replace(  # noqa: SLF001 - explicit source contract fixture
+        source._snapshot,
+        connection_generation=2,
+        action_generation=3,
+    )
+    world = WorldState(
+        source,
+        transport_retention=TransportObservationRetention(
+            max_records=2,
+            max_bytes=100_000,
+        ),
+    )
+    world._consume(event("game.state_sync", 1, sync_payload()))  # noqa: SLF001
+    world._consume(event("action.accepted", 2, {  # noqa: SLF001
+        "action": "vote.cast",
+        "request_event_id": "00000000-0000-0000-0000-000000000201",
+    }))
+    world._consume(  # noqa: SLF001
+        ActionAccepted(
+            action="vote.cast",
+            request_event_id="00000000-0000-0000-0000-000000000201",
+            seq=2,
+            observation_connection_generation=2,
+            observed_at_monotonic=8.0,
+        )
+    )
+    world._consume(event("action.rejected", 3, {  # noqa: SLF001
+        "action": "ability.use",
+        "reason": "invalid_target",
+        "request_event_id": "00000000-0000-0000-0000-000000000202",
+    }))
+    world._consume(  # noqa: SLF001
+        ActionRejected(
+            "ability.use",
+            "invalid_target",
+            3,
+            2,
+            8.5,
+            "00000000-0000-0000-0000-000000000202",
+        )
+    )
+    world._consume(event("game.state_sync", 5, sync_payload()))  # noqa: SLF001
+    world._consume(  # noqa: SLF001
+        ResumeRecoveryCompleted(
+            connection_generation=2,
+            requested_last_seq=1,
+            replay_first_seq=2,
+            replay_last_seq=3,
+            replay_contiguous=True,
+            replay_gap_or_floor=False,
+            resumed_seq=4,
+            state_sync_seq=5,
+        )
+    )
+
+    view = world.transport_observations(
+        TransportObservationQuery(after_order=0)
+    )
+    assert view.gap_before_first
+    assert len(view.observations) == 2
+    rejection, barrier = view.observations
+    assert isinstance(rejection, ActionRejectionObservation)
+    assert rejection.request_event_id == "00000000-0000-0000-0000-000000000202"
+    assert rejection.observation_connection_generation == 2
+    assert isinstance(barrier, ResumeRecoveryBarrier)
+    assert barrier.world_version == world.snapshot().version
+    assert barrier.requested_last_seq == 1
+    assert (barrier.replay_first_seq, barrier.replay_last_seq) == (2, 3)
+    assert barrier.replay_contiguous
+    assert not barrier.replay_gap_or_floor
+    assert barrier.complete
+    accepted_only = world.transport_observations(
+        TransportObservationQuery(
+            kinds=frozenset({TransportObservationKind.ACTION_ACCEPTED})
+        )
+    )
+    assert accepted_only.observations == ()  # evicted with explicit gap metadata above
+    assert world.snapshot().complete
+
+
+def test_resume_barrier_cannot_precede_world_sync_commit() -> None:
+    world = WorldState(ListSource([], last_seq=2, lifecycle=ClientLifecycle.CONNECTED))
+    with pytest.raises(ValueError, match="preceded its state sync"):
+        world._consume(  # noqa: SLF001
+            ResumeRecoveryCompleted(
+                connection_generation=2,
+                requested_last_seq=1,
+                replay_first_seq=None,
+                replay_last_seq=None,
+                replay_contiguous=False,
+                replay_gap_or_floor=True,
+                resumed_seq=2,
+                state_sync_seq=3,
+            )
+        )
+
+
 class NoopCredentialStore:
     async def load(self):
         return None
@@ -175,7 +320,9 @@ async def _recover_terminal_from_real_server(*, retain_terminal_event: bool):
         await old_socket.send(json.dumps(client_message("session.ready", {})))
         ready = json.loads(await asyncio.wait_for(old_socket.recv(), 2))
         checkpoint = SessionCheckpoint(
-            joined["payload"]["connection_token"], ready["seq"]
+            joined["payload"]["connection_token"],
+            ready["seq"],
+            PROTOCOL_VERSION,
         )
 
         if retain_terminal_event:

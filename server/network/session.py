@@ -11,15 +11,15 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 from types import MappingProxyType
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from ..aiwolf_core.clock import timestamp
+from ..aiwolf_core.interactions import ChatSubmission, InteractionAcceptance
 from ..aiwolf_core.rejections import ActionRejected
 
-from .protocol import ProtocolMessageValidator, ProtocolValidationError
+from .protocol import PROTOCOL_VERSION, ProtocolMessageValidator, ProtocolValidationError
 
 
-PROTOCOL_VERSION = "1.0"
 Clock = Callable[[], int]
 TokenFactory = Callable[[], str]
 EventIdFactory = Callable[[], str]
@@ -41,10 +41,14 @@ class SessionGame(Protocol):
     def record_channel_message(self, channel_id: str, message: Mapping[str, Any]) -> None:
         ...
 
-    def submit_chat(self, player_id: str, channel_id: str, message: str) -> Any:
+    def submit_chat(
+        self, now: int, player_id: str, channel_id: str, message: str
+    ) -> ChatSubmission:
         ...
 
-    def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
+    def submit_vote(
+        self, now: int, voter_player_id: str, target_player_id: str | None
+    ) -> InteractionAcceptance:
         ...
 
     def submit_action(
@@ -52,12 +56,14 @@ class SessionGame(Protocol):
     ) -> None:
         ...
 
-    def declare_co(self, player_id: str, claimed_role_id: str, comment: str) -> None:
+    def declare_co(
+        self, now: int, player_id: str, claimed_role_id: str, comment: str
+    ) -> InteractionAcceptance:
         ...
 
     def report_co(
-        self, player_id: str, kind: str, target_player_id: str, claimed_result: str
-    ) -> None:
+        self, now: int, player_id: str, kind: str, target_player_id: str, claimed_result: str
+    ) -> InteractionAcceptance:
         ...
 
 
@@ -105,7 +111,7 @@ class SessionResult:
     reply: ServerReply | None
     context: ConnectionContext | None
     replaced_connection_ids: tuple[str, ...] = ()
-    channel_messages: tuple[tuple[str, Mapping[str, Any]], ...] = ()
+    channel_messages: tuple[ChatSubmission, ...] = ()
     replay: tuple[ServerReply, ...] = ()
 
 
@@ -252,11 +258,30 @@ class _GameSession:
         if not connections:
             del self._connections[context.player_id]
 
-    def rejected(self, context: ConnectionContext, action: str, reason: str) -> ServerReply:
+    def accepted(
+        self, context: ConnectionContext, action: str, request_event_id: str
+    ) -> ServerReply:
+        return self._reply(
+            context.player_id,
+            "action.accepted",
+            {"action": action, "request_event_id": request_event_id},
+        )
+
+    def rejected(
+        self,
+        context: ConnectionContext,
+        action: str,
+        reason: str,
+        request_event_id: str | None,
+    ) -> ServerReply:
         return self._reply(
             context.player_id,
             "action.rejected",
-            {"action": action, "reason": reason},
+            {
+                "action": action,
+                "reason": reason,
+                "request_event_id": request_event_id,
+            },
         )
 
     def _connect(self, player_id: str, connection_token: str) -> ConnectionContext:
@@ -359,17 +384,19 @@ class SessionManager:
         self, message: Mapping[str, Any], context: ConnectionContext | None = None
     ) -> SessionResult:
         action = message.get("type") if isinstance(message.get("type"), str) else "request"
+        request_event_id = _valid_request_event_id(message)
         if context is None:
             game_id = message.get("game_id")
             if not isinstance(game_id, str):
                 raise UnaddressableRequest("missing_game_id")
             session = self.session_for(game_id)
+            protocol_version = message.get("protocol_version")
+            if isinstance(protocol_version, str) and protocol_version != PROTOCOL_VERSION:
+                raise UnaddressableRequest("unsupported_protocol_version")
             try:
                 self._validator.validate_client(message)
             except ProtocolValidationError as error:
                 raise UnaddressableRequest("invalid_message") from error
-            if not _same_major_version(message["protocol_version"], PROTOCOL_VERSION):
-                raise UnaddressableRequest("unsupported_protocol_version")
             message_type = message["type"]
             if message_type == "session.join":
                 new_context, reply = session.join(message["payload"]["entry_token"])
@@ -382,29 +409,56 @@ class SessionManager:
             raise UnaddressableRequest("not_authenticated")
 
         session = self.session_for(context.game_id)
+        protocol_version = message.get("protocol_version")
+        if isinstance(protocol_version, str) and protocol_version != PROTOCOL_VERSION:
+            return self._result(
+                session.rejected(
+                    context,
+                    action,
+                    "unsupported_protocol_version",
+                    request_event_id,
+                ),
+                context,
+            )
         try:
             self._validator.validate_client(message)
         except ProtocolValidationError:
-            return self._result(session.rejected(context, action, "invalid_message"), context)
+            return self._result(
+                session.rejected(context, action, "invalid_message", request_event_id),
+                context,
+            )
 
         if message["game_id"] != context.game_id:
-            return self._result(session.rejected(context, action, "game_mismatch"), context)
-        if not _same_major_version(message["protocol_version"], PROTOCOL_VERSION):
             return self._result(
-                session.rejected(context, action, "unsupported_protocol_version"), context
+                session.rejected(context, action, "game_mismatch", request_event_id), context
             )
 
         message_type = message["type"]
         if message_type == "session.ready":
             return self._result(session.ready(context), context)
+        received_at = timestamp(self._clock())
         try:
             channel_messages = self._dispatch_game_action(
-                session.game, context.player_id, message_type, message["payload"]
+                session.game,
+                context.player_id,
+                message_type,
+                message["payload"],
+                received_at=received_at,
             )
         except ActionRejected as error:
-            return self._result(session.rejected(context, message_type, error.reason), context)
+            return self._result(
+                session.rejected(context, message_type, error.reason, request_event_id), context
+            )
         except ValueError:
-            return self._result(session.rejected(context, message_type, "invalid_action"), context)
+            return self._result(
+                session.rejected(context, message_type, "invalid_action", request_event_id), context
+            )
+        if message_type in {"vote.cast", "ability.use"}:
+            if request_event_id is None:
+                raise RuntimeError("validated Phase 3.5 action must have a request UUID")
+            return self._result(
+                session.accepted(context, message_type, request_event_id), context
+            )
         if channel_messages is None:
             return self._result(None, context)
         return self._result(None, context, channel_messages=channel_messages)
@@ -430,7 +484,7 @@ class SessionManager:
         reply: ServerReply | None,
         context: ConnectionContext | None,
         replaced_connection_ids: tuple[str, ...] = (),
-        channel_messages: tuple[tuple[str, Mapping[str, Any]], ...] = (),
+        channel_messages: tuple[ChatSubmission, ...] = (),
         replay: tuple[ServerReply, ...] = (),
     ) -> SessionResult:
         validated_reply = self._validated_reply(reply, context) if reply is not None else None
@@ -442,30 +496,41 @@ class SessionManager:
         player_id: str,
         message_type: str,
         raw_payload: object,
-    ) -> tuple[tuple[str, Mapping[str, Any]], ...] | None:
+        *,
+        received_at: int,
+    ) -> tuple[ChatSubmission, ...] | None:
         """Route typed protocol data while leaving action legality to the core service."""
 
         if not isinstance(raw_payload, Mapping):
             raise ActionRejected("invalid_message")
         if message_type == "chat.send":
-            submission = game.submit_chat(player_id, raw_payload["channel_id"], raw_payload["message"])
-            return ((submission.channel_id, submission.message),)
+            submission = game.submit_chat(
+                received_at, player_id, raw_payload["channel_id"], raw_payload["message"]
+            )
+            return (submission,)
         if message_type == "vote.cast":
-            game.submit_vote(player_id, raw_payload["target_player_id"])
+            acceptance = game.submit_vote(
+                received_at, player_id, raw_payload["target_player_id"]
+            )
+            if acceptance.action != "vote.cast" or acceptance.player_id != player_id:
+                raise RuntimeError("vote core returned mismatched acceptance evidence")
             return None
         if message_type == "ability.use":
             game.submit_action(
-                timestamp(self._clock()),
+                received_at,
                 player_id,
                 raw_payload["ability_id"],
                 tuple(raw_payload["target_player_ids"]),
             )
             return None
         if message_type == "co.declare":
-            game.declare_co(player_id, raw_payload["claimed_role_id"], raw_payload["comment"])
+            game.declare_co(
+                received_at, player_id, raw_payload["claimed_role_id"], raw_payload["comment"]
+            )
             return None
         if message_type == "co.report":
             game.report_co(
+                received_at,
                 player_id,
                 raw_payload["kind"],
                 raw_payload["target_player_id"],
@@ -513,5 +578,12 @@ class TickDriver:
         return results
 
 
-def _same_major_version(client_version: str, server_version: str) -> bool:
-    return client_version.partition(".")[0] == server_version.partition(".")[0]
+def _valid_request_event_id(message: Mapping[str, Any]) -> str | None:
+    value = message.get("event_id")
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        return None
+    return value if str(parsed) == value else None

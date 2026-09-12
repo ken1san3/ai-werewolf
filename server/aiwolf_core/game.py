@@ -12,7 +12,7 @@ from .available_actions import ActionAvailability
 from .content import ContentPack, Preset
 from .death import DeathResolver, public_death_cause
 from .events import EventBus, EventSink, EventVisibility, GameEvent, InMemoryEventSink, JsonlEventLog
-from .interactions import ChatSubmission, PlayerInteractions
+from .interactions import ChatSubmission, InteractionAcceptance, PlayerInteractions
 from .models import GamePhase, RulesConfig
 from .phase import PhaseManager
 from .state import (
@@ -222,13 +222,17 @@ class GameState:
             if player.alive and channel_id in chat_channels_for(player)
         )
 
-    def submit_vote(self, voter_player_id: str, target_player_id: str | None) -> None:
-        VoteResolver(self).submit(voter_player_id, target_player_id)
+    def submit_vote(
+        self, now: int, voter_player_id: str, target_player_id: str | None
+    ) -> InteractionAcceptance:
+        return VoteResolver(self).submit(now, voter_player_id, target_player_id)
 
-    def submit_chat(self, player_id: str, channel_id: str, message: str) -> ChatSubmission:
+    def submit_chat(
+        self, now: int, player_id: str, channel_id: str, message: str
+    ) -> ChatSubmission:
         """Accept chat through the core's player-view authorization service."""
 
-        submission = PlayerInteractions(self).submit_chat(player_id, channel_id, message)
+        submission = PlayerInteractions(self).submit_chat(now, player_id, channel_id, message)
         self.record_channel_message(submission.channel_id, submission.message)
         return submission
 
@@ -241,17 +245,21 @@ class GameState:
             if self.rules.co.allow_villager_claim or self.content.roles[role_id].claimable
         )
 
-    def declare_co(self, player_id: str, claimed_role_id: str, comment: str) -> None:
+    def declare_co(
+        self, now: int, player_id: str, claimed_role_id: str, comment: str
+    ) -> InteractionAcceptance:
         """Accept one public CO declaration without validating its truth."""
 
-        PlayerInteractions(self).declare_co(player_id, claimed_role_id, comment)
+        return PlayerInteractions(self).declare_co(now, player_id, claimed_role_id, comment)
 
     def report_co(
-        self, player_id: str, kind: str, target_player_id: str, claimed_result: str
-    ) -> None:
+        self, now: int, player_id: str, kind: str, target_player_id: str, claimed_result: str
+    ) -> InteractionAcceptance:
         """Accept one public CO report without validating its truth."""
 
-        PlayerInteractions(self).report_co(player_id, kind, target_player_id, claimed_result)
+        return PlayerInteractions(self).report_co(
+            now, player_id, kind, target_player_id, claimed_result
+        )
 
     def can_declare_co(self, player_id: str) -> bool:
         """Return the content-configured declaration quota state for this day."""

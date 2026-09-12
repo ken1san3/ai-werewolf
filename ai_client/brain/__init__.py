@@ -4,6 +4,12 @@ from .controller import BrainController
 from .coordinator import PhaseBrainCoordinator
 from .dummy import DummyBrain
 from .interface import Brain
+from .invocation import (
+    BrainDispatchResult,
+    BrainInvocationArbiter,
+    BrainInvocationOwner,
+    BrainInvocationPriority,
+)
 from .model import (
     AbilityDecision,
     BrainActionContext,
@@ -19,6 +25,9 @@ from .model import (
     CoordinatorState,
     DecisionOutcome,
     DecisionStatus,
+    DispatchDeadline,
+    FeatureControllerExit,
+    FeatureControllerExitReason,
     NoDecision,
     PhaseKey,
     VoteDecision,
@@ -32,6 +41,10 @@ __all__ = [
     "BrainController",
     "BrainDecision",
     "BrainInput",
+    "BrainDispatchResult",
+    "BrainInvocationArbiter",
+    "BrainInvocationOwner",
+    "BrainInvocationPriority",
     "BrainRunConfig",
     "ChatDecision",
     "CoDeclareDecision",
@@ -41,6 +54,9 @@ __all__ = [
     "CoordinatorState",
     "DecisionOutcome",
     "DecisionStatus",
+    "DispatchDeadline",
+    "FeatureControllerExit",
+    "FeatureControllerExitReason",
     "DummyBrain",
     "NoDecision",
     "PhaseBrainCoordinator",

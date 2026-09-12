@@ -98,6 +98,9 @@ class WorldState:
         source: NetworkEventSource,
         *,
         config: WorldStateConfig = WorldStateConfig(),
+        transport_retention: TransportObservationRetention = (
+            TransportObservationRetention()
+        ),
     ) -> None: ...
 
     async def run(self) -> WorldStateExit: ...
@@ -108,8 +111,28 @@ class WorldState:
     def history(self, query: HistoryQuery = HistoryQuery()) -> HistoryView: ...
     def co_for_day(self, day: int) -> CoView: ...
     def ability_results(self) -> AbilityResultView: ...
+    def transport_observations(
+        self,
+        query: TransportObservationQuery = TransportObservationQuery(),
+    ) -> TransportObservationView: ...
     async def wait_for_update(self, after_version: int) -> WorldSnapshot: ...
 ```
+
+Phase 3.4 の D055 拡張では、semantic history と分離した bounded transport journal
+を同じ exclusive consumer が管理する。既定 retention は 256 records / 256 KiB で、
+record は action rejection、phase timing mapping、deadline reached の immutable union
+である。`TransportObservationQuery` は `after_order` と kind filter を持ち、結果は
+oldest-first で返す。cursor より前が eviction 済みなら `gap_before_first=True` とする。
+最新 record 単体が byte limit を超える場合もその1件は保持する。
+
+`TransportObservationView` は query 結果に加え、query 時点の `world_version`、
+retained order 範囲、および generation-aware な `CurrentPhaseDeadline | None` を返す。
+mapping、rejection、deadline-reached notice の各適用も1回の World version commit である。
+action state/state sync/timing-change の raw `ServerEvent` を適用してから対応 mapping notice
+を適用するまで、および disconnect/reset 中は current deadline を空にする。journal 自体は
+sync/reconnect で消去せず、古い generation の record も bounded な証跡として残すが、
+current deadline へは昇格させない。semantic `WorldSnapshot.complete` と
+`HistoryRetention` の意味は変更しない。
 
 `WorldSnapshot` は少なくとも次を持つ。
 

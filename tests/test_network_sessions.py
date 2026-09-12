@@ -7,27 +7,42 @@ from dataclasses import replace
 from random import Random
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from websockets.asyncio.client import connect
 
 from server.aiwolf_core import (
+    ActionRejected,
+    ChatSubmission,
     EventVisibility,
     GamePhase,
     GameState,
     GameEvent,
     InMemoryEventSink,
+    InteractionAcceptance,
     PlayerConfig,
     load_content,
     load_preset,
 )
 from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGameServer
-from server.network.protocol import ProtocolMessageValidator, ProtocolValidationError
+from server.network.protocol import (
+    PROTOCOL_VERSION,
+    ProtocolMessageValidator,
+    ProtocolValidationError,
+)
 from server.network.session import UnaddressableRequest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GAME_ID = "123e4567-e89b-12d3-a456-426614174100"
-SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json"
+NON_CANONICAL_REQUEST_IDS = (
+    "123e4567e89b12d3a456426614174101",
+    "{123e4567-e89b-12d3-a456-426614174101}",
+    "urn:uuid:123e4567-e89b-12d3-a456-426614174101",
+    "123E4567-E89B-12D3-A456-426614174101",
+    "bad",
+)
 
 
 def make_game(game_id: str = GAME_ID, *, rules=None) -> GameState:
@@ -54,20 +69,23 @@ def client_message(
     message_type: str,
     payload: dict[str, object],
     *,
-    protocol_version: str = "1.0",
+    protocol_version: str = PROTOCOL_VERSION,
     game_id: str = GAME_ID,
+    event_id: str = "123e4567-e89b-12d3-a456-426614174101",
 ) -> dict[str, object]:
     return {
         "type": message_type,
         "protocol_version": protocol_version,
-        "event_id": "123e4567-e89b-12d3-a456-426614174101",
+        "event_id": event_id,
         "game_id": game_id,
         "timestamp": 0,
         "payload": payload,
     }
 
 
-def join_message(registry, player_id, *, game_id=GAME_ID, protocol_version="1.0"):
+def join_message(
+    registry, player_id, *, game_id=GAME_ID, protocol_version=PROTOCOL_VERSION
+):
     return client_message("session.join", {"entry_token": registry.entry_tokens_for(game_id)[player_id]},
                           game_id=game_id, protocol_version=protocol_version)
 
@@ -84,6 +102,19 @@ class SessionManagerTests(unittest.TestCase):
             event_id_factory=lambda: "123e4567-e89b-12d3-a456-426614174102",
         )
         self.validator = ProtocolMessageValidator()
+
+    @staticmethod
+    def communication_message(action: str) -> dict[str, object]:
+        payloads = {
+            "chat.send": {"channel_id": "public", "message": "hello"},
+            "co.declare": {"claimed_role_id": "seer", "comment": "claim"},
+            "co.report": {
+                "kind": "inspect_result",
+                "target_player_id": "player-1",
+                "claimed_result": "not_wolf",
+            },
+        }
+        return client_message(action, payloads[action])
 
     def test_join_issues_token_only_to_the_joined_session_and_ready_marks_seat(self) -> None:
         result = self.manager.handle_message(
@@ -149,17 +180,79 @@ class SessionManagerTests(unittest.TestCase):
                 client_message("session.resume", {"connection_token": "wrong", "last_seq": 2})
             )
 
-    def test_major_protocol_mismatch_and_unknown_player_are_rejected_without_token(self) -> None:
-        with self.assertRaises(UnaddressableRequest):
-            self.manager.handle_message(
-                join_message(self.registry, "player-0", protocol_version="2.0")
-            )
+    def test_non_exact_protocol_versions_and_unknown_player_are_rejected_without_token(self) -> None:
+        for version in ("1.0", "1.2", "2.0"):
+            with self.subTest(version=version), self.assertRaisesRegex(
+                UnaddressableRequest, "unsupported_protocol_version"
+            ):
+                self.manager.handle_message(
+                    join_message(self.registry, "player-0", protocol_version=version)
+                )
         self.assertFalse(self.manager.session_for(GAME_ID).has_joined("player-0"))
 
         with self.assertRaises(UnaddressableRequest):
             self.manager.handle_message(
                 client_message("session.join", {"entry_token": "unknown-entry"})
             )
+
+    def test_authenticated_version_mismatch_is_rejected_before_core_mutation(self) -> None:
+        self.game._enter_phase(GamePhase.VOTE, 1)
+        joined = self.manager.handle_message(join_message(self.registry, "player-0"))
+
+        result = self.manager.handle_message(
+            client_message(
+                "vote.cast",
+                {"target_player_id": "player-1"},
+                protocol_version="1.0",
+            ),
+            joined.context,
+        )
+
+        self.assertEqual(result.reply.type, "action.rejected")
+        self.assertEqual(result.reply.payload["reason"], "unsupported_protocol_version")
+        self.assertEqual(
+            result.reply.payload["request_event_id"],
+            "123e4567-e89b-12d3-a456-426614174101",
+        )
+        self.assertEqual(self.game.pending_votes, {})
+
+    def test_noncanonical_request_uuids_are_nullable_retained_rejections(self) -> None:
+        joined = self.manager.handle_message(join_message(self.registry, "player-0"))
+        replies = []
+
+        for event_id in NON_CANONICAL_REQUEST_IDS:
+            with self.subTest(event_id=event_id):
+                result = self.manager.handle_message(
+                    client_message(
+                        "vote.cast",
+                        {"target_player_id": "player-1"},
+                        event_id=event_id,
+                    ),
+                    joined.context,
+                )
+                self.assertEqual(result.reply.type, "action.rejected")
+                self.assertEqual(result.reply.payload["reason"], "invalid_message")
+                self.assertIsNone(result.reply.payload["request_event_id"])
+                self.validator.validate_server(result.reply.as_message())
+                replies.append(result.reply)
+
+        self.assertEqual(
+            [reply.seq for reply in replies],
+            list(range(joined.reply.seq + 1, joined.reply.seq + 1 + len(replies))),
+        )
+        self.assertEqual(self.game.pending_votes, {})
+        self.manager.disconnect(joined.context)
+        resumed = self.manager.handle_message(
+            client_message(
+                "session.resume",
+                {
+                    "connection_token": joined.reply.payload["connection_token"],
+                    "last_seq": joined.reply.seq,
+                },
+            )
+        )
+
+        self.assertEqual(resumed.replay, tuple(replies))
 
     def test_disconnect_keeps_the_game_and_seat_intact(self) -> None:
         result = self.manager.handle_message(
@@ -193,6 +286,49 @@ class SessionManagerTests(unittest.TestCase):
         self.assertEqual(replacement.replaced_connection_ids, (first.context.connection_id,))
         self.assertEqual(self.manager.session_for(GAME_ID).connection_count("player-0"), 1)
 
+    def test_action_results_are_retained_and_replayed_with_original_request_ids(self) -> None:
+        self.game._enter_phase(GamePhase.VOTE, 1)
+        joined = self.manager.handle_message(join_message(self.registry, "player-0"))
+        request_id = "123e4567-e89b-12d3-a456-426614174199"
+        accepted = self.manager.handle_message(
+            client_message(
+                "vote.cast",
+                {"target_player_id": "player-1"},
+                event_id=request_id,
+            ),
+            joined.context,
+        )
+        rejected_request_id = "123e4567-e89b-12d3-a456-426614174177"
+        rejected = self.manager.handle_message(
+            client_message(
+                "vote.cast",
+                {"target_player_id": "player-0"},
+                event_id=rejected_request_id,
+            ),
+            joined.context,
+        )
+        self.manager.disconnect(joined.context)
+
+        resumed = self.manager.handle_message(
+            client_message(
+                "session.resume",
+                {
+                    "connection_token": joined.reply.payload["connection_token"],
+                    "last_seq": joined.reply.seq,
+                },
+            )
+        )
+
+        self.assertEqual(accepted.reply.seq, joined.reply.seq + 1)
+        self.assertEqual(accepted.reply.payload["request_event_id"], request_id)
+        self.assertEqual(rejected.reply.type, "action.rejected")
+        self.assertEqual(rejected.reply.seq, accepted.reply.seq + 1)
+        self.assertEqual(
+            rejected.reply.payload["request_event_id"], rejected_request_id
+        )
+        self.assertEqual(resumed.replay, (accepted.reply, rejected.reply))
+        self.assertEqual(resumed.reply.seq, rejected.reply.seq + 1)
+
     def test_non_uuid_game_id_is_valid_for_core_and_protocol_messages(self) -> None:
         game = make_game("standard-nine")
         manager = SessionManager(
@@ -218,10 +354,15 @@ class SessionManagerTests(unittest.TestCase):
         self.assertIsNone(chat.reply)
         self.assertEqual(
             chat.channel_messages,
-            ((
-                "public",
-                {"player_id": "player-0", "display_name": "Player 0", "message": "hello"},
-            ),),
+            (
+                ChatSubmission(
+                    "public",
+                    {"player_id": "player-0", "display_name": "Player 0", "message": "hello"},
+                    InteractionAcceptance(
+                        "chat.send", "player-0", self.game.day, "day", 12, self.game.phase_ends_at
+                    ),
+                ),
+            ),
         )
         self.assertEqual(
             self.game.public_activity_counts[(self.game.day, "player-0")], 1
@@ -235,6 +376,153 @@ class SessionManagerTests(unittest.TestCase):
         self.assertIsNotNone(rejected.reply)
         self.assertEqual(rejected.reply.type, "action.rejected")
         self.assertEqual(rejected.reply.payload["reason"], "action_unavailable")
+        self.assertEqual(
+            rejected.reply.payload["request_event_id"],
+            "123e4567-e89b-12d3-a456-426614174101",
+        )
+
+    def test_authenticated_dispatch_samples_one_receipt_time_for_core_actions(self) -> None:
+        class CountingClock:
+            def __init__(self) -> None:
+                self.value = 37
+                self.calls: list[int] = []
+
+            def __call__(self) -> int:
+                self.calls.append(self.value)
+                return self.value
+
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        clock = CountingClock()
+        manager = SessionManager(registry, clock=clock)
+        context = manager.handle_message(join_message(registry, "player-0")).context
+        clock.calls.clear()
+        acceptance = InteractionAcceptance("chat.send", "player-0", 1, "day", 37, 40)
+
+        with patch.object(
+            game,
+            "submit_chat",
+            return_value=ChatSubmission(
+                "public",
+                {"player_id": "player-0", "display_name": "Player 0", "message": "hello"},
+                acceptance,
+            ),
+        ) as submit_chat:
+            result = manager.handle_message(self.communication_message("chat.send"), context)
+            self.assertEqual(result.channel_messages[0].acceptance, acceptance)
+            submit_chat.assert_called_once_with(37, "player-0", "public", "hello")
+
+        with patch.object(game, "declare_co", return_value=acceptance) as declare_co:
+            manager.handle_message(self.communication_message("co.declare"), context)
+            declare_co.assert_called_once_with(37, "player-0", "seer", "claim")
+
+        with patch.object(game, "report_co", return_value=acceptance) as report_co:
+            manager.handle_message(self.communication_message("co.report"), context)
+            report_co.assert_called_once_with(
+                37, "player-0", "inspect_result", "player-1", "not_wolf"
+            )
+
+        with patch.object(game, "submit_action") as submit_action:
+            accepted = manager.handle_message(
+                client_message(
+                    "ability.use", {"ability_id": "inspect", "target_player_ids": ["player-1"]}
+                ),
+                context,
+            )
+            submit_action.assert_called_once_with(37, "player-0", "inspect", ("player-1",))
+            self.assertEqual(accepted.reply.type, "action.accepted")
+
+        self.assertEqual(clock.calls, [37, 37, 37, 37, 37])
+
+    def test_core_owns_deadline_rejection_and_reply_clock_is_not_authorization(self) -> None:
+        class SequenceClock:
+            def __init__(self) -> None:
+                self.values = iter((1, 110, 777))
+                self.calls: list[int] = []
+
+            def __call__(self) -> int:
+                value = next(self.values)
+                self.calls.append(value)
+                return value
+
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        clock = SequenceClock()
+        manager = SessionManager(registry, clock=clock)
+        context = manager.handle_message(join_message(registry, "player-0")).context
+        with patch.object(
+            game, "submit_chat", side_effect=ActionRejected("action_deadline_passed")
+        ) as submit_chat:
+            result = manager.handle_message(self.communication_message("chat.send"), context)
+
+        submit_chat.assert_called_once_with(110, "player-0", "public", "hello")
+        self.assertEqual(clock.calls, [1, 110, 777])
+        self.assertEqual(result.reply.type, "action.rejected")
+        self.assertEqual(result.reply.payload["reason"], "action_deadline_passed")
+        self.assertEqual(
+            result.reply.payload["request_event_id"],
+            "123e4567-e89b-12d3-a456-426614174101",
+        )
+        self.assertEqual(result.reply.timestamp, 777)
+
+    def test_real_core_rejects_communication_at_exact_deadline_without_delivery(self) -> None:
+        for action in ("chat.send", "co.declare", "co.report"):
+            with self.subTest(action=action):
+                game = make_game()
+                game.day = 1
+                game._enter_phase(GamePhase.DAY, 100)
+                deadline = game.phase_ends_at
+                registry = GameRegistry({game.game_id: game})
+                manager = SessionManager(registry, clock=lambda: deadline)
+                context = manager.handle_message(join_message(registry, "player-0")).context
+                before = (
+                    dict(game.public_activity_counts),
+                    dict(game.co_declaration_counts),
+                    len(game.event_bus.events),
+                    game.get_state_sync("player-0")["history"],
+                )
+
+                result = manager.handle_message(self.communication_message(action), context)
+
+                self.assertEqual(result.reply.payload["reason"], "action_deadline_passed")
+                self.assertEqual(result.channel_messages, ())
+                self.assertEqual(
+                    (
+                        dict(game.public_activity_counts),
+                        dict(game.co_declaration_counts),
+                        len(game.event_bus.events),
+                        game.get_state_sync("player-0")["history"],
+                    ),
+                    before,
+                )
+
+    def test_session_preserves_unavailability_in_setup_and_dawn(self) -> None:
+        for phase in (GamePhase.SETUP, GamePhase.DAWN):
+            for action in ("chat.send", "co.declare", "co.report"):
+                game = make_game()
+                game.day = 1
+                game._enter_phase(phase, 100)
+                times = (101,)
+                if phase is GamePhase.DAWN:
+                    self.assertIsNotNone(game.phase_ends_at)
+                    times = (
+                        game.phase_ends_at - 1,
+                        game.phase_ends_at,
+                        game.phase_ends_at + 1,
+                    )
+                for now in times:
+                    with self.subTest(phase=phase.value, action=action, now=now):
+                        registry = GameRegistry({game.game_id: game})
+                        manager = SessionManager(registry, clock=lambda now=now: now)
+                        context = manager.handle_message(
+                            join_message(registry, "player-0")
+                        ).context
+                        result = manager.handle_message(
+                            self.communication_message(action), context
+                        )
+                        self.assertEqual(result.reply.type, "action.rejected")
+                        self.assertEqual(result.reply.payload["reason"], "action_unavailable")
+                        self.assertEqual(result.channel_messages, ())
 
     def test_ability_and_vote_requests_are_accepted_by_the_same_core_methods(self) -> None:
         wolf_player_id = next(
@@ -256,14 +544,28 @@ class SessionManagerTests(unittest.TestCase):
             ),
             joined.context,
         )
-        self.assertIsNone(ability.reply)
+        self.assertEqual(ability.reply.type, "action.accepted")
+        self.assertEqual(
+            ability.reply.payload,
+            {
+                "action": "ability.use",
+                "request_event_id": "123e4567-e89b-12d3-a456-426614174101",
+            },
+        )
         self.assertIn(wolf_player_id, self.game.pending_actions)
 
         self.game._enter_phase(GamePhase.VOTE, 2)
         vote = self.manager.handle_message(
             client_message("vote.cast", {"target_player_id": target_player_id}), joined.context
         )
-        self.assertIsNone(vote.reply)
+        self.assertEqual(vote.reply.type, "action.accepted")
+        self.assertEqual(
+            vote.reply.payload,
+            {
+                "action": "vote.cast",
+                "request_event_id": "123e4567-e89b-12d3-a456-426614174101",
+            },
+        )
         self.assertEqual(self.game.pending_votes[wolf_player_id], target_player_id)
 
     def test_vote_and_ability_rejections_expose_safe_distinct_reason_codes(self) -> None:
@@ -295,7 +597,17 @@ class SessionManagerTests(unittest.TestCase):
             ("self_vote_disabled", "unknown_target", "unknown_ability"),
         )
         self.assertTrue(
-            all(set(reply.payload) == {"action", "reason"} for reply in replies)
+            all(
+                set(reply.payload) == {"action", "reason", "request_event_id"}
+                for reply in replies
+            )
+        )
+        self.assertTrue(
+            all(
+                reply.payload["request_event_id"]
+                == "123e4567-e89b-12d3-a456-426614174101"
+                for reply in replies
+            )
         )
 
 
@@ -366,7 +678,7 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
         validator = ProtocolMessageValidator()
         event = {
             "type": "game.event",
-            "protocol_version": "1.0",
+            "protocol_version": PROTOCOL_VERSION,
             "event_id": "123e4567-e89b-12d3-a456-426614174102",
             "game_id": GAME_ID,
             "seq": 1,
@@ -409,6 +721,25 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
                 client_message("chat.send", {"channel": "public", "channel_id": "public", "message": "extra"})
             )
 
+    def test_runtime_validator_rejects_declared_opposite_direction_types(self) -> None:
+        validator = ProtocolMessageValidator()
+        server_only = client_message(
+            "action.accepted",
+            {
+                "action": "vote.cast",
+                "request_event_id": "123e4567-e89b-12d3-a456-426614174101",
+            },
+        )
+        client_only = client_message(
+            "vote.cast", {"target_player_id": "player-1"}
+        )
+        client_only["seq"] = 1
+
+        with self.assertRaisesRegex(ProtocolValidationError, "server-only"):
+            validator.validate_client(server_only)
+        with self.assertRaisesRegex(ProtocolValidationError, "client-only"):
+            validator.validate_server(client_only)
+
 
 class ChatChannelRecipientTests(unittest.TestCase):
     def test_public_channel_recipients_do_not_depend_on_every_role_declaration(self) -> None:
@@ -439,6 +770,320 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sync["seq"], joined["seq"] + 1)
         ProtocolMessageValidator().validate_server(sync)
         return joined
+
+    async def test_legacy_join_is_closed_before_player_state_or_token_issue(self) -> None:
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(registry, tick_interval_seconds=3600)
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        try:
+            async with connect(uri) as socket:
+                await socket.send(
+                    json.dumps(
+                        join_message(registry, "player-0", protocol_version="1.0")
+                    )
+                )
+                await socket.wait_closed()
+                self.assertEqual(socket.close_code, 1008)
+            self.assertFalse(server.sessions.session_for(GAME_ID).has_joined("player-0"))
+        finally:
+            await server.close()
+
+    async def test_noncanonical_request_ids_receive_replayable_rejections_not_1011(self) -> None:
+        game = make_game()
+        registry = GameRegistry({game.game_id: game})
+        server = WebSocketGameServer(registry, tick_interval_seconds=3600)
+        listener = await server.start("127.0.0.1", 0)
+        uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
+        rejected_messages = []
+        try:
+            async with connect(uri) as socket:
+                joined = await self._join(socket, registry, "player-0")
+                for event_id in NON_CANONICAL_REQUEST_IDS:
+                    await socket.send(
+                        json.dumps(
+                            client_message(
+                                "vote.cast",
+                                {"target_player_id": "player-1"},
+                                event_id=event_id,
+                            )
+                        )
+                    )
+                    rejected = json.loads(await socket.recv())
+                    ProtocolMessageValidator().validate_server(rejected)
+                    self.assertEqual(rejected["type"], "action.rejected")
+                    self.assertEqual(rejected["payload"]["reason"], "invalid_message")
+                    self.assertIsNone(rejected["payload"]["request_event_id"])
+                    rejected_messages.append(rejected)
+                await socket.send(json.dumps(client_message("session.ready", {})))
+                ready = json.loads(await socket.recv())
+                self.assertEqual(ready["type"], "session.ready")
+
+            async with connect(uri) as resumed_socket:
+                await resumed_socket.send(
+                    json.dumps(
+                        client_message(
+                            "session.resume",
+                            {
+                                "connection_token": joined["payload"]["connection_token"],
+                                "last_seq": 2,
+                            },
+                        )
+                    )
+                )
+                replay = [
+                    json.loads(await resumed_socket.recv())
+                    for _ in range(len(rejected_messages))
+                ]
+                self.assertEqual(replay, rejected_messages)
+                self.assertEqual(
+                    json.loads(await resumed_socket.recv())["type"], "session.ready"
+                )
+                self.assertEqual(
+                    json.loads(await resumed_socket.recv())["type"], "session.resumed"
+                )
+                self.assertEqual(
+                    json.loads(await resumed_socket.recv())["type"], "game.state_sync"
+                )
+        finally:
+            await server.close()
+
+    async def test_dispatch_lock_orders_deadline_equality_before_or_after_tick(self) -> None:
+        async def exercise(*, request_first: bool):
+            class ControlledWebSocket:
+                def __init__(self, request_release: asyncio.Event) -> None:
+                    self._request_release = request_release
+                    self.request_yielded = asyncio.Event()
+                    self.sent: list[str] = []
+                    self.closed = False
+
+                async def __aiter__(self):
+                    yield json.dumps(join_message(registry, "player-0"))
+                    await self._request_release.wait()
+                    self.request_yielded.set()
+                    yield json.dumps(
+                        SessionManagerTests.communication_message("chat.send")
+                    )
+
+                async def send(self, message: str) -> None:
+                    self.sent.append(message)
+
+                async def close(self, *, code: int, reason: str) -> None:
+                    self.closed = True
+
+            game = make_game()
+            game.day = 1
+            game._enter_phase(GamePhase.DAY, 100)
+            deadline = game.phase_ends_at
+            self.assertIsNotNone(deadline)
+            assert deadline is not None
+            registry = GameRegistry({game.game_id: game})
+            sessions = SessionManager(registry, clock=lambda: deadline)
+            ticker = TickDriver(registry, clock=lambda: deadline)
+            server = WebSocketGameServer(
+                registry,
+                sessions=sessions,
+                ticker=ticker,
+                tick_interval_seconds=3600,
+            )
+            request_release = asyncio.Event()
+            tick_release = asyncio.Event()
+            tick_sleep_returned = asyncio.Event()
+            join_seen = asyncio.Event()
+            request_seen = asyncio.Event()
+            tick_seen = asyncio.Event()
+            action_results = []
+            action_phases = []
+            tick_results = []
+            tick_phases = []
+            websocket = ControlledWebSocket(request_release)
+            original_handle_json = sessions.handle_json
+            original_advance_once = ticker.advance_once
+
+            def checked_handle_json(raw_message, context=None):
+                message_type = json.loads(raw_message)["type"]
+                result = original_handle_json(raw_message, context)
+                self.assertTrue(server._dispatch_lock.locked())  # noqa: SLF001
+                if message_type == "session.join":
+                    join_seen.set()
+                elif message_type == "chat.send":
+                    action_results.append(result)
+                    action_phases.append(game.phase)
+                    request_seen.set()
+                return result
+
+            def checked_advance_once():
+                self.assertTrue(server._dispatch_lock.locked())  # noqa: SLF001
+                result = original_advance_once()
+                tick_results.append(result)
+                tick_phases.append(game.phase)
+                tick_seen.set()
+                return result
+
+            async def controlled_tick_wait(_delay: float) -> None:
+                await tick_release.wait()
+                tick_sleep_returned.set()
+                tick_release.clear()
+
+            with patch.object(
+                sessions, "handle_json", side_effect=checked_handle_json
+            ), patch.object(
+                ticker, "advance_once", side_effect=checked_advance_once
+            ), patch(
+                "server.network.server.asyncio.sleep", new=controlled_tick_wait
+            ):
+                handler_task = asyncio.create_task(server._handle_connection(websocket))  # noqa: SLF001
+                await join_seen.wait()
+                await server._dispatch_lock.acquire()  # noqa: SLF001
+                ticker_task = asyncio.create_task(server._tick_forever())  # noqa: SLF001
+                if request_first:
+                    request_release.set()
+                    await websocket.request_yielded.wait()
+                    tick_release.set()
+                    await tick_sleep_returned.wait()
+                else:
+                    tick_release.set()
+                    await tick_sleep_returned.wait()
+                    request_release.set()
+                    await websocket.request_yielded.wait()
+                self.assertFalse(request_seen.is_set())
+                self.assertFalse(tick_seen.is_set())
+                server._dispatch_lock.release()  # noqa: SLF001
+                await request_seen.wait()
+                await tick_seen.wait()
+                await handler_task
+                ticker_task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await ticker_task
+                await server.close()
+
+            self.assertEqual(len(action_results), 1)
+            self.assertEqual(len(tick_results), 1)
+            return action_results[0], action_phases[0], tick_results[0], tick_phases[0]
+
+        request_result, request_phase, tick_result, tick_phase = await exercise(
+            request_first=True
+        )
+        self.assertEqual(request_phase, GamePhase.DAY)
+        self.assertEqual(request_result.reply.payload["reason"], "action_deadline_passed")
+        self.assertTrue(tick_result[GAME_ID])
+        self.assertNotEqual(tick_phase, GamePhase.DAY)
+
+        request_result, request_phase, tick_result, tick_phase = await exercise(
+            request_first=False
+        )
+        self.assertTrue(tick_result[GAME_ID])
+        self.assertNotEqual(tick_phase, GamePhase.DAY)
+        self.assertEqual(request_phase, tick_phase)
+        self.assertEqual(request_result.reply.payload["reason"], "action_unavailable")
+
+    async def test_vote_request_and_tick_have_deterministic_dispatch_lock_order(self) -> None:
+        async def exercise(*, request_first: bool):
+            game = make_game()
+            game.rules = replace(
+                game.rules, vote=replace(game.rules.vote, reveal="live")
+            )
+            game.day = 1
+            game._enter_phase(GamePhase.VOTE, 100)
+            deadline = game.phase_ends_at
+            self.assertIsNotNone(deadline)
+            assert deadline is not None
+            registry = GameRegistry({game.game_id: game})
+            sessions = SessionManager(registry, clock=lambda: deadline - 1)
+            ticker = TickDriver(registry, clock=lambda: deadline)
+            server = WebSocketGameServer(
+                registry,
+                sessions=sessions,
+                ticker=ticker,
+                tick_interval_seconds=3600,
+            )
+            context = sessions.handle_message(join_message(registry, "player-0")).context
+            request_id = "123e4567-e89b-12d3-a456-426614174188"
+            request_observations = []
+            tick_observations = []
+            core_evidence = []
+            original_submit_vote = game.submit_vote
+
+            def observed_submit_vote(now, voter_player_id, target_player_id):
+                acceptance = original_submit_vote(now, voter_player_id, target_player_id)
+                core_evidence.append((target_player_id, request_id, acceptance))
+                return acceptance
+
+            async def dispatch_request():
+                async with server._dispatch_lock:  # noqa: SLF001
+                    self.assertTrue(server._dispatch_lock.locked())  # noqa: SLF001
+                    result = sessions.handle_message(
+                        client_message(
+                            "vote.cast",
+                            {"target_player_id": "player-1"},
+                            event_id=request_id,
+                        ),
+                        context,
+                    )
+                    request_observations.append(
+                        (result, game.phase, dict(game.pending_votes))
+                    )
+
+            async def dispatch_tick():
+                async with server._dispatch_lock:  # noqa: SLF001
+                    self.assertTrue(server._dispatch_lock.locked())  # noqa: SLF001
+                    tick_observations.append((ticker.advance_once(), game.phase))
+
+            with patch.object(game, "submit_vote", side_effect=observed_submit_vote):
+                first = dispatch_request if request_first else dispatch_tick
+                second = dispatch_tick if request_first else dispatch_request
+                first_task = asyncio.create_task(first())
+                await asyncio.sleep(0)
+                second_task = asyncio.create_task(second())
+                await asyncio.gather(first_task, second_task)
+            await server.close()
+
+            event_types = [event.type for event in game.event_bus.events]
+            return (
+                request_observations[0],
+                tick_observations[0],
+                tuple(core_evidence),
+                dict(game.pending_votes),
+                event_types,
+                deadline,
+            )
+
+        request, tick, evidence, pending, event_types, deadline = await exercise(
+            request_first=True
+        )
+        result, request_phase, pending_during_request = request
+        self.assertEqual(request_phase, GamePhase.VOTE)
+        self.assertEqual(pending_during_request, {"player-0": "player-1"})
+        self.assertEqual(result.reply.type, "action.accepted")
+        self.assertEqual(
+            result.reply.payload["request_event_id"],
+            "123e4567-e89b-12d3-a456-426614174188",
+        )
+        self.assertEqual(len(evidence), 1)
+        target, evidence_request_id, acceptance = evidence[0]
+        self.assertEqual(target, "player-1")
+        self.assertEqual(evidence_request_id, result.reply.payload["request_event_id"])
+        self.assertEqual(acceptance.accepted_at, deadline - 1)
+        self.assertEqual(acceptance.phase_deadline, deadline)
+        self.assertEqual(pending, {})
+        self.assertIn("VOTE_SUBMITTED", event_types)
+        self.assertIn("VOTE_REVEALED_LIVE", event_types)
+        self.assertTrue(tick[0][GAME_ID])
+
+        request, tick, evidence, pending, event_types, _ = await exercise(
+            request_first=False
+        )
+        result, request_phase, pending_during_request = request
+        self.assertNotEqual(request_phase, GamePhase.VOTE)
+        self.assertEqual(pending_during_request, {})
+        self.assertEqual(result.reply.type, "action.rejected")
+        self.assertEqual(result.reply.payload["reason"], "action_unavailable")
+        self.assertEqual(evidence, ())
+        self.assertEqual(pending, {})
+        self.assertNotIn("VOTE_SUBMITTED", event_types)
+        self.assertNotIn("VOTE_REVEALED_LIVE", event_types)
+        self.assertTrue(tick[0][GAME_ID])
 
     async def test_event_delivery_separates_public_private_and_server_visibility(self) -> None:
         game = make_game()
@@ -514,7 +1159,11 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
         game = make_game()
         game._enter_phase(GamePhase.DAY, 1)
         registry = GameRegistry({game.game_id: game})
-        server = WebSocketGameServer(registry, tick_interval_seconds=3600)
+        server = WebSocketGameServer(
+            registry,
+            sessions=SessionManager(registry, clock=lambda: 2),
+            tick_interval_seconds=3600,
+        )
         listener = await server.start("127.0.0.1", 0)
         uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
         try:

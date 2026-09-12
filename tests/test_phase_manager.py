@@ -303,7 +303,7 @@ class PhaseManagerTests(unittest.TestCase):
             ("player-5", "player-4"),
             ("player-6", "player-4"),
         ):
-            game.submit_vote(voter_player_id, target_player_id)
+            game.submit_vote(game.phase_ends_at - 1, voter_player_id, target_player_id)
 
 
 if __name__ == "__main__":

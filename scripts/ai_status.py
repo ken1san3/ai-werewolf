@@ -27,7 +27,35 @@ for _stream in (sys.stdout, sys.stderr):
 ROOT = Path(__file__).resolve().parent.parent
 AI = ROOT / "Docs" / "ai"
 
-ROLE_SECTIONS = {"implement": "1", "review": "2", "fix": "3", "design": "4"}
+ROLE_SECTIONS = {
+    "integrate": "1",
+    "architect": "2",
+    "design": "2",
+    "implement": "3",
+    "review": "4",
+    "fix": "5",
+    "test": "6",
+    "investigate": "7",
+}
+TASK_STATES = {
+    "READY",
+    "IN_PROGRESS",
+    "REVIEW",
+    "BLOCKED",
+    "DECISION_REQUIRED",
+    "DONE",
+    "CANCELLED",
+}
+LIVE_TASK_STATES = {
+    "READY",
+    "IN_PROGRESS",
+    "REVIEW",
+    "BLOCKED",
+    "DECISION_REQUIRED",
+}
+TASK_BLOCK = re.compile(r"(?ms)^## (T\d+)\s*$\n(.*?)(?=^## |\Z)")
+TASK_FIELD = re.compile(r"(?m)^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$")
+ACTIVE_TASK_LINE = re.compile(r"(?m)^Active task:\s*(T\d+)\s*$")
 DESIGN_REQUIRED_MARKER = re.compile(r"(?m)^DESIGN: REQUIRED\s*$")
 STATUS_LINE = re.compile(r"(?m)^Status:\s*(.*?)\s*$")
 STATUS_VALUE = re.compile(
@@ -102,6 +130,44 @@ def active_review_blocks(inbox: str) -> list[str]:
         )
     active.sort(key=lambda item: item[0])
     return [block for _, block in active]
+
+
+def task_records(board: str | None = None) -> list[dict[str, str]]:
+    """Return model-neutral task board records in file order."""
+
+    if board is None:
+        board = read(AI / "TASKS.md")
+    records: list[dict[str, str]] = []
+    for match in TASK_BLOCK.finditer(board):
+        record = {key: value for key, value in TASK_FIELD.findall(match.group(2))}
+        record["Header ID"] = match.group(1)
+        records.append(record)
+    return records
+
+
+def active_task_id(state: str | None = None) -> str | None:
+    if state is None:
+        state = read(AI / "CURRENT_STATE.md")
+    declarations = ACTIVE_TASK_LINE.findall(state)
+    return declarations[0] if len(declarations) == 1 else None
+
+
+def display_task(record: dict[str, str]) -> str:
+    task_id = record.get("Task ID", record.get("Header ID", "(unknown)"))
+    title = record.get("Title", "(untitled)")
+    responsibility = record.get("Role", record.get("Responsibility", "(unknown)"))
+    state = record.get("State", "(unknown)")
+    packet = record.get("Task packet", "(missing packet)").replace("`", "")
+    return f"{task_id} [{state}] {title} — {responsibility}\n  packet: {packet}"
+
+
+def git_summary() -> str:
+    branch = git("branch", "--show-current") or "(unknown branch)"
+    head = git("rev-parse", "--short", "HEAD") or "(unknown HEAD)"
+    dirty = [
+        line for line in git("status", "--short").splitlines() if "_to_delete" not in line
+    ]
+    return f"{branch} @ {head}; dirty entries: {len(dirty)}"
 
 
 def target_subphase(state: str | None = None) -> str | None:
@@ -310,7 +376,14 @@ def print_design_gate(state: str) -> None:
 
     status, approved = design_status(design)
     print(f"design document: {display_path(design)}")
-    print(f"Status: {status}")
+    status_match = STATUS_VALUE.fullmatch(status)
+    if status_match is None:
+        print("Status: UNKNOWN — design Status value is not recognized")
+    else:
+        # The source line may retain historical reviewer/model attribution after an em
+        # dash.  Normal bootstrap output is responsibility-based, so emit only the
+        # canonical workflow state here and leave the evidence in its source document.
+        print(f"Status: {status_match.group(1)}")
     if approved is True:
         print("approved: yes")
         print("implementation: allowed")
@@ -329,21 +402,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "role",
         nargs="?",
-        choices=(*ROLE_SECTIONS, 'infra'),
+        choices=tuple(ROLE_SECTIONS),
         help="append only the matching RUNBOOK section",
     )
-    parser.add_argument('--run', type=Path, help='infra only: read a local runner state')
-    args = parser.parse_args()
-    if args.run and args.role != 'infra':
-        parser.error('--run requires infra')
-    return args
+    return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if args.role == 'infra':
-        from infra_status import display
-        return display(ROOT, args.run)
+    role = args.role or "integrate"
     state = read(AI / "CURRENT_STATE.md")
     inbox = read(AI / "REVIEW_INBOX.md")
     questions = read(AI / "OPEN_QUESTIONS.md")
@@ -355,47 +422,75 @@ def main() -> int:
 
     print()
     print("=" * 60)
-    print("NEXT TASK")
+    print("CURRENT TARGET")
     print("=" * 60)
-    print(section(state, "Next Task") or "(unknown)")
+    print(section(state, "Current Target") or "(unknown)")
 
-    if args.role == "implement":
+    print()
+    print("=" * 60)
+    print("LIVE TASKS")
+    print("=" * 60)
+    live_tasks = [
+        record
+        for record in task_records()
+        if record.get("State") in LIVE_TASK_STATES
+    ]
+    print("\n".join(display_task(record) for record in live_tasks) or "none")
+
+    print()
+    print("=" * 60)
+    print("CURRENT BLOCKERS")
+    print("=" * 60)
+    print(section(state, "Current Blockers") or "(unknown)")
+
+    if role == "integrate":
+        print()
+        print("=" * 60)
+        print("CRITICAL PATH")
+        print("=" * 60)
+        print(section(state, "Critical Path") or "(unknown)")
+
+        print()
+        print("=" * 60)
+        print("NEXT INTEGRATION ACTION")
+        print("=" * 60)
+        print(section(state, "Next Integration Action") or "(unknown)")
+
+    if args.role:
         print()
         print_design_gate(state)
 
-    print()
-    print("=" * 60)
-    print("OPEN REVIEWS")
-    print("=" * 60)
-    active_reviews = active_review_blocks(inbox)
-    if active_reviews:
-        print("\n\n".join(active_reviews))
-    else:
-        print("none")
+    if role in {"integrate", "implement", "review", "fix", "test", "investigate"}:
+        print()
+        print("=" * 60)
+        print("OPEN REVIEWS")
+        print("=" * 60)
+        active_reviews = active_review_blocks(inbox)
+        if active_reviews:
+            print("\n\n".join(active_reviews))
+        else:
+            print("none")
 
-    print()
-    print("=" * 60)
-    print("TEST STATUS")
-    print("=" * 60)
-    print(section(state, "Test Status") or "(unknown)")
+    if role not in {"architect", "design"}:
+        print()
+        print("=" * 60)
+        print("TEST STATUS")
+        print("=" * 60)
+        print(section(state, "Test Status") or "(unknown)")
 
-    print()
-    print("=" * 60)
-    print("OPEN QUESTIONS")
-    print("=" * 60)
-    titles = re.findall(r"^## (Q\d+ .*)$", questions, flags=re.MULTILINE)
-    print("\n".join(titles) if titles else "none")
+    if role in {"integrate", "architect", "design"}:
+        print()
+        print("=" * 60)
+        print("OPEN QUESTIONS")
+        print("=" * 60)
+        titles = re.findall(r"^## (Q\d+ .*)$", questions, flags=re.MULTILINE)
+        print("\n".join(titles) if titles else "none")
 
     print()
     print("=" * 60)
     print("GIT")
     print("=" * 60)
-    print(git("log", "--oneline", "-3") or "(no history)")
-    dirty = git("status", "--short")
-    dirty_lines = [line for line in dirty.splitlines() if "_to_delete" not in line]
-    print()
-    print("dirty files:")
-    print("\n".join(dirty_lines) if dirty_lines else "(clean)")
+    print(git_summary())
 
     if args.role:
         print()

@@ -82,7 +82,7 @@ class WinEvaluatorTests(unittest.TestCase):
     def test_execution_evaluates_and_ends_after_the_last_werewolf_is_lynched(self) -> None:
         game = self.make_game({"villager": "villager", "wolf": "werewolf"})
         game._enter_phase(GamePhase.VOTE, 100)
-        game.submit_vote("villager", "wolf")
+        game.submit_vote(game.phase_ends_at - 1, "villager", "wolf")
 
         game.resolve_votes(160)
 
@@ -109,9 +109,9 @@ class WinEvaluatorTests(unittest.TestCase):
             rng=FirstChoiceRandom(),
         )
         game._enter_phase(GamePhase.VOTE, 100)
-        game.submit_vote("cat", "wolf")
-        game.submit_vote("wolf", "cat")
-        game.submit_vote("villager", "cat")
+        game.submit_vote(game.phase_ends_at - 1, "cat", "wolf")
+        game.submit_vote(game.phase_ends_at - 1, "wolf", "cat")
+        game.submit_vote(game.phase_ends_at - 1, "villager", "cat")
 
         game.resolve_votes(160)
 

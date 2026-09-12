@@ -38,6 +38,18 @@ _COMPLETION_TESTS = {
         "tests/test_phase3_3_completion.py",
         "test_nine_brain_clients_complete_with_dummy",
     ),
+    (
+        "tests/test_phase3_5_completion.py",
+        "test_nine_process_cumulative_reservations_are_exact_and_reproducible",
+    ),
+    (
+        "tests/test_phase4_completion.py",
+        "test_one_llm_eight_rule_based_clients_complete_with_exact_evidence",
+    ),
+    (
+        "tests/test_phase5_completion.py",
+        "test_one_broker_nine_production_llm_clients_complete",
+    ),
 }
 
 

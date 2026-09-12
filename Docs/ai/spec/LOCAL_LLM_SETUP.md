@@ -53,7 +53,7 @@ dev と game は同時起動できないので、どちらを立てたかが表�
 現行設定の評価資料ではpeak VRAM 6949 MiB。旧設定の約5GBという見積りは流用しない。
 
 **したがってツールは「サーバが落ちている」状態を必ず取りうる。**
-圧縮呼び出しが失敗したら生のまま進む。実装runnerでは失敗と証拠を保存し、上位へ引継ぐ。
+圧縮呼び出しが失敗したら生のまま進み、失敗と証拠を作業記録へ残す。
 
 ## プロファイル
 
@@ -71,10 +71,15 @@ dev と game は同時起動できないので、どちらを立てたかが表�
 dev  : -ngl 99 --n-cpu-moe 35 -fa 1 -c 32768 --jinja
        --temp 0.7 --top-p 0.8 --top-k 20 --presence-penalty 1.5 --min-p 0.0
 game : -ngl 99 -c 8192 --jinja
+       --chat-template-kwargs '{"enable_thinking":false}'
 ```
 
 `--n-cpu-moe 35` が dev の要点。35B MoE のエキスパートを CPU/RAM 側へ逃がすことで
 8GB VRAM に収めている。
+
+game profile も structured output の短い上限内で推論だけに token を使い切らないよう、
+chat template の thinking を明示的に無効化する。Phase 4 実機確認では、この一項目だけを
+変えた同一 request が非空かつ schema-valid な JSON content を返した。
 
 ## 使われたかを確認する
 
@@ -125,9 +130,3 @@ python tools\ask.py "Phase 2.2 の残課題を挙げて" -p aiwolf -d current -d
 4. `python tools\doctor.py` で健全性を確認する
 5. プロジェクトを足すときは `projects\<名前>.toml` を作る。
    repo のパスと文書のキーだけを書き、内容は複製しない
-
-## Qwen実装runner（2026-09-07）
-
-D057で用途を実装・修正へ拡張。手順は LOCAL_IMPLEMENTATION_RUNNER.md。
-dev設定35は2026-09-07評価資料の長時間検証に基づく（peak VRAM 6949 MiB）。
-上記2026-08-30の速度は旧測定であり、設定35の再測定ではない。

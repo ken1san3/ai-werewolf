@@ -24,7 +24,7 @@ The SHA-256 derivation is implementation-unique: it fixes a domain tag, field or
 
 During review, the draft lacked public statuses for invalid Brain output and Brain failure. The author added `INVALID` and `BRAIN_FAILED`, so `ReactionOutcome` can now preserve every distinction required by the parent Acceptance Criterion 11 without overloading intentional silence or timeout.
 
-Approval is limited to the exact pre-approval bytes identified above. After reviewing those bytes, the reviewer changed only the leading status line. The stopped D059 run remains terminal; a replacement workpackage must bind the approved addendum and this review record and must use a new run. This approval does not authorize implementation beyond the isolated types/randomness unit or any game implementation.
+Approval is limited to the exact pre-approval bytes identified above. After reviewing those bytes, the reviewer changed only the leading status line. This approval does not authorize implementation beyond the isolated types/randomness unit or any other game implementation.
 
 No implementation, provider call, or game execution was performed. Documentation validation had already passed on the reviewed draft; the reviewer reruns it after recording approval.
 

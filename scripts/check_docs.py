@@ -27,6 +27,31 @@ DOCS = ROOT / "Docs" / "ai"
 DESIGN = DOCS / "spec" / "DESIGN.md"
 CURRENT_STATE = DOCS / "CURRENT_STATE.md"
 CORE = ROOT / "server" / "aiwolf_core"
+TASK_BOARD = DOCS / "TASKS.md"
+MODEL_ASSIGNMENTS = DOCS / "MODEL_ASSIGNMENTS.md"
+ROLE_DOCUMENTS = {
+    "Integrator": DOCS / "roles" / "INTEGRATOR.md",
+    "Architect": DOCS / "roles" / "ARCHITECT.md",
+    "Implementer": DOCS / "roles" / "IMPLEMENTER.md",
+    "Reviewer": DOCS / "roles" / "REVIEWER.md",
+    "Tester": DOCS / "roles" / "TESTER.md",
+    "Investigator": DOCS / "roles" / "INVESTIGATOR.md",
+}
+
+RESPONSIBILITIES = {
+    "Integrator",
+    "Architect",
+    "Implementer",
+    "Reviewer",
+    "Tester",
+    "Investigator",
+}
+MODEL_NAME = re.compile(
+    r"(?<![A-Za-z0-9_])"
+    r"(?:Astra|Sol|Luna|Terra|Claude|Codex|Qwen|Gemini|GPT-[0-9A-Za-z.-]+)"
+    r"(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
 
 sys.path.insert(0, str(ROOT))
 from scripts import ai_status
@@ -140,10 +165,18 @@ def check_known_failures_have_active_review() -> None:
         return
     inbox = read(DOCS / "REVIEW_INBOX.md")
     active = re.findall(r"(?m)^## R-\d{8}-\d+ \[(?:OPEN|IN_PROGRESS)\]", inbox)
+    covered_task = False
     if not active:
+        task_ids = set(re.findall(r"\bT\d+\b", value))
+        covered_task = any(
+            record.get("Task ID") in task_ids
+            and record.get("State") in ai_status.LIVE_TASK_STATES
+            for record in ai_status.task_records(read(TASK_BOARD))
+        )
+    if not active and not covered_task:
         fail(
             "known-failing-review",
-            "CURRENT_STATE.md に既知の失敗があるのに REVIEW_INBOX.md に OPEN / IN_PROGRESS が無い",
+            "CURRENT_STATE.md に既知の失敗があるのに OPEN review または対応する live task が無い",
         )
 
 
@@ -155,24 +188,223 @@ def check_runbook_sections() -> None:
             fail("runbook-section", f"role '{role}' の RUNBOOK §{number} が無い")
 
 
+# --- 5a. 現役責務と model assignment が分離されているか --------------------
+def active_workflow_files() -> list[Path]:
+    files = [
+        ROOT / "AGENTS.md",
+        ROOT / "README.md",
+        ROOT / "CONTRIBUTING.md",
+        DOCS / "INDEX.md",
+        DOCS / "CURRENT_STATE.md",
+        DOCS / "RUNBOOK.md",
+        DOCS / "PROMPTS.md",
+        DOCS / "ROADMAP.md",
+        DOCS / "TASKS.md",
+        DOCS / "WORKFLOW.md",
+        DOCS / "ARCHITECTURE.md",
+        DOCS / "OPERATIONS.md",
+        DOCS / "MAIN_INTEGRATOR_PROMPT.md",
+        DOCS / "OPEN_QUESTIONS.md",
+        DOCS / "REVIEW_INBOX.md",
+    ]
+    files.extend(sorted((DOCS / "tasks").glob("T*.md")))
+    files.extend(sorted((DOCS / "roles").glob("*.md")))
+    files.extend(sorted((DOCS / "prompts").glob("*.md")))
+    return files
+
+
+def check_role_model_separation() -> None:
+    for responsibility, path in ROLE_DOCUMENTS.items():
+        if not path.is_file():
+            fail("role-doc", f"{responsibility} の role document が無い")
+
+    for path in active_workflow_files():
+        if not path.is_file():
+            fail("role-model", f"{path.relative_to(ROOT)} が見つからない")
+            continue
+        match = MODEL_NAME.search(read(path))
+        if match:
+            fail(
+                "role-model",
+                f"{path.relative_to(ROOT)} に現役割当として解釈され得る model 名 "
+                f"'{match.group(0)}' がある",
+            )
+
+    if not MODEL_ASSIGNMENTS.is_file():
+        fail("model-assignments", "Docs/ai/MODEL_ASSIGNMENTS.md が見つからない")
+        return
+    text = read(MODEL_ASSIGNMENTS)
+    assigned = {
+        match.group(1)
+        for match in re.finditer(
+            r"(?m)^\| (Integrator|Architect|Implementer|Reviewer|Tester|Investigator) \|",
+            text,
+        )
+    }
+    for responsibility in sorted(RESPONSIBILITIES - assigned):
+        fail(
+            "model-assignments",
+            f"MODEL_ASSIGNMENTS.md に {responsibility} の行が無い",
+        )
+    if not MODEL_NAME.search(text):
+        fail(
+            "model-assignments",
+            "MODEL_ASSIGNMENTS.md に現在の具体的な model assignment が無い",
+        )
+
+
+def task_path(value: str) -> Path | None:
+    match = re.search(r"`([^`]+)`", value)
+    if match is None:
+        return None
+    try:
+        candidate = (ROOT / match.group(1)).resolve()
+        candidate.relative_to(ROOT)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
+def check_task_board() -> None:
+    if not TASK_BOARD.is_file():
+        fail("task-board", "Docs/ai/TASKS.md が見つからない")
+        return
+
+    records = ai_status.task_records(read(TASK_BOARD))
+    if not records:
+        fail("task-board", "TASKS.md に task record が無い")
+        return
+
+    ids = [record.get("Task ID", "") for record in records]
+    for task_id in sorted({value for value in ids if value and ids.count(value) > 1}):
+        fail("task-board", f"Task ID {task_id} が重複している")
+
+    required = {
+        "Task ID",
+        "Title",
+        "Role",
+        "State",
+        "Priority",
+        "Dependencies",
+        "Scope",
+        "Goal",
+        "Acceptance",
+        "Tests",
+        "Notes",
+        "Expected files",
+        "Design Gate",
+        "Review required",
+        "Task packet",
+        "Handoff path",
+    }
+    by_id: dict[str, dict[str, str]] = {}
+    for record in records:
+        header_id = record.get("Header ID", "")
+        task_id = record.get("Task ID", "")
+        if task_id != header_id:
+            fail(
+                "task-board",
+                f"header {header_id or '(missing)'} と Task ID {task_id or '(missing)'} が一致しない",
+            )
+        if task_id:
+            by_id[task_id] = record
+        for field in sorted(required - record.keys()):
+            fail("task-board", f"{header_id or '(unknown)'} に {field}: が無い")
+        state = record.get("State")
+        if state not in ai_status.TASK_STATES:
+            fail("task-board", f"{task_id or header_id} の State '{state}' は許可語彙外")
+        responsibility = record.get("Role")
+        if responsibility not in RESPONSIBILITIES:
+            fail(
+                "task-board",
+                f"{task_id or header_id} の Responsibility '{responsibility}' は未定義",
+            )
+
+        packet = task_path(record.get("Task packet", ""))
+        if packet is None or not packet.is_file():
+            fail("task-board", f"{task_id or header_id} の task packet が実在しない")
+        else:
+            packet_text = read(packet)
+            if not re.search(
+                rf"(?m)^Task ID:\s*{re.escape(task_id)}\s*$",
+                packet_text,
+            ):
+                fail("task-board", f"{task_id} の packet 内 Task ID が一致しない")
+            if not re.search(
+                rf"(?m)^Responsibility:\s*{re.escape(responsibility or '')}\s*$",
+                packet_text,
+            ):
+                fail("task-board", f"{task_id} の packet 内 Responsibility が一致しない")
+
+        handoff = task_path(record.get("Handoff path", ""))
+        if state == "DONE" and (handoff is None or not handoff.is_file()):
+            fail("task-board", f"DONE の {task_id or header_id} に handoff が実在しない")
+
+        gate = record.get("Design Gate")
+        if state == "READY" and gate not in {
+            "APPROVED",
+            "NOT REQUIRED",
+            "PRODUCES DESIGN",
+        }:
+            fail("task-board", f"READY の {task_id or header_id} は Design Gate 未充足")
+
+    state_text = read(CURRENT_STATE)
+    active_id = ai_status.active_task_id(state_text)
+    if active_id is None:
+        fail("task-board", "CURRENT_STATE.md に一意な Active task: Txxx が無い")
+        return
+    active = by_id.get(active_id)
+    if active is None:
+        fail("task-board", f"Active task {active_id} が TASKS.md に存在しない")
+        return
+    if active.get("State") not in ai_status.LIVE_TASK_STATES:
+        fail("task-board", f"Active task {active_id} が live state ではない")
+    declared_states = re.findall(r"(?m)^Task state:\s*(\w+)\s*$", state_text)
+    if declared_states != [active.get("State")]:
+        fail(
+            "task-board",
+            f"CURRENT_STATE の Task state と {active_id} の State が一致しない",
+        )
+
+    gate = active.get("Design Gate")
+    decision = ai_status.design_gate(state_text)
+    if gate == "APPROVED":
+        selected = ai_status.target_design(state_text)
+        design = DOCS / "design" / (selected or "")
+        _, approved = ai_status.design_status(design)
+        if decision != "REQUIRED" or not design.is_file() or approved is not True:
+            fail(
+                "task-board",
+                f"{active_id} は Design Gate APPROVED だが CURRENT_STATE/design と不整合",
+            )
+    elif gate == "NOT REQUIRED" and decision != "NOT REQUIRED":
+        fail(
+            "task-board",
+            f"{active_id} は Design Gate NOT REQUIRED だが CURRENT_STATE と不整合",
+        )
+
+
 # --- 5b. Design Gate の対象と Status 語彙が機械判定できるか ---------------
 def check_design_target() -> None:
     state = read(CURRENT_STATE)
     target = ai_status.target_subphase(state)
+    decision = ai_status.design_gate(state)
+    selected_design = ai_status.target_design(state)
+    if target is None and decision is None and selected_design is None:
+        return
     if target is None:
         fail("design-target", "CURRENT_STATE.md に Target subphase: 行が無い")
         return
-    decision = ai_status.design_gate(state)
     if decision is None:
         fail(
             "design-target",
             "CURRENT_STATE.md に Design gate: REQUIRED / NOT REQUIRED の宣言が無い、重複、または語彙外",
         )
         return
-    if not re.search(
-        rf"(?m)^## {re.escape(target)}(?:\s|$)",
-        read(DOCS / "ROADMAP.md"),
-    ):
+    roadmap = read(DOCS / "ROADMAP.md")
+    subphase_heading = rf"(?m)^## {re.escape(target)}(?:\s|$)"
+    phase_heading = rf"(?m)^# Phase {re.escape(target)}(?:\s|$)"
+    if not re.search(subphase_heading, roadmap) and not re.search(phase_heading, roadmap):
         fail("design-target", f"Target subphase {target} の ROADMAP 節が無い")
     requests = ai_status.design_gate_documents(target)
     if decision == "NOT REQUIRED" and requests:
@@ -243,12 +475,18 @@ def check_design_request_status() -> None:
                 )
 
 
-# --- 6. CURRENT_STATE の Next Task が実在ファイルを指すか -----------------
+# --- 6. CURRENT_STATE の next integration action が実在ファイルを指すか ----
 def check_next_task_file() -> None:
     text = read(CURRENT_STATE)
-    section = re.search(r"(?ms)^## Next Task\s*\n(.*?)(?=^## |\Z)", text)
+    section = re.search(
+        r"(?ms)^## Next Integration Action\s*\n(.*?)(?=^## |\Z)",
+        text,
+    )
     if section is None:
-        fail("next-task-file", "CURRENT_STATE.md に ## Next Task 節が無い")
+        fail(
+            "next-task-file",
+            "CURRENT_STATE.md に ## Next Integration Action 節が無い",
+        )
         return
 
     references = re.findall(r"`([^`\r\n]+)`", section.group(1))
@@ -269,7 +507,7 @@ def check_next_task_file() -> None:
 
     fail(
         "next-task-file",
-        "CURRENT_STATE.md の ## Next Task に、バッククォートで囲まれた"
+        "CURRENT_STATE.md の ## Next Integration Action に、バッククォートで囲まれた"
         "リポジトリ内の実在ファイルパスが無い",
     )
 
@@ -470,6 +708,11 @@ SESSION_CONTEXT_LIMITS = {
     DOCS / "REVIEW_INBOX.md": 8000,
     DOCS / "ROADMAP.md": 10000,
     DOCS / "RUNBOOK.md": 16000,
+    DOCS / "TASKS.md": 12000,
+    DOCS / "WORKFLOW.md": 12000,
+    DOCS / "ARCHITECTURE.md": 12000,
+    DOCS / "OPERATIONS.md": 16000,
+    DOCS / "MAIN_INTEGRATOR_PROMPT.md": 8000,
 }
 
 
@@ -497,11 +740,6 @@ def check_session_context_size() -> None:
 
 
 def main() -> int:
-    if (DOCS / 'infra' / 'runner.json').exists():
-        from infra_status import check_gate
-        valid, detail = check_gate(ROOT)
-        if not valid:
-            fail('infra-gate', detail)
     for check in (
         check_design_sections,
         check_decision_refs,
@@ -509,6 +747,8 @@ def main() -> int:
         check_review_inbox,
         check_known_failures_have_active_review,
         check_runbook_sections,
+        check_role_model_separation,
+        check_task_board,
         check_design_target,
         check_design_gate_status,
         check_design_request_status,

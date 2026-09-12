@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 import math
-from typing import Any
+import time
+from typing import Any, Callable
 
 from ai_client.network import (
     AbilityAction,
@@ -35,6 +36,7 @@ from .model import (
     CoReportDecision,
     DecisionOutcome,
     DecisionStatus,
+    DispatchDeadline,
     NoDecision,
     VoteDecision,
 )
@@ -69,18 +71,23 @@ class BrainController:
         sender: NetworkClient,
         brain: Brain,
         config: BrainRunConfig = BrainRunConfig(),
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not isinstance(config, BrainRunConfig):
             raise TypeError("config must be BrainRunConfig")
         if not hasattr(brain, "decide") or not callable(brain.decide):
             raise TypeError("brain must provide an async decide(request) method")
+        if not callable(clock):
+            raise TypeError("clock must be callable")
         self.world = world
         self.sender = sender
         self.brain = brain
         self.config = config
+        self._clock = clock
         self._active: _Invocation | None = None
         self._stopping = False
         self._unresponsive = False
+        self._last_dispatched_decision: tuple[SendReceipt, BrainDecision] | None = None
 
     @property
     def active(self) -> bool:
@@ -90,9 +97,18 @@ class BrainController:
     def unresponsive(self) -> bool:
         return self._unresponsive
 
-    def capture_input(self) -> BrainInput | None:
+    def capture_input(
+        self,
+        *,
+        allowed_handles: tuple[ActionHandle, ...] | None = None,
+        dispatch_deadline: DispatchDeadline | None = None,
+    ) -> BrainInput | None:
         """Synchronously capture a consistent, request-local World view."""
 
+        if dispatch_deadline is not None and not isinstance(
+            dispatch_deadline, DispatchDeadline
+        ):
+            raise TypeError("dispatch_deadline must be DispatchDeadline when supplied")
         snapshot = self.world.snapshot()
         if not self._snapshot_is_current(snapshot):
             return None
@@ -106,14 +122,34 @@ class BrainController:
             return None
         if any(not isinstance(action, ActionHandle) for action in actions.actions):
             return None
+        captured_actions = tuple(actions.actions)
+        if allowed_handles is not None:
+            if (
+                not isinstance(allowed_handles, tuple)
+                or not allowed_handles
+                or any(not isinstance(handle, ActionHandle) for handle in allowed_handles)
+                or len(set(allowed_handles)) != len(allowed_handles)
+                or any(handle not in captured_actions for handle in allowed_handles)
+            ):
+                return None
+            allowed = frozenset(allowed_handles)
+            captured_actions = tuple(
+                handle for handle in captured_actions if handle in allowed
+            )
         phase = snapshot.phase
         assert phase is not None
+        if dispatch_deadline is not None and (
+            (phase.day, phase.phase)
+            != (dispatch_deadline.day, dispatch_deadline.phase)
+            or not self._deadline_allows_dispatch(dispatch_deadline)
+        ):
+            return None
         history = self.world.history()
         co = self.world.co_for_day(phase.day)
         ability_results = self.world.ability_results()
         options = tuple(
             BrainActionOption(f"action:{index}", action)
-            for index, action in enumerate(actions.actions)
+            for index, action in enumerate(captured_actions)
         )
         return BrainInput(
             snapshot=snapshot,
@@ -129,15 +165,58 @@ class BrainController:
             ability_results=ability_results,
         )
 
+    def dispatch_context_is_current(
+        self,
+        *,
+        allowed_handles: tuple[ActionHandle, ...],
+        dispatch_deadline: DispatchDeadline,
+    ) -> bool:
+        """Check the received-handle and deadline context without creating input."""
+
+        if not isinstance(dispatch_deadline, DispatchDeadline):
+            raise TypeError("dispatch_deadline must be DispatchDeadline")
+        if (
+            not isinstance(allowed_handles, tuple)
+            or not allowed_handles
+            or any(not isinstance(handle, ActionHandle) for handle in allowed_handles)
+            or len(set(allowed_handles)) != len(allowed_handles)
+        ):
+            return False
+        snapshot = self.world.snapshot()
+        if not self._snapshot_is_current(snapshot):
+            return False
+        phase = snapshot.phase
+        assert phase is not None
+        if (phase.day, phase.phase) != (
+            dispatch_deadline.day,
+            dispatch_deadline.phase,
+        ):
+            return False
+        actions = self.world.current_actions()
+        if not (
+            actions.is_caught_up
+            and actions.world_version == snapshot.version
+            and actions.world_last_applied_seq == snapshot.last_applied_seq
+            and actions.network_last_seq == snapshot.last_applied_seq
+            and all(handle in actions.actions for handle in allowed_handles)
+        ):
+            return False
+        return self._deadline_allows_dispatch(dispatch_deadline)
+
     async def decide_and_send(
         self,
         request: BrainInput,
         *,
         timeout_seconds: float | None = None,
+        dispatch_deadline: DispatchDeadline | None = None,
     ) -> DecisionOutcome:
         if not isinstance(request, BrainInput):
             raise TypeError("request must be BrainInput")
         timeout = self._validate_timeout(timeout_seconds)
+        if dispatch_deadline is not None and not isinstance(
+            dispatch_deadline, DispatchDeadline
+        ):
+            raise TypeError("dispatch_deadline must be DispatchDeadline when supplied")
         if self._stopping:
             return self._outcome(request, DecisionStatus.CANCELLED)
         if self._unresponsive:
@@ -160,7 +239,11 @@ class BrainController:
             self.world.wait_for_update(request.snapshot.version)
         )
         try:
-            decision = await self._wait_for_decision(invocation, deadline)
+            decision = await self._wait_for_decision(
+                invocation,
+                deadline,
+                dispatch_deadline=dispatch_deadline,
+            )
             if isinstance(decision, DecisionOutcome):
                 return decision
             if invocation.cancel_status is not None:
@@ -168,6 +251,15 @@ class BrainController:
             outcome = self._validate_and_dispatch(request, decision)
             if outcome is not None:
                 return outcome
+            if dispatch_deadline is not None and not self._deadline_allows_dispatch(
+                dispatch_deadline
+            ):
+                return self._outcome(
+                    request,
+                    DecisionStatus.DEADLINE_SUPPRESSED,
+                    option_id=getattr(decision, "option_id", None),
+                    started=True,
+                )
             stale = self._stale_before_send(request, decision.option_id)
             if stale:
                 return self._outcome(
@@ -201,13 +293,21 @@ class BrainController:
         return await self.brain.decide(request)
 
     async def _wait_for_decision(
-        self, invocation: _Invocation, deadline: float
+        self,
+        invocation: _Invocation,
+        deadline: float,
+        *,
+        dispatch_deadline: DispatchDeadline | None,
     ) -> BrainDecision | DecisionOutcome:
         assert invocation.brain_task is not None
         assert invocation.world_task is not None
         brain_task = invocation.brain_task
         world_task = invocation.world_task
         while True:
+            if dispatch_deadline is not None and not self._deadline_allows_dispatch(
+                dispatch_deadline
+            ):
+                return await self._cancel_for_deadline(invocation, brain_task)
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 invocation.cancel_status = DecisionStatus.TIMED_OUT
@@ -216,11 +316,30 @@ class BrainController:
                 return self._outcome(
                     invocation.request, DecisionStatus.TIMED_OUT, started=True
                 )
+            cutoff_remaining = (
+                None
+                if dispatch_deadline is None
+                else dispatch_deadline.not_after_monotonic - self._clock()
+            )
+            wait_timeout = (
+                remaining
+                if cutoff_remaining is None
+                else min(remaining, max(0.0, cutoff_remaining))
+            )
             done, _pending = await asyncio.wait(
                 {brain_task, world_task},
-                timeout=remaining,
+                timeout=wait_timeout,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if dispatch_deadline is not None and (
+                (
+                    not done
+                    and cutoff_remaining is not None
+                    and cutoff_remaining <= remaining
+                )
+                or not self._deadline_allows_dispatch(dispatch_deadline)
+            ):
+                return await self._cancel_for_deadline(invocation, brain_task)
             if not done:
                 invocation.cancel_status = DecisionStatus.TIMED_OUT
                 invocation.terminal = True
@@ -279,6 +398,20 @@ class BrainController:
                 self.world.wait_for_update(world_snapshot.version)
             )
             invocation.world_task = world_task
+
+    async def _cancel_for_deadline(
+        self,
+        invocation: _Invocation,
+        brain_task: asyncio.Task[BrainDecision],
+    ) -> DecisionOutcome:
+        invocation.cancel_status = DecisionStatus.DEADLINE_SUPPRESSED
+        invocation.terminal = True
+        await self._cancel_brain_task(brain_task)
+        return self._outcome(
+            invocation.request,
+            DecisionStatus.DEADLINE_SUPPRESSED,
+            started=True,
+        )
 
     def _validate_and_dispatch(
         self, request: BrainInput, decision: object
@@ -423,29 +556,30 @@ class BrainController:
                 started=True,
             )
         except DeliveryUnknownError as error:
-            return self._outcome(
+            return self._delivery_unknown_outcome(
                 request,
-                DecisionStatus.SEND_DELIVERY_UNKNOWN,
-                option_id=getattr(decision, "option_id", None),
+                decision,
+                handle,
                 error_type=type(error).__name__,
-                started=True,
+                request_event_id=error.request_event_id,
+                attempt_action=error.action,
+                send_connection_generation=error.connection_generation,
             )
         except Exception as error:
-            return self._outcome(
+            return self._delivery_unknown_outcome(
                 request,
-                DecisionStatus.SEND_DELIVERY_UNKNOWN,
-                option_id=getattr(decision, "option_id", None),
+                decision,
+                handle,
                 error_type=type(error).__name__,
-                started=True,
             )
         if not isinstance(receipt, SendReceipt):
-            return self._outcome(
+            return self._delivery_unknown_outcome(
                 request,
-                DecisionStatus.SEND_DELIVERY_UNKNOWN,
-                option_id=getattr(decision, "option_id", None),
+                decision,
+                handle,
                 error_type="InvalidSendReceipt",
-                started=True,
             )
+        self._last_dispatched_decision = (receipt, decision)
         return self._outcome(
             request,
             DecisionStatus.SENT,
@@ -453,6 +587,62 @@ class BrainController:
             receipt=receipt,
             started=True,
         )
+
+    def _delivery_unknown_outcome(
+        self,
+        request: BrainInput,
+        decision: BrainDecision,
+        handle: ActionHandle,
+        *,
+        error_type: str,
+        request_event_id: str | None = None,
+        attempt_action: str | None = None,
+        send_connection_generation: int | None = None,
+    ) -> DecisionOutcome:
+        action_by_handle = {
+            ChatAction: "chat.send",
+            VoteAction: "vote.cast",
+            AbilityAction: "ability.use",
+            CoDeclareAction: "co.declare",
+            CoReportAction: "co.report",
+        }
+        derived_action = next(
+            action
+            for handle_type, action in action_by_handle.items()
+            if isinstance(handle, handle_type)
+        )
+        if attempt_action is not None and attempt_action != derived_action:
+            raise RuntimeError("delivery-unknown action identity does not match the decision")
+        return self._outcome(
+            request,
+            DecisionStatus.SEND_DELIVERY_UNKNOWN,
+            option_id=getattr(decision, "option_id", None),
+            error_type=error_type,
+            started=True,
+            request_event_id=request_event_id,
+            attempt_action=attempt_action or derived_action,
+            send_connection_generation=send_connection_generation,
+            vote_target_player_id=(
+                decision.target_player_id if isinstance(decision, VoteDecision) else None
+            ),
+            ability_id=handle.ability_id if isinstance(handle, AbilityAction) else None,
+            ability_target_player_ids=(
+                decision.target_player_ids
+                if isinstance(decision, AbilityDecision)
+                else ()
+            ),
+        )
+
+    def take_dispatched_decision(
+        self, receipt: SendReceipt | None
+    ) -> BrainDecision | None:
+        """Return the matching successful dispatch decision exactly once."""
+
+        dispatched = self._last_dispatched_decision
+        if receipt is None or dispatched is None or dispatched[0] != receipt:
+            return None
+        self._last_dispatched_decision = None
+        return dispatched[1]
 
     def _snapshot_is_current(self, snapshot: WorldSnapshot) -> bool:
         return (
@@ -531,6 +721,20 @@ class BrainController:
         )
         return selected.handle not in actions.actions
 
+    def _deadline_allows_dispatch(self, deadline: DispatchDeadline) -> bool:
+        view = self.world.transport_observations()
+        current = view.current_deadline
+        return (
+            current is not None
+            and current.mapping_order == deadline.mapping_order
+            and current.phase == deadline.phase
+            and current.day == deadline.day
+            and current.connection_generation == deadline.connection_generation
+            and current.action_generation == deadline.action_generation
+            and current.local_deadline_monotonic is not None
+            and self._clock() < deadline.not_after_monotonic
+        )
+
     def _validate_timeout(self, timeout_seconds: float | None) -> float:
         timeout = (
             self.config.max_decision_seconds
@@ -558,6 +762,12 @@ class BrainController:
         receipt: SendReceipt | None = None,
         error_type: str | None = None,
         started: bool = False,
+        request_event_id: str | None = None,
+        attempt_action: str | None = None,
+        send_connection_generation: int | None = None,
+        vote_target_player_id: str | None = None,
+        ability_id: str | None = None,
+        ability_target_player_ids: tuple[str, ...] = (),
     ) -> DecisionOutcome:
         phase = request.snapshot.phase
         return DecisionOutcome(
@@ -569,6 +779,12 @@ class BrainController:
             receipt=receipt,
             error_type=error_type,
             invocation_started=started,
+            request_event_id=request_event_id,
+            attempt_action=attempt_action,
+            send_connection_generation=send_connection_generation,
+            vote_target_player_id=vote_target_player_id,
+            ability_id=ability_id,
+            ability_target_player_ids=ability_target_player_ids,
         )
 
     async def _cancel_invocation_tasks(self, invocation: _Invocation) -> None:

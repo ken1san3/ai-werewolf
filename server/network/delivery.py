@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Collection, Mapping, Protocol, runtime_checkable
 
 from ..aiwolf_core.events import EventBus, EventVisibility, GameEvent
+from ..aiwolf_core.interactions import InteractionAcceptance
 
 
 ConnectedPlayers = Callable[[str], Collection[str]]
@@ -52,6 +53,7 @@ class OutboundDelivery:
     recipient_player_ids: tuple[str, ...]
     message_type: str
     payload: Mapping[str, Any]
+    acceptance: InteractionAcceptance | None = None
 
 
 class EventDeliveryRouter:
@@ -79,7 +81,12 @@ class EventDeliveryRouter:
                 )
 
     def queue_channel_message(
-        self, game_id: str, channel_id: str, message: Mapping[str, Any]
+        self,
+        game_id: str,
+        channel_id: str,
+        message: Mapping[str, Any],
+        *,
+        acceptance: InteractionAcceptance | None = None,
     ) -> None:
         """Queue an already-authorized chat message for content-declared viewers.
 
@@ -102,6 +109,7 @@ class EventDeliveryRouter:
                 recipient_player_ids=recipients,
                 message_type="chat.message",
                 payload={"channel": channel_id, "message": deepcopy(dict(message))},
+                acceptance=acceptance,
             )
         )
 

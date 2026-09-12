@@ -106,8 +106,15 @@ class WebSocketGameServer:
                             result = self.sessions.handle_json(raw_message, context)
                             if result.reply is not None:
                                 self._enqueue(context, result.reply)
-                        for channel_id, message in result.channel_messages:
-                            self._delivery_router.queue_channel_message(context.game_id, channel_id, message)
+                        for submission in result.channel_messages:
+                            if submission.acceptance.action != "chat.send":
+                                raise RuntimeError("client chat requires chat.send acceptance evidence")
+                            self._delivery_router.queue_channel_message(
+                                context.game_id,
+                                submission.channel_id,
+                                submission.message,
+                                acceptance=submission.acceptance,
+                            )
                         self._flush_outbound_deliveries()
                 except UnaddressableRequest:
                     await websocket.close(code=1008, reason="invalid request")

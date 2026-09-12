@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from ai_client.network import ActionHandle, SendReceipt
 from ai_client.world import (
@@ -114,6 +114,7 @@ class DecisionStatus(str, Enum):
     CANCELLED = "CANCELLED"
     SEND_NOT_DELIVERED = "SEND_NOT_DELIVERED"
     SEND_DELIVERY_UNKNOWN = "SEND_DELIVERY_UNKNOWN"
+    DEADLINE_SUPPRESSED = "DEADLINE_SUPPRESSED"
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,41 @@ class DecisionOutcome:
     receipt: SendReceipt | None = None
     error_type: str | None = None
     invocation_started: bool = False
+    request_event_id: str | None = None
+    attempt_action: str | None = None
+    send_connection_generation: int | None = None
+    vote_target_player_id: str | None = None
+    ability_id: str | None = None
+    ability_target_player_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "ability_target_player_ids",
+            tuple(self.ability_target_player_ids),
+        )
+        for name in (
+            "request_event_id",
+            "attempt_action",
+            "vote_target_player_id",
+            "ability_id",
+        ):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValueError(f"{name} must be a non-empty string when supplied")
+        if self.send_connection_generation is not None and (
+            isinstance(self.send_connection_generation, bool)
+            or not isinstance(self.send_connection_generation, int)
+            or self.send_connection_generation < 0
+        ):
+            raise ValueError(
+                "send_connection_generation must be a non-negative integer when supplied"
+            )
+        if any(
+            not isinstance(player_id, str) or not player_id
+            for player_id in self.ability_target_player_ids
+        ):
+            raise ValueError("ability targets must be non-empty strings")
 
 
 @dataclass(frozen=True)
@@ -155,6 +191,66 @@ class BrainRunConfig:
 class PhaseKey:
     day: int
     phase: str
+
+
+@dataclass(frozen=True)
+class DispatchDeadline:
+    mapping_order: int
+    phase: str
+    day: int
+    connection_generation: int
+    action_generation: int
+    not_after_monotonic: float
+
+    def __post_init__(self) -> None:
+        for name in (
+            "mapping_order",
+            "day",
+            "connection_generation",
+            "action_generation",
+        ):
+            value = getattr(self, name)
+            minimum = 0
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ValueError(f"{name} must be an integer >= {minimum}")
+        if not isinstance(self.phase, str) or not self.phase:
+            raise ValueError("phase must be a non-empty string")
+        if (
+            isinstance(self.not_after_monotonic, bool)
+            or not isinstance(self.not_after_monotonic, (int, float))
+            or not math.isfinite(self.not_after_monotonic)
+            or self.not_after_monotonic < 0
+        ):
+            raise ValueError("not_after_monotonic must be a finite non-negative number")
+
+
+class FeatureControllerExitReason(str, Enum):
+    WORLD_ENDED = "WORLD_ENDED"
+    WORLD_FAILED = "WORLD_FAILED"
+    STOP_REQUESTED = "STOP_REQUESTED"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True)
+class FeatureControllerExit:
+    owner: Literal["vote_ability", "reaction_chat"]
+    reason: FeatureControllerExitReason
+    error_type: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.owner not in {"vote_ability", "reaction_chat"}:
+            raise ValueError("owner must be 'vote_ability' or 'reaction_chat'")
+        if not isinstance(self.reason, FeatureControllerExitReason):
+            raise TypeError("reason must be FeatureControllerExitReason")
+        if self.error_type is not None and (
+            not isinstance(self.error_type, str) or not self.error_type
+        ):
+            raise ValueError("error_type must be a non-empty string when supplied")
+        if (
+            self.reason is not FeatureControllerExitReason.FAILED
+            and self.error_type is not None
+        ):
+            raise ValueError("error_type is only valid for FAILED")
 
 
 class CoordinatorState(str, Enum):

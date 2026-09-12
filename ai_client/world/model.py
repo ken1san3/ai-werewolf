@@ -13,6 +13,16 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Mapping, TypeAlias
 
 
+def _require_non_negative_int(name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+
+
+def _require_positive_int(name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+
+
 def freeze(value: Any) -> Any:
     """Recursively convert protocol-shaped values to immutable values."""
 
@@ -422,6 +432,152 @@ class CurrentActionsView:
     @property
     def current_actions(self) -> tuple[Any, ...]:
         return self.actions
+
+
+class TransportObservationKind(str, Enum):
+    ACTION_ACCEPTED = "action_accepted"
+    ACTION_REJECTION = "action_rejection"
+    PHASE_TIMING = "phase_timing"
+    PHASE_DEADLINE_REACHED = "phase_deadline_reached"
+    RESUME_RECOVERY_BARRIER = "resume_recovery_barrier"
+
+
+@dataclass(frozen=True)
+class TransportObservationRetention:
+    max_records: int = 256
+    max_bytes: int = 262144
+
+    def __post_init__(self) -> None:
+        _require_positive_int("max_records", self.max_records)
+        _require_positive_int("max_bytes", self.max_bytes)
+
+
+@dataclass(frozen=True)
+class TransportObservationQuery:
+    after_order: int | None = None
+    kinds: frozenset[TransportObservationKind] | None = None
+
+    def __post_init__(self) -> None:
+        if self.after_order is not None:
+            _require_non_negative_int("after_order", self.after_order)
+        if self.kinds is not None:
+            object.__setattr__(self, "kinds", frozenset(self.kinds))
+            if any(not isinstance(kind, TransportObservationKind) for kind in self.kinds):
+                raise TypeError("kinds must contain TransportObservationKind values")
+
+
+@dataclass(frozen=True)
+class ActionAcceptedObservation:
+    order: int
+    world_version: int
+    action: str
+    request_event_id: str
+    seq: int
+    observation_connection_generation: int
+    observed_at_monotonic: float
+    kind: ClassVar[TransportObservationKind] = TransportObservationKind.ACTION_ACCEPTED
+
+    @property
+    def connection_generation(self) -> int:
+        return self.observation_connection_generation
+
+
+@dataclass(frozen=True)
+class ActionRejectionObservation:
+    order: int
+    world_version: int
+    action: str
+    reason: str
+    seq: int
+    connection_generation: int
+    observed_at_monotonic: float
+    request_event_id: str | None = None
+    kind: ClassVar[TransportObservationKind] = TransportObservationKind.ACTION_REJECTION
+
+    @property
+    def observation_connection_generation(self) -> int:
+        return self.connection_generation
+
+
+@dataclass(frozen=True)
+class PhaseTimingObservation:
+    order: int
+    world_version: int
+    phase: str
+    day: int
+    source_seq: int
+    connection_generation: int
+    action_generation: int
+    server_timestamp: int
+    phase_ends_at: int | None
+    mapped_at_monotonic: float
+    local_deadline_monotonic: float | None
+    kind: ClassVar[TransportObservationKind] = TransportObservationKind.PHASE_TIMING
+
+
+@dataclass(frozen=True)
+class PhaseDeadlineReachedObservation:
+    order: int
+    world_version: int
+    phase: str
+    day: int
+    connection_generation: int
+    action_generation: int
+    local_deadline_monotonic: float
+    reached_at_monotonic: float
+    kind: ClassVar[TransportObservationKind] = (
+        TransportObservationKind.PHASE_DEADLINE_REACHED
+    )
+
+
+@dataclass(frozen=True)
+class ResumeRecoveryBarrier:
+    order: int
+    world_version: int
+    connection_generation: int
+    requested_last_seq: int
+    replay_first_seq: int | None
+    replay_last_seq: int | None
+    replay_contiguous: bool
+    replay_gap_or_floor: bool
+    resumed_seq: int
+    state_sync_seq: int
+    complete: bool
+    kind: ClassVar[TransportObservationKind] = (
+        TransportObservationKind.RESUME_RECOVERY_BARRIER
+    )
+
+
+TransportObservation: TypeAlias = (
+    ActionAcceptedObservation
+    | ActionRejectionObservation
+    | PhaseTimingObservation
+    | PhaseDeadlineReachedObservation
+    | ResumeRecoveryBarrier
+)
+
+
+@dataclass(frozen=True)
+class CurrentPhaseDeadline:
+    mapping_order: int
+    phase: str
+    day: int
+    connection_generation: int
+    action_generation: int
+    local_deadline_monotonic: float | None
+
+
+@dataclass(frozen=True)
+class TransportObservationView:
+    world_version: int
+    first_retained_order: int | None
+    last_order: int | None
+    gap_before_first: bool
+    observations: tuple[TransportObservation, ...]
+    current_deadline: CurrentPhaseDeadline | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observations", tuple(self.observations))
 
 
 @dataclass(frozen=True)

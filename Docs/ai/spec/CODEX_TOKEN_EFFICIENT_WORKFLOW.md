@@ -1,5 +1,9 @@
 # Codex 低トークン実装運用ガイド
 
+> Historical guidance only. Embedded runner commands, model assignments, and copied
+> workflow examples are not current project interfaces after D065. Current instructions
+> are `AGENTS.md`, `Docs/ai/RUNBOOK.md`, and `Docs/ai/CURRENT_STATE.md`.
+
 ## 0. この文書の目的
 
 この文書は、Codexを長期間のソフトウェア開発に利用する際に、

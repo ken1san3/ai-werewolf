@@ -1,149 +1,117 @@
-# Project AI Rules
+# AIwolf Project Agent Rules
 
-## このリポジトリの動かし方
+## Session bootstrap
 
-ユーザーが打つ指示は原則4つだけ。**指示を受けたら対応する
-`python scripts/ai_status.py <role>` を実行し、出力された RUNBOOK 節に従う。
-ユーザーへ追加の指示を求めない。**
+Responsibilities, models, chats, and tasks are separate concepts. A responsibility grants
+authority; a model is only the current executor selected in `Docs/ai/MODEL_ASSIGNMENTS.md`.
+Changing a model never changes a responsibility or task contract.
 
-| 指示 | 送る先（役割 / model） | 手順 |
-|---|---|---|
-| 「レビューして」 | Reviewer / Claude または Sol | `python scripts/ai_status.py review` |
-| 「Phase X.Y を詳細設計して」 | Detailed Design / Sol | `python scripts/ai_status.py design` |
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer / Qwen（上位が契約確定） | `python scripts/ai_status.py implement` |
-| 「レビュー内容を確認して修正して」 | Implementer / Qwen | `python scripts/ai_status.py fix` |
+At the start of every session:
 
-**どれを送るかは Reviewer が決める。** 迷ったら「レビューして」を Reviewer へ送る。
-Reviewer が Design Gate（D051）で次の1手を名指しし、`CURRENT_STATE.md` の
-Next Task に残す。ユーザーはそれをそのまま送ればよい。
+1. Read this file.
+2. Run `python scripts/ai_status.py <entry>` for the assigned responsibility.
+3. Read the named task packet and only the canonical/design files it references.
+4. Inspect `git status` and the relevant diff before writing.
 
-- **実装の指示は、まず Design Gate を通る**（D051 / RUNBOOK §1.2 / §2.5）。
-  `DESIGN: REQUIRED` と判定されたサブPhaseは、承認済み詳細設計が無いかぎり実装しない
-- フェーズ番号の指定が無ければ `ai_status.py` が出力する Next Task に従う
-- スコープ（含む / 含まない / 完了条件）は `Docs/ai/ROADMAP.md` の該当サブPhaseにある
-- 判断に迷ったら `Docs/ai/OPEN_QUESTIONS.md` へ起票し、避けて進められるなら続行する
-- 現状の要約は `python scripts/ai_status.py` で取得できる
+Canonical entries are `integrate`, `architect`, `implement`, `review`, `fix`, `test`,
+and `investigate`; `design` remains a compatibility alias for `architect`. Do not use
+conversation history as the sole source of project state.
 
-## Roles
+## Responsibilities
 
-**役割と、その役割に現在割り当てているモデルは別物である。**
-モデルの変更は役割の定義を変えない。
+| Responsibility | Authority and output |
+|---|---|
+| Integrator | Maintains the critical path and task board, partitions non-overlapping work, verifies handoffs and evidence, resolves conflicts, decides the next wave, and coordinates phase/MVP completion. It does not absorb all routine implementation. |
+| Architect | Defines public interfaces, lifecycle, state transitions, concurrency, protocol interaction, acceptance criteria, and required tests for a task that passed a required Design Gate. It does not implement or self-approve. |
+| Implementer | Implements an approved contract or unambiguous existing specification, adds focused/regression tests, and writes measured handoff evidence. It does not change specifications on its own. |
+| Reviewer | Independently checks specification, design, implementation, tests, and diff; records findings and actual evidence. It does not approve a detailed design created in the same session. |
+| Tester | Runs focused, integration, completion, regression, and bounded long-running tests; preserves raw commands, logs, timing, and failures. It verifies facts and does not make design decisions. |
+| Investigator | Reproduces and isolates unclear, cross-component, flaky, concurrency, or E2E failures; reports cause, evidence, and recommended repair scope. It does not begin a broad repair without a separate implementation task. |
 
-| 役割 | default model | やること |
-|---|---|---|
-| Implementer / Local-LLM Orchestrator | Qwen / 決定的runner | 契約内の実装・修正・テスト。重要判断はGPT/Claude。状態・handoff等は証拠に基づき更新 |
-| Detailed Design | Sol | Reviewer が必要と判定したタスクの詳細設計（D051） |
-| Reviewer / Design Gate（通常） | Claude, Sol | 詳細設計の要否判定 / 詳細設計レビュー / 仕様整合レビュー / REVIEW_INBOX 起票 / 仕様と設計ドキュメントの整備（D053） |
-| Reviewer（深掘り） | Sol | 同上。対象を絞って深く見る（D053） |
+The user retains final authority over product rules, scope, and direction.
 
-- **新しい実装タスクは Reviewer の Implementation Design Gate を通る**（D051 / RUNBOOK §2.5）。
-  不要と判定すれば Implementer へ直行、必要なら Detailed Design → Reviewer 承認 → Implementer。
-- Reviewer は原則コードを書かない。指摘は `Docs/ai/REVIEW_INBOX.md` へ残し、修正は Implementer が行う。
-- **Reviewer は2 model いる（D053）。Sol の各レーンは別チャットで動く。**
-  `_DESIGN.md` の `Status: APPROVED` だけは、設計を書いた model と別の model が付ける
-  （Sol の設計は Claude が承認）。model の違いが見落としを捕まえた実績による（R-97）。
-- **どの role も、他 role の判定・承認・実測値を代筆しない**（R-20260905-04）。
-  レビュー結果 / 完了承認 / Blocking 判定 / `Status: APPROVED` は、
-  **その判定を実際に行った role の署名でのみ記録する。**
-  実測値には必ず実行環境（Local Windows / Reviewer VM）を書く。
-  `CURRENT_STATE.md` の Next Task に次の role の結論を先取りして書かない。
-- Implementer は仕様を勝手に変更しない。疑問は `Docs/ai/OPEN_QUESTIONS.md` へ起票する。
-- Qwen中心の開発基盤はD056/D057。入口は `python scripts/ai_status.py infra`。
-  Geminiは他の3モデルへ任せる合理性が低い作業だけに使う。通常工程の依存にしない。
-  Greenは機械検証、Yellowはfreshレビュー追加、Redは上位承認、Hard Redは上位実装。
-  READYやQwenの自己申告をDesign Gate・正式完了承認へ読み替えない。
-  有限キューの無人実行はD058。`Docs/ai/spec/AUTONOMOUS_DEVELOPMENT.md`を参照する。
-- 仕様・ルールの最終決定権はユーザーにある。各役割とも決定を `Docs/ai/decisions/` へ記録する。
+## External memory
 
-## Start of session
+`Docs/ai/INDEX.md` is the routing index. Current facts live in `CURRENT_STATE.md`; the
+live work queue is `TASKS.md`; stable boundaries are summarized in `ARCHITECTURE.md`;
+delegation and recovery procedures live in `OPERATIONS.md`; role contracts live under
+`roles/`. One worker assignment is one file under `tasks/`; concise results go under
+`handoffs/tasks/`. Canonical game conclusions remain in `spec/DESIGN.md`, phase scope in
+`ROADMAP.md`, and rationale in `decisions/`.
 
-`AGENTS.md` を bootstrap / 恒久ルールとして毎セッション読む。次に作業役割の
-`python scripts/ai_status.py <role>` を実行する。`ai_status.py` は動的コンテキストの
-**唯一の入口**である。引数なしは状態確認専用で、RUNBOOK を出力しない。
+Worker sessions are short-lived: finish one task, or a tightly related small set, write a
+handoff, then stop. An Integrator session may live longer, but Git, tests, task packets,
+handoffs, decisions, `CURRENT_STATE.md`, and `TASKS.md` remain authoritative.
 
-`CURRENT_STATE.md` / `REVIEW_INBOX.md` / `RUNBOOK.md` を開始時に別途開かない。
-`ai_status.py` の出力が追加で名指したファイルだけを読む。必要な文書の
-詳細索引は `Docs/ai/INDEX.md` だけに置き、ここに複製しない。
+Before parallel dispatch, the Integrator checks expected/shared files and conflict risk.
+Tasks that edit the same file run serially. Shared board/state files are updated by the
+Integrator, not concurrently by workers unless the packet explicitly assigns that write.
 
-Do not scan the whole repository unless necessary.
+The Integrator uses the host's standard task delegation and isolation facilities. It does
+not create a daemon, scheduler, workflow engine, model router, automatic merge system, or
+Autodev replacement. Normal review findings return directly to an Implementer; after three
+failed rounds on the same cause, route to an Investigator. Ask the user only when canonical
+sources, decisions, code, and an Architect cannot determine a material product choice. Keep
+independent tasks moving while one task awaits that decision.
+
+## Design Gate
+
+New implementation work follows D051. A task marked as requiring design may be implemented
+only when the selected detailed design is independently approved. Detailed design is below
+canonical sources in this order:
+
+1. canonical specification
+2. implementation and protocol/schema facts
+3. tests
+4. approved detailed design
+
+Self-approval is prohibited by responsibility plus session independence, regardless of
+which model executes either session. Questions that materially change scope or product
+rules go to `Docs/ai/OPEN_QUESTIONS.md`.
 
 ## Design invariants
 
 1. Server is the single source of truth. Never trust the client.
 2. Server and AI logic are separate programs. The game core has no AI dependency.
 3. Realtime free chat. No fixed speaking order.
-4. No role names hardcoded in the game core or in the AI client.
-5. Keep `Role` / `Team` / `Alignment` / `Knowledge` / `Ability` / `Passive` / `Effect` / `WinCondition` / `ChatPermission` separated.
-6. Roles, teams and game modes are loaded from YAML, never from Python literals.
-7. Send each client only the information that client may know. Never filter secrets in the prompt.
-8. The protocol must stay language-independent and versioned.
-9. Must run on RTX 3070 Ti / 8GB VRAM: one shared LLM server, not one model per agent.
-10. Game core must be fully testable without any LLM.
+4. No role names hardcoded in the game core or AI client.
+5. Keep Role, Team, Alignment, Knowledge, Ability, Passive, Effect, WinCondition, and ChatPermission separated.
+6. Roles, teams, and game modes are loaded from YAML, never Python literals.
+7. Send each client only information it may know. Never filter secrets in the prompt.
+8. The protocol stays language-independent and versioned.
+9. Target RTX 3070 Ti / 8GB VRAM with one shared LLM server.
+10. The game core remains fully testable without any LLM.
 
 ## Review checklist
 
-レビュー時に必ず確認する。**この一覧が唯一の置き場所であり、各Decisionには複製しない。**
+- No role-specific branch such as `if role == "seer"` in the game core.
+- Inspection/medium results use `inspect_result` / `medium_result`, not `team`.
+- Win counts use `count_as`, not `team`.
+- Rule evaluation uses effective Role + Modifiers attributes.
+- Internal death causes never reach clients.
+- Private notifications never use broadcast paths.
+- The network layer does not decide whether an action is allowed.
+- Random selections are recorded as events; no direct module-level `random` calls.
+- No rule default is hardcoded and adding a role requires no Python change.
+- `python scripts/check_docs.py` passes.
 
-- ゲームコアに役職固有の分岐（`if role == "seer"`）が入っていないか
-- 占い・霊能が `team` を参照していないか（`inspect_result` / `medium_result` を使うこと）
-- 勝利条件の人数計算が `team` を数えていないか（`count_as` を使うこと）
-- 判定が Role を直接読んでいないか（Role + Modifiers の実効属性を経由すること）
-- 内部死因を含むイベントがクライアントへ送られていないか
-- private 通知がブロードキャスト経路に乗っていないか
-- ネットワーク層に行動の可否判定が書かれていないか
-- ランダムな選択の結果がイベントとして記録されているか
-- モジュールレベルの `random` を直接呼んでいないか
-- ルールの既定値がコードへ埋め込まれていないか
-- 役職の追加に Python の変更が必要になっていないか
-- `python scripts/check_docs.py` が通るか（文書と実装の不整合の機械検査）
+## Working-tree and evidence rules
 
-## Prohibitions
+- Preserve all user and inherited uncommitted changes; work around unrelated edits.
+- Never use `git reset --hard`, `git clean -fd`, force push, or history rewriting.
+- Do not commit unless the user explicitly authorizes it.
+- A responsibility records only decisions and measurements it actually performed.
+- Test evidence names the execution environment and raw pass/fail result.
+- Do not infer approval from a worker's completion claim.
+- Do not restore or execute the archived autonomous-development runtime.
 
-```
-Do not reread the whole repository just to refresh context.
-Use the AI documentation as the persistent project memory.
+## End of task
 
-Do not repeat an investigation already documented in decisions or failures
-unless current code contradicts that documentation.
+Before handing work back:
 
-Prefer targeted reads, searches, diffs, and batched independent operations.
-
-Do not redesign a completed phase without an explicit request.
-Do not change roles or the protocol on your own judgement; raise it in OPEN_QUESTIONS.md.
-
-Before ending the session, externalize all information required by the next
-agent into the repository.
-
-Route bulk one-shot input through the local LLM before it enters the conversation:
-test output, long diffs, and the large reference documents. Using it is the default;
-skipping it needs a reason. Ask first whether a script would do the job for free.
-
-Never conclude "no problem" from its output. Take pass/fail counts from the exit
-code and the raw last line, never from a summary. Narrowing may reorder what you
-read, never reduce it. See D034.
-```
-
-## End of session checklist
-
-```
-[ ] tests run
-[ ] git diff reviewed
-[ ] CURRENT_STATE.md updated (phase / next task / current problem)
-[ ] REVIEW_INBOX.md OPEN items checked
-[ ] new decision -> Docs/ai/decisions/
-[ ] repeatable failure -> Docs/ai/failures/
-[ ] phase finished -> Docs/ai/handoffs/PHASE<N>_HANDOFF.md
-[ ] Next Task に次のエージェントが読む実在ファイルパスを書いた
-```
-
-## Commit convention
-
-```
-feat(core): ...
-feat(network): ...
-fix(core): ...
-test(core): ...
-docs(ai): ...
-```
-
-Phase または責務単位でコミットする。
+- Run focused tests, relevant regressions, `python scripts/check_docs.py`, and diff checks.
+- Review the complete scoped diff.
+- Write the task handoff with measured evidence.
+- Let the Integrator update `TASKS.md` and `CURRENT_STATE.md` from verified evidence.
+- Record new decisions in `decisions/` and repeatable failures in `failures/`.
+- Stop at the task boundary; do not begin the next task implicitly.

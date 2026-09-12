@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Mapping, Sequence
 from .clock import timestamp
 from .death import DeathResolver
 from .events import EventVisibility, GameEvent
+from .interactions import InteractionAcceptance
 from .models import CoreDeathCause, GamePhase
 from .phase import PhaseManager
 from .rejections import ActionRejected
@@ -51,12 +52,14 @@ class VoteResolver:
     def __init__(self, game: GameState) -> None:
         self.game = game
 
-    def submit(self, voter_player_id: str, target_player_id: str | None) -> None:
+    def submit(
+        self, now: int, voter_player_id: str, target_player_id: str | None
+    ) -> InteractionAcceptance:
         """Reserve or replace one living player's vote for the current round."""
 
         if self.game.phase not in {GamePhase.VOTE, GamePhase.RUNOFF}:
             raise ActionRejected(
-                "vote_unavailable", "votes can only be submitted during vote or runoff phases"
+                "action_unavailable", "votes can only be submitted during vote or runoff phases"
             )
         try:
             voter = alive_player(self.game, voter_player_id, "voter")
@@ -81,6 +84,19 @@ class VoteResolver:
                 raise ActionRejected(
                     "invalid_target", "runoff votes must target a runoff candidate"
                 )
+        received_at = timestamp(now)
+        started_at = self.game.phase_started_at
+        deadline = self.game.phase_ends_at
+        if started_at is None or deadline is None:
+            raise RuntimeError("vote phases require an authoritative deadline")
+        if received_at < started_at:
+            raise ActionRejected(
+                "action_unavailable", "votes cannot be submitted before the phase starts"
+            )
+        if received_at >= deadline:
+            raise ActionRejected(
+                "action_deadline_passed", "votes cannot be submitted after the deadline"
+            )
         self.game.pending_votes[voter.player_id] = target_player_id
         self.game.event_bus.publish(
             GameEvent(
@@ -96,6 +112,14 @@ class VoteResolver:
         )
         if self.game.rules.vote.reveal == "live":
             self.record_live_reveal(voter.player_id, target_player_id)
+        return InteractionAcceptance(
+            action="vote.cast",
+            player_id=voter.player_id,
+            day=self.game.day,
+            phase=self.game.phase.value,
+            accepted_at=received_at,
+            phase_deadline=deadline,
+        )
 
     def resolve(self, now: int) -> VoteResult:
         """Confirm the round at its deadline and enter Runoff or Execution."""

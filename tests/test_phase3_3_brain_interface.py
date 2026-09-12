@@ -11,6 +11,8 @@ from unittest.mock import patch
 from ai_client.brain import (
     AbilityDecision,
     BrainController,
+    BrainInvocationArbiter,
+    BrainInvocationPriority,
     BrainInput,
     BrainRunConfig,
     ChatDecision,
@@ -18,6 +20,7 @@ from ai_client.brain import (
     CoReportDecision,
     CoordinatorExitReason,
     DecisionStatus,
+    DispatchDeadline,
     DummyBrain,
     NoDecision,
     PhaseBrainCoordinator,
@@ -37,9 +40,11 @@ from ai_client.world import (
     AbilityResultView,
     CoView,
     CurrentActionsView,
+    CurrentPhaseDeadline,
     Freshness,
     HistoryView,
     WorldSnapshot,
+    TransportObservationView,
 )
 
 
@@ -62,6 +67,7 @@ class _FakeWorld:
         )
         self._update = asyncio.Event()
         self.reads = 0
+        self.deadline = CurrentPhaseDeadline(1, "day", 1, 1, 1, 10.0)
 
     def snapshot(self) -> WorldSnapshot:
         return self._snapshot
@@ -78,6 +84,16 @@ class _FakeWorld:
 
     def ability_results(self) -> AbilityResultView:
         return AbilityResultView((), True, self._snapshot.history_retention)
+
+    def transport_observations(self) -> TransportObservationView:
+        return TransportObservationView(
+            world_version=self._snapshot.version,
+            first_retained_order=None,
+            last_order=None,
+            gap_before_first=False,
+            observations=(),
+            current_deadline=self.deadline,
+        )
 
     async def wait_for_update(self, after_version: int) -> WorldSnapshot:
         while self._snapshot.version <= after_version and self._snapshot.freshness not in {
@@ -223,6 +239,24 @@ class _CancellationIgnoringBrain:
         raise AssertionError("unreachable")
 
 
+class _OrderedBlockingBrain:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.started = [asyncio.Event() for _ in range(3)]
+        self.release = [asyncio.Event() for _ in range(3)]
+
+    async def decide(self, request: BrainInput) -> object:
+        index = len(self.calls)
+        handle = request.action_context.options[0].handle
+        kind = "vote" if isinstance(handle, VoteAction) else "chat"
+        self.calls.append(kind)
+        self.started[index].set()
+        await self.release[index].wait()
+        if kind == "vote":
+            return VoteDecision("action:0", "p2")
+        return ChatDecision("action:0", f"message-{index}")
+
+
 def make_controller(
     kind: str = "chat", *, brain: object | None = None
 ) -> tuple[BrainController, _FakeWorld, _Sender, BrainInput]:
@@ -269,6 +303,25 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
         assert request is not None
         self.assertEqual(request.action_context.options, ())
 
+    def test_filtered_capture_uses_canonical_order_and_original_handles(self) -> None:
+        controller, world, _sender, _request = make_controller()
+        chat = action("chat")
+        vote = action("vote")
+        ability = action("ability")
+        world._actions = replace(world._actions, actions=(vote, chat, ability))
+        request = controller.capture_input(allowed_handles=(ability, chat))
+        self.assertIsNotNone(request)
+        assert request is not None
+        self.assertEqual(
+            [option.option_id for option in request.action_context.options],
+            ["action:0", "action:1"],
+        )
+        self.assertIs(request.action_context.options[0].handle, chat)
+        self.assertIs(request.action_context.options[1].handle, ability)
+        self.assertIsNone(controller.capture_input(allowed_handles=()))
+        self.assertIsNone(controller.capture_input(allowed_handles=(chat, chat)))
+        self.assertIsNone(controller.capture_input(allowed_handles=(action("co_report"),)))
+
     async def test_each_typed_decision_dispatches_once(self) -> None:
         cases = (
             ("chat", ChatDecision("action:0", "hello"), "chat"),
@@ -290,6 +343,285 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
         outcome = await controller.decide_and_send(request)
         self.assertEqual(outcome.status, DecisionStatus.NO_DECISION)
         self.assertEqual(sender.calls, [])
+
+    async def test_dispatch_deadline_is_rechecked_immediately_before_send(self) -> None:
+        brain = _ScriptedBrain(ChatDecision("action:0", "hello"))
+        handle = action("chat")
+        world = _FakeWorld(action=handle)
+        sender = _Sender()
+        now = [5.0]
+        controller = BrainController(
+            world=world,
+            sender=sender,
+            brain=brain,
+            config=BrainRunConfig(max_decision_seconds=0.2),
+            clock=lambda: now[0],
+        )
+        request = controller.capture_input()
+        assert request is not None
+        deadline = DispatchDeadline(1, "day", 1, 1, 1, 9.0)
+        outcome = await controller.decide_and_send(request, dispatch_deadline=deadline)
+        self.assertEqual(outcome.status, DecisionStatus.SENT)
+        self.assertEqual(len(sender.calls), 1)
+
+        sender.calls.clear()
+        request = controller.capture_input()
+        assert request is not None
+        world.deadline = replace(world.deadline, mapping_order=2)
+        outcome = await controller.decide_and_send(request, dispatch_deadline=deadline)
+        self.assertEqual(outcome.status, DecisionStatus.DEADLINE_SUPPRESSED)
+        self.assertEqual(sender.calls, [])
+
+        world.deadline = replace(world.deadline, mapping_order=1)
+        now[0] = 9.0
+        request = controller.capture_input()
+        assert request is not None
+        outcome = await controller.decide_and_send(request, dispatch_deadline=deadline)
+        self.assertEqual(outcome.status, DecisionStatus.DEADLINE_SUPPRESSED)
+        self.assertEqual(sender.calls, [])
+
+    async def test_public_dispatched_decision_is_exact_once_and_wrong_receipt_safe(
+        self,
+    ) -> None:
+        decision = ChatDecision("action:0", "hello")
+        controller, _world, sender, request = make_controller(
+            brain=_ScriptedBrain(decision)
+        )
+        outcome = await controller.decide_and_send(request)
+        self.assertEqual(outcome.status, DecisionStatus.SENT)
+        self.assertIsNone(
+            controller.take_dispatched_decision(SendReceipt("wrong", 1))
+        )
+        self.assertIs(controller.take_dispatched_decision(sender.receipt), decision)
+        self.assertIsNone(controller.take_dispatched_decision(sender.receipt))
+        self.assertIsNone(controller.take_dispatched_decision(None))
+
+    async def test_arbiter_is_bounded_non_preemptive_and_grants_reservation_next(
+        self,
+    ) -> None:
+        chat = action("chat")
+        vote = action("vote")
+        assert isinstance(chat, ChatAction)
+        assert isinstance(vote, VoteAction)
+        world = _FakeWorld(action=chat)
+        world._actions = replace(world._actions, actions=(chat, vote))
+        sender = _Sender()
+        brain = _OrderedBlockingBrain()
+        controller = BrainController(
+            world=world,
+            sender=sender,  # type: ignore[arg-type]
+            brain=brain,
+            config=BrainRunConfig(max_decision_seconds=1.0),
+        )
+        arbiter = BrainInvocationArbiter(controller=controller)
+        deadline = DispatchDeadline(1, "day", 1, 1, 1, time.monotonic() + 5)
+
+        active = asyncio.create_task(
+            arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(chat,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await brain.started[0].wait()
+        pending_reaction = asyncio.create_task(
+            arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(chat,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await asyncio.sleep(0)
+        pending_reservation = asyncio.create_task(
+            arbiter.invoke(
+                owner="vote_ability",
+                priority=BrainInvocationPriority.RESERVATION_ACTION,
+                allowed_handles=(vote,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await asyncio.sleep(0)
+        with self.assertRaisesRegex(RuntimeError, "already has a pending"):
+            await arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(chat,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        self.assertEqual(brain.calls, ["chat"])
+
+        brain.release[0].set()
+        await brain.started[1].wait()
+        self.assertEqual(brain.calls, ["chat", "vote"])
+        brain.release[1].set()
+        await brain.started[2].wait()
+        self.assertEqual(brain.calls, ["chat", "vote", "chat"])
+        brain.release[2].set()
+        results = await asyncio.gather(active, pending_reservation, pending_reaction)
+        self.assertTrue(
+            all(result.outcome.status is DecisionStatus.SENT for result in results)
+        )
+        self.assertEqual(len(sender.calls), 3)
+        await arbiter.stop()
+
+    async def test_arbiter_captures_after_grant_and_suppresses_cutoff_before_brain(
+        self,
+    ) -> None:
+        chat = action("chat")
+        vote = action("vote")
+        assert isinstance(chat, ChatAction)
+        assert isinstance(vote, VoteAction)
+        world = _FakeWorld(action=chat)
+        world._actions = replace(world._actions, actions=(chat, vote))
+        sender = _Sender()
+        brain = _OrderedBlockingBrain()
+        now = [1.0]
+        controller = BrainController(
+            world=world,
+            sender=sender,  # type: ignore[arg-type]
+            brain=brain,
+            config=BrainRunConfig(max_decision_seconds=1.0),
+            clock=lambda: now[0],
+        )
+        arbiter = BrainInvocationArbiter(controller=controller, clock=lambda: now[0])
+        deadline = DispatchDeadline(1, "day", 1, 1, 1, 5.0)
+        active = asyncio.create_task(
+            arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(chat,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await brain.started[0].wait()
+        pending = asyncio.create_task(
+            arbiter.invoke(
+                owner="vote_ability",
+                priority=BrainInvocationPriority.RESERVATION_ACTION,
+                allowed_handles=(vote,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await asyncio.sleep(0)
+        replacement_vote = replace(vote, valid_targets=("p3",))
+        world._actions = replace(world._actions, actions=(chat, replacement_vote))
+        brain.release[0].set()
+        first, stale = await asyncio.gather(active, pending)
+        self.assertEqual(first.outcome.status, DecisionStatus.SENT)
+        self.assertEqual(stale.outcome.status, DecisionStatus.STALE)
+        self.assertEqual(brain.calls, ["chat"])
+
+        now[0] = 5.0
+        suppressed = await arbiter.invoke(
+            owner="vote_ability",
+            priority=BrainInvocationPriority.RESERVATION_ACTION,
+            allowed_handles=(replacement_vote,),
+            timeout_seconds=1.0,
+            dispatch_deadline=deadline,
+        )
+        self.assertEqual(suppressed.outcome.status, DecisionStatus.DEADLINE_SUPPRESSED)
+        self.assertFalse(suppressed.outcome.invocation_started)
+        self.assertEqual(brain.calls, ["chat"])
+        await arbiter.stop()
+
+    async def test_arbiter_stop_cancels_active_and_pending_and_is_permanent(self) -> None:
+        chat = action("chat")
+        vote = action("vote")
+        assert isinstance(chat, ChatAction)
+        assert isinstance(vote, VoteAction)
+        world = _FakeWorld(action=chat)
+        world._actions = replace(world._actions, actions=(chat, vote))
+        brain = _OrderedBlockingBrain()
+        controller = BrainController(
+            world=world,
+            sender=_Sender(),  # type: ignore[arg-type]
+            brain=brain,
+            config=BrainRunConfig(max_decision_seconds=1.0),
+        )
+        arbiter = BrainInvocationArbiter(controller=controller)
+        deadline = DispatchDeadline(1, "day", 1, 1, 1, time.monotonic() + 5)
+        active = asyncio.create_task(
+            arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(chat,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await brain.started[0].wait()
+        pending = asyncio.create_task(
+            arbiter.invoke(
+                owner="vote_ability",
+                priority=BrainInvocationPriority.RESERVATION_ACTION,
+                allowed_handles=(vote,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        )
+        await asyncio.sleep(0)
+        await arbiter.stop()
+        active_result, pending_result = await asyncio.gather(active, pending)
+        self.assertEqual(active_result.outcome.status, DecisionStatus.CANCELLED)
+        self.assertEqual(pending_result.outcome.status, DecisionStatus.CANCELLED)
+        with self.assertRaisesRegex(RuntimeError, "is stopped"):
+            await arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(chat,),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+
+    async def test_arbiter_rejects_owner_priority_family_mismatch(self) -> None:
+        controller, _world, _sender, _request = make_controller()
+        arbiter = BrainInvocationArbiter(controller=controller)
+        chat = action("chat")
+        deadline = DispatchDeadline(1, "day", 1, 1, 1, time.monotonic() + 5)
+        with self.assertRaisesRegex(ValueError, "priority does not match owner"):
+            await arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.RESERVATION_ACTION,
+                allowed_handles=(chat,),  # type: ignore[arg-type]
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        with self.assertRaisesRegex(ValueError, "do not match owner"):
+            await arbiter.invoke(
+                owner="vote_ability",
+                priority=BrainInvocationPriority.RESERVATION_ACTION,
+                allowed_handles=(chat,),  # type: ignore[arg-type]
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        await arbiter.stop()
+
+    async def test_arbiter_sent_without_public_decision_fails_visibly(self) -> None:
+        decision = ChatDecision("action:0", "hello")
+        controller, _world, _sender, _request = make_controller(
+            brain=_ScriptedBrain(decision)
+        )
+        controller.take_dispatched_decision = lambda _receipt: None  # type: ignore[method-assign]
+        arbiter = BrainInvocationArbiter(controller=controller)
+        with self.assertRaisesRegex(RuntimeError, "decision is unavailable"):
+            await arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(action("chat"),),  # type: ignore[arg-type]
+                timeout_seconds=0.1,
+                dispatch_deadline=DispatchDeadline(
+                    1, "day", 1, 1, 1, time.monotonic() + 5
+                ),
+            )
+        await arbiter.stop()
 
     async def test_invalid_decisions_are_observable_and_never_send(self) -> None:
         invalid = (
@@ -471,6 +803,30 @@ class BrainInterfaceTests(unittest.IsolatedAsyncioTestCase):
             sender.error = error
             outcome = await controller.decide_and_send(request)
             self.assertEqual(outcome.status, expected)
+
+    async def test_delivery_unknown_retains_sanitized_reservation_attempt(self) -> None:
+        controller, _world, sender, request = make_controller(
+            "vote", brain=_ScriptedBrain(VoteDecision("action:0", "p2"))
+        )
+        sender.error = DeliveryUnknownError(
+            "unknown",
+            request_event_id="10000000-0000-4000-8000-000000000001",
+            action="vote.cast",
+            connection_generation=1,
+        )
+
+        outcome = await controller.decide_and_send(request)
+
+        self.assertEqual(outcome.status, DecisionStatus.SEND_DELIVERY_UNKNOWN)
+        self.assertEqual(
+            outcome.request_event_id,
+            "10000000-0000-4000-8000-000000000001",
+        )
+        self.assertEqual(outcome.attempt_action, "vote.cast")
+        self.assertEqual(outcome.send_connection_generation, 1)
+        self.assertEqual(outcome.vote_target_player_id, "p2")
+        self.assertIsNone(outcome.ability_id)
+        self.assertEqual(outcome.ability_target_player_ids, ())
 
     async def test_unresponsive_brain_is_permanently_disabled(self) -> None:
         brain = _CancellationIgnoringBrain()

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 import unittest
 
 from server.aiwolf_core import (
+    ActionRejected,
     EventVisibility,
     GamePhase,
     GameState,
     InMemoryEventSink,
+    InteractionAcceptance,
     PlayerConfig,
     VoteResultKind,
     load_content,
@@ -36,6 +38,26 @@ class FirstChoiceRandom:
 
     def shuffle(self, sequence: list[str]) -> None:
         return None
+
+
+def submit_vote(
+    game: GameState,
+    voter_player_id: str,
+    target_player_id: str | None,
+    *,
+    now: int | None = None,
+):
+    """Submit through the mandatory receipt-time API inside the current vote window."""
+
+    deadline = game.phase_ends_at
+    received_at = (
+        now
+        if now is not None
+        else deadline - 1
+        if deadline is not None
+        else game.phase_started_at or 0
+    )
+    return game.submit_vote(received_at, voter_player_id, target_player_id)
 
 
 class VotingTests(unittest.TestCase):
@@ -73,9 +95,9 @@ class VotingTests(unittest.TestCase):
     def test_vote_reservation_replaces_the_previous_target_and_lynches(self) -> None:
         game = self.create_game()
 
-        game.submit_vote("player-1", "player-2")
-        game.submit_vote("player-1", "player-3")
-        game.submit_vote("player-2", "player-3")
+        submit_vote(game, "player-1", "player-2")
+        submit_vote(game, "player-1", "player-3")
+        submit_vote(game, "player-2", "player-3")
         result = self._resolve_votes(game)
 
         self.assertEqual(result.kind, VoteResultKind.LYNCH)
@@ -98,6 +120,102 @@ class VotingTests(unittest.TestCase):
         self.assertEqual(public_death.payload["public_cause"], "lynched")
         self.assertNotIn("cause", public_death.payload)
 
+    def test_vote_receipt_window_returns_immutable_evidence_and_rejects_without_mutation(self) -> None:
+        game = self.create_game(rules=self._rules(reveal="live"))
+        started_at = game.phase_started_at
+        deadline = game.phase_ends_at
+        self.assertIsNotNone(started_at)
+        self.assertIsNotNone(deadline)
+        assert started_at is not None and deadline is not None
+        with self.assertRaises(TypeError):
+            game.submit_vote("player-1", "player-3")  # type: ignore[call-arg]
+
+        acceptance = game.submit_vote(deadline - 1, "player-1", "player-3")
+
+        self.assertEqual(
+            acceptance,
+            InteractionAcceptance(
+                action="vote.cast",
+                player_id="player-1",
+                day=game.day,
+                phase="vote",
+                accepted_at=deadline - 1,
+                phase_deadline=deadline,
+            ),
+        )
+        with self.assertRaises(FrozenInstanceError):
+            acceptance.accepted_at = deadline  # type: ignore[misc]
+        self.assertEqual(game.pending_votes, {"player-1": "player-3"})
+        self.assertEqual(
+            [event.type for event in game.event_bus.events[-2:]],
+            ["VOTE_SUBMITTED", "VOTE_REVEALED_LIVE"],
+        )
+
+        for now in (deadline, deadline + 1):
+            rejected = self.create_game(rules=self._rules(reveal="live"))
+            before = (dict(rejected.pending_votes), len(rejected.event_bus.events))
+            with self.assertRaises(ActionRejected) as raised:
+                rejected.submit_vote(now, "player-1", "player-3")
+            self.assertEqual(raised.exception.reason, "action_deadline_passed")
+            self.assertEqual(
+                (dict(rejected.pending_votes), len(rejected.event_bus.events)), before
+            )
+
+        validation_order = self.create_game(rules=self._rules(reveal="live"))
+        order_deadline = validation_order.phase_ends_at
+        self.assertIsNotNone(order_deadline)
+        assert order_deadline is not None
+        for voter_player_id, target_player_id, reason in (
+            ("missing", "player-3", "actor_unavailable"),
+            ("player-1", "missing", "unknown_target"),
+        ):
+            before = (
+                dict(validation_order.pending_votes),
+                len(validation_order.event_bus.events),
+            )
+            with self.subTest(reason=reason), self.assertRaises(ActionRejected) as raised:
+                validation_order.submit_vote(
+                    order_deadline, voter_player_id, target_player_id
+                )
+            self.assertEqual(raised.exception.reason, reason)
+            self.assertEqual(
+                (
+                    dict(validation_order.pending_votes),
+                    len(validation_order.event_bus.events),
+                ),
+                before,
+            )
+
+        pre_start = self.create_game()
+        assert pre_start.phase_started_at is not None
+        before = (dict(pre_start.pending_votes), len(pre_start.event_bus.events))
+        with self.assertRaises(ActionRejected) as raised:
+            pre_start.submit_vote(
+                pre_start.phase_started_at - 1, "player-1", "player-3"
+            )
+        self.assertEqual(raised.exception.reason, "action_unavailable")
+        self.assertEqual((dict(pre_start.pending_votes), len(pre_start.event_bus.events)), before)
+
+        missing_start = self.create_game()
+        missing_start.phase_started_at = None
+        before = (dict(missing_start.pending_votes), len(missing_start.event_bus.events))
+        with self.assertRaisesRegex(RuntimeError, "authoritative deadline"):
+            missing_start.submit_vote(1, "player-1", "player-3")
+        self.assertEqual(
+            (dict(missing_start.pending_votes), len(missing_start.event_bus.events)),
+            before,
+        )
+
+        missing_deadline = self.create_game()
+        missing_deadline.phase_ends_at = None
+        before = (dict(missing_deadline.pending_votes), len(missing_deadline.event_bus.events))
+        with self.assertRaisesRegex(RuntimeError, "authoritative deadline"):
+            missing_deadline.submit_vote(1, "player-1", "player-3")
+        self.assertEqual(
+            (dict(missing_deadline.pending_votes), len(missing_deadline.event_bus.events)),
+            before,
+        )
+
     def test_tied_first_vote_enters_runoff_and_uses_each_runoff_tie_policy(self) -> None:
         for tie_rule, expected_kind in (
             ("no_lynch", VoteResultKind.NO_LYNCH),
@@ -113,7 +231,7 @@ class VotingTests(unittest.TestCase):
                 self.assertEqual(first_result.runoff_candidate_player_ids, ("player-3", "player-4"))
                 self.assertEqual(game.phase, GamePhase.RUNOFF)
                 with self.assertRaisesRegex(ValueError, "runoff candidate"):
-                    game.submit_vote("player-1", "player-5")
+                    submit_vote(game, "player-1", "player-5")
 
                 self._submit_tie(game)
                 runoff_result = self._resolve_votes(game)
@@ -154,11 +272,11 @@ class VotingTests(unittest.TestCase):
     def test_self_vote_rule_rejects_or_accepts_the_voter_as_configured(self) -> None:
         disabled_game = self.create_game(rules=self._rules(self_vote=False))
         with self.assertRaisesRegex(ValueError, "self-voting"):
-            disabled_game.submit_vote("player-1", "player-1")
+            submit_vote(disabled_game, "player-1", "player-1")
 
         enabled_game = self.create_game(rules=self._rules(self_vote=True))
-        enabled_game.submit_vote("player-1", "player-1")
-        enabled_game.submit_vote("player-2", "player-1")
+        submit_vote(enabled_game, "player-1", "player-1")
+        submit_vote(enabled_game, "player-2", "player-1")
         result = self._resolve_votes(enabled_game)
         self.assertEqual(result.lynched_player_id, "player-1")
 
@@ -167,14 +285,14 @@ class VotingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "resolve_votes"):
             game.advance_phase(game.phase_ends_at)
         with self.assertRaisesRegex(ValueError, "unknown voter"):
-            game.submit_vote("missing", "player-1")
+            submit_vote(game, "missing", "player-1")
         with self.assertRaisesRegex(ValueError, "unknown vote target"):
-            game.submit_vote("player-1", "missing")
-        game.submit_vote("player-1", "player-3")
-        game.submit_vote("player-2", "player-3")
+            submit_vote(game, "player-1", "missing")
+        submit_vote(game, "player-1", "player-3")
+        submit_vote(game, "player-2", "player-3")
         self._resolve_votes(game)
         with self.assertRaisesRegex(ValueError, "only be submitted"):
-            game.submit_vote("player-1", "player-2")
+            submit_vote(game, "player-1", "player-2")
         with self.assertRaisesRegex(ValueError, "only be resolved"):
             self._resolve_votes(game)
 
@@ -183,14 +301,14 @@ class VotingTests(unittest.TestCase):
         game.advance_phase(game.phase_ends_at)
         game.advance_phase(game.phase_ends_at)
         with self.assertRaisesRegex(ValueError, "voter 'player-3' must be alive"):
-            game.submit_vote("player-3", "player-1")
+            submit_vote(game, "player-3", "player-1")
         with self.assertRaisesRegex(ValueError, "vote target 'player-3' must be alive"):
-            game.submit_vote("player-1", "player-3")
+            submit_vote(game, "player-1", "player-3")
 
     def test_missing_vote_is_no_vote_and_does_not_cancel_the_round(self) -> None:
         game = self.create_game()
         for voter_player_id in tuple(game.players)[:-1]:
-            game.submit_vote(voter_player_id, "player-9")
+            submit_vote(game, voter_player_id, "player-9")
 
         result = self._resolve_votes(game)
 
@@ -216,23 +334,23 @@ class VotingTests(unittest.TestCase):
             rules=self._rules(abstain=replace(self.preset.rules.vote.abstain, enabled=False))
         )
         with self.assertRaisesRegex(ValueError, "abstaining is disabled"):
-            disabled_game.submit_vote("player-1", None)
+            submit_vote(disabled_game, "player-1", None)
 
         limited_game = self.create_game(
             rules=self._rules(
                 abstain=replace(self.preset.rules.vote.abstain, enabled=True, max_per_player=1)
             )
         )
-        limited_game.submit_vote("player-1", None)
+        submit_vote(limited_game, "player-1", None)
         self._resolve_votes(limited_game)
         self.assertEqual(limited_game.abstentions_used, {"player-1": 1})
         self._advance_execution_to_vote(limited_game)
         with self.assertRaisesRegex(ValueError, "abstention limit"):
-            limited_game.submit_vote("player-1", None)
+            submit_vote(limited_game, "player-1", None)
 
     def test_vote_reveal_modes_publish_only_the_configured_information(self) -> None:
         hidden_game = self.create_game(rules=self._rules(reveal="hidden"))
-        hidden_game.submit_vote("player-1", "player-3")
+        submit_vote(hidden_game, "player-1", "player-3")
         self.assertFalse(
             any(event.type == "VOTE_REVEALED_LIVE" for event in hidden_game.event_bus.events)
         )
@@ -242,7 +360,7 @@ class VotingTests(unittest.TestCase):
         )
 
         live_game = self.create_game(rules=self._rules(reveal="live"))
-        live_game.submit_vote("player-1", "player-3")
+        submit_vote(live_game, "player-1", "player-3")
         live_reveal = next(
             event for event in live_game.event_bus.events if event.type == "VOTE_REVEALED_LIVE"
         )
@@ -258,7 +376,7 @@ class VotingTests(unittest.TestCase):
         )
 
         after_game = self.create_game(rules=self._rules(reveal="after"))
-        after_game.submit_vote("player-1", "player-3")
+        submit_vote(after_game, "player-1", "player-3")
         self.assertFalse(
             any(event.type == "VOTES_REVEALED_AFTER" for event in after_game.event_bus.events)
         )
@@ -303,7 +421,7 @@ class VotingTests(unittest.TestCase):
             ("player-5", "player-4"),
             ("player-6", "player-4"),
         ):
-            game.submit_vote(voter_player_id, target_player_id)
+            submit_vote(game, voter_player_id, target_player_id)
 
     @staticmethod
     def _advance_to_vote(game: GameState) -> None:

@@ -1,403 +1,88 @@
-# Runbook
-
-通常のゲーム開発でユーザーが打つ言葉は4つ。各セッションは
-`python scripts/ai_status.py <role>` が出力する対応節で手順を決める。
-
-| ユーザーの指示 | 送る先 | 手順 |
-|---|---|---|
-| 「レビューして」 | Reviewer | `review` / §2 |
-| 「Phase X.Y を詳細設計して」 | Detailed Design | `design` / §4 |
-| 「Phase X.Y を実装して」「次のフェーズを実装して」 | Implementer | `implement` / §1 |
-| 「レビュー内容を確認して修正して」 | Implementer | `fix` / §3 |
-
-フェーズ番号が指定されなかった場合は `CURRENT_STATE.md` の Next Task に従う。
-**次にどれを送るかは Reviewer が決め、Next Task に名指しで書く**（D051）。
-方向性の変更や新しい仕様判断は、この4つのどれでもない。ユーザーが別途指示する。
-
-Qwen中心の実装・修正はD057に従う。基盤の入口は `python scripts/ai_status.py infra`、
-実行・再開・一括処理・利用枠/効率集計は `Docs/ai/spec/LOCAL_IMPLEMENTATION_RUNNER.md`。
-上位担当が契約を確定し、通常の工程管理をrunnerへ移す。Geminiは通常工程に入れない。
-基盤承認はゲームDesign Gateの代わりにならない。
-
----
-
-## 1. 実装セッション（Implementer / `implement`）
-
-### 1.1 開始時
-
-```
-python scripts/ai_status.py implement
-Docs/ai/ROADMAP.md      ← 対象サブPhaseの「含む / 含まない / 完了条件」
-Docs/ai/spec/DESIGN.md  ← ROADMAP が指定した節のみ
-Docs/ai/TEST_POLICY.md  ← 対象サブPhaseに関係するカテゴリのみ
-```
-
-`AGENTS.md` はセッション開始時に既に読み込む。`ai_status.py` の出力と
-そこが指定した範囲以外は、必要になってから読む。リポジトリ全体を読まない。
-`review_archive/` は過去の記録であり、現在の状態を書き足さない。FIXED /
-REJECTED / DEFERRED の指摘はここへ退避し、通常のセッションでは読まない。
-
-`Docs/ai/spec/AI_WEREWOLF_CODEX_HANDOFF.md` は元になった旧仕様であり、
-DESIGN.md と矛盾する箇所がある。**矛盾したら DESIGN.md を優先する。**
-`Docs/ai/decisions/` は判断の理由。DESIGN.md の意図が読み取れないときだけ開く。
-
-### 1.2 着手前の確認
-
-- **Design Gate を通ったか確認する**（D051 / §2.5）。対象サブPhaseが
-  `DESIGN: REQUIRED` と判定されている場合、`Docs/ai/design/` に該当する詳細設計があり、
-  Reviewer の `DESIGN REVIEW: APPROVED` を受けているときだけ実装へ入る。
-  判定が無い、または設計が未承認なら、**実装せずユーザーへ報告して止まる**
-- `REVIEW_INBOX.md` に `[OPEN]` の Critical / High があれば、**新機能より先に対応する**
-- 未コミットの変更があれば先にコミットする
-- ROADMAP の「含まない」に書かれたものは実装しない
-
-### 1.3 実装中
-
-- 仕様に疑問が出たら勝手に決めず `OPEN_QUESTIONS.md` へ起票し、
-  そこを避けて実装できるなら続行、できないなら止めて報告する
-- レビュー観点は `AGENTS.md` の Review checklist にある。自分でも確認する
-- テスト出力・200行超の diff・大きい参照文書は、**会話へ入れる前に**
-  ローカルLLMで圧縮する（D034）。通さないなら理由が要る。
-  ただし合否の値は終了コードと生の最終行から取る
-- 設計の形を新たに決めたら `decisions/` へ D0NN として記録する
-- **`spec/DESIGN.md` は書き換えない**（Reviewer の担当）。
-  DESIGN を直さないと `check_docs.py` が通らない状況になったら、**直さずに報告する。**
-  検査側の想定漏れである可能性が高い。DESIGN §5 の「未実装」注記は、
-  実装が追いついても検査を落とさない（注記の除去は Reviewer が行う）
-
-### 1.4 終了時
-
-```
-[ ] ROADMAP の完了条件を満たしたか確認
-[ ] テスト実行（報告は成功数・失敗数・重要エラーのみ。全出力を貼らない）
-[ ] `python scripts/check_docs.py` を実行し、不整合を0にする
-[ ] git diff 確認 → コミット
-[ ] CURRENT_STATE.md 更新（Current Phase / Completed / Next Task / Test Status）
-    Test Status には commit hash を入れる。
-    Known failing が「なし」以外なら、対応する OPEN / IN_PROGRESS 指摘を残す。
-    **Latest Review は書き換えない**（Reviewer の担当）
-[ ] 新しい判断があれば decisions/、再発しそうな失敗があれば failures/
-[ ] Phase 全体が完了したときのみ handoffs/PHASE<N>_HANDOFF.md を作成
-[ ] コミット後、人間へ `git push` を促す（エージェント環境に GitHub 認証情報は無い）
-```
-
-報告は「実装したもの / テスト結果 / 未実装 / 次にやること」を各数行。
-加えて**ローカルLLMを何に使ったか**を1〜2行（使わなかったならその理由）。D034。
-
----
-
-## 2. レビューセッション（Reviewer / `review`）
-
-実装は行わない。指摘を `REVIEW_INBOX.md` へ残す。
-
-**Reviewer は Claude と Sol の2 model いる**（D053）。通常レビューはどちらでもよい。
-深掘りレビューと詳細設計は Sol。Sol の各レーンは**別チャット**で、文脈を共有しない。
-
-- **`_DESIGN.md` の `Status: APPROVED` は、設計を書いた model と別の model が付ける。**
-  Sol が書いた設計は Claude が承認する。文脈ではなく model を変えることが目的
-- **起票前に `REVIEW_INBOX.md` と `review_archive/` の両方で同じ日付のIDを確認し、
-  最大値+1を使う。** 同じ日に複数レーンが起票するため、inbox だけの採番は衝突する
-
-### 2.1 開始時と読む順
-
-```
-python scripts/ai_status.py review
-git log / git diff            ← 前回レビュー以降の差分に限定
-Docs/ai/spec/DESIGN.md        ← 差分が触れている節
-Docs/ai/TEST_POLICY.md
-差分のあるコードと、その影響を直接受けるコードのみ
-```
-
-変更されていないファイルは、必要が生じない限り読まない。
-どれを読むかの絞り込みにローカルLLMを使ってよいが、
-**差分に含まれるファイルは減らさず全部開く**（D034）。
-
-**別ホストのReviewer VMからWindows localhostへは到達できない。** Reviewer が動く Linux VM は
-Windows とは別ホストであり、llama-server が bind している Windows 側の
-`127.0.0.1:8080` は VM からは別物である（`Network is unreachable`）。
-したがってこの別ホストVMでのReviewer報告では
-ローカルLLMは「環境から到達不可のため未使用」であり、
-**サーバが起動しているかどうかとは無関係である。**
-Local Windowsで動くReviewerはこのVM前提を流用せず、実際の接続結果を記録する。
-ただし **VM から PyPI へは出られる。「ネットワークが無い」ではない。**
-
-**Reviewer VM には実行時依存が入っていないことがある。** 素の状態では
-`websockets` が無く `jsonschema` が古いため、ネットワーク系の5モジュールが
-import に失敗し、収集が 179 から 132 へ落ちる。エラーは出るので緑にはならないが、
-環境ノイズとして流すと**網羅が落ちたまま報告することになる。**
-テスト前に `python -m pip install -e ".[dev]"` を実行し、
-**収集数が `CURRENT_STATE.md` の Test Status と一致することを確認する**（D034）。
-
-**Reviewer VM のマウント上では `__pycache__` が無効化されないことがある。**
-Reviewer がコードを一時的に書き換えて（ミューテーション検証など）元へ戻すと、
-`cp` で復元したファイルが**書き換え前と同じ mtime と同じサイズ**になることがあり、
-Python の mtime + size による bytecode 無効化がすり抜ける。
-その結果、**ソースは HEAD と一致しているのに、実行されるのは書き換え後の bytecode** になる。
-2026-09-02 に実際に発生し、`git diff --quiet ai_client/` が clean を返す状態で
-`ai_client/world` の2テストが落ち続けた。
-
-対策は次のどちらか。
-
-```
-PYTHONPYCACHEPREFIX=/tmp/pyc_$RANDOM python -m pytest ...   ← 実行ごとに別キャッシュ
-mv <pkg>/__pycache__ _to_delete/...                         ← 復元後に退避（rm は権限が無い）
-```
-
-**ソースを一時変更したあとのテスト結果は、この対策を取ってから読むこと。**
-取らずに得た「赤」「緑」はどちらも信用してはならない。
-
-同じ理由で、`usage.jsonl` の `outcome: unreachable` が Reviewer の実行によるものなら、
-それはサーバ停止を意味しない。`tool` 欄で実行元を確認すること。
-入力長やトークン数の Verification のように**サーバが必要な確認は Implementer が行う。**
-
-### 2.2 確認する
-
-`AGENTS.md` の Review checklist を必ず通す。加えて:
-
-- DESIGN.md との差異（実装が設計から外れていないか）
-- ROADMAP の完了条件を満たしているか
-- TEST_POLICY の該当項目がテストとして存在するか
-- 情報漏洩（private が broadcast に乗っていないか、内部死因が外へ出ていないか）
-- 競合状態、async の扱い
-- 拡張性を壊す実装
-- 指摘の原因が Reviewer 側の文書にある場合、**その文書を直したうえで**起票する
-
-テストは実際に走らせて結果を確認する。
-`scripts/check_docs.py` も走らせる。文書と実装のずれはここで機械的に落とす。
-
-### 2.3 起票の形
-
-```
-## R-YYYYMMDD-NN [OPEN] Critical|High|Medium|Low
-
-File:
-Problem:
-Required:
-Verification:
-```
-
-- 長い解説を書かない
-- Reviewer 側の文書（DESIGN.md / TEST_POLICY.md）に原因がある指摘は、
-  **その旨を明記し、修正は Reviewer が行うと書く**
-- **Reviewer 名義の記録は Reviewer セッションだけが書く**（R-20260905-04）。
-  `review_archive/` の「Reviewer 確認」節、完了承認、Blocking 判定は、
-  実際にそのセッションで走らせた実測とミューテーション結果に対応していなければならない。
-  他 role が書いた Reviewer 名義の記述を見つけたら、訂正したうえで起票する
-- 終了時に `CURRENT_STATE.md` の Latest Review と Test Status を更新する
-- `python scripts/check_docs.py` を実行する。**DESIGN / ROADMAP / TEST_POLICY を
-  書き換えたら必ず走らせる。** 実装より先に書いたルールは DESIGN §5 の該当行へ
-  「未実装（Phase X.Y）」と注記すれば検査を通る
-
-### 2.4 報告の最後に「次に誰へ何を送るか」を書く
-
-**レビュー報告は必ずこれで締める。** ユーザーが判断せずに済む形で、
-そのまま送れる文面を1つ名指しする。省略しない。
-
-```
-## 次に送る指示
-
-→ <役割> / <model> へ「<そのまま打つ文面>」
-
-理由: 1〜2行
-並行して送れるもの: あれば1行（無ければ書かない）
-先に潰すべきもの: あれば1行
-```
-
-対応表は `AGENTS.md` の「このリポジトリの動かし方」にある。ここへ複製しない。
-同じ内容を `CURRENT_STATE.md` の Next Task にも残す。
-**チャットだけに書かない。**
-
-**Next Task には機械が読む宣言を2行入れる**（D052）。書き忘れると
-`check_docs.py` が落ち、`ai_status.py implement` が `blocked` を出す。
-
-```
-Target subphase: 3.1     ← 行頭に1回。ROADMAP に `## 3.1` 節が実在すること
-Design gate: REQUIRED    ← REQUIRED / NOT REQUIRED のどちらか。行頭に1回だけ
-```
-
-`REQUIRED` なら `design/PHASE<N>_<M>_<名前>_REQUEST.md` を1枚置く。
-`NOT REQUIRED` なら依頼書を作らない。**宣言と依頼書が食い違うと門が止まる。**
-散文中で行頭から `Design gate:` と書き始めない（2件目の宣言として数えられる）。
-
-**対象を次のサブPhaseへ進める前に、そのサブPhaseの ROADMAP 節を書く。**
-`## 3.2`〜`## 3.5` はまだ無い（R-20260901-82）。節が無いまま
-`Target subphase` を進めると `check_docs.py` が落ちる。
-
-複数を並行して送れるときも、**最初に送る1つを先頭に置く。**
-「どれでもよい」と書かない。順序に理由があるならそれを書く。
-
-### 2.5 Implementation Design Gate（D051 / D052）
-
-**門の出力は2値である。** `DESIGN: NOT REQUIRED` は正常な結論であり、
-「未確定」でも「準備不足」でもない。NOT REQUIRED と判定したサブPhaseには
-依頼書を作らない。機械側もこの状態を表現できる必要がある。
-
-
-**新しい実装タスクへ進む前に、Reviewer が2値で判定する。**
-判定リストに当たれば必要、当たらなければ不要。迷いを理由に必要へ倒さない。
-
-不要（Implementer へ直行）: 局所的な bug fix / Reviewer 指摘への明確な修正 /
-validation 追加 / テスト追加 / 既存 pattern に従う実装 /
-canonical design から実装方法がほぼ一意 / public API と state 構造を新設しない /
-component 間の責務変更が無い / 小規模な既存機能拡張。
-
-必要（Detailed Design へ）: 新しい subsystem・module / 複数 component の責務分担 /
-新しい state machine / lifecycle / async・concurrency / queue /
-timeout・reconnect / protocol との複雑な相互作用 / public API の新設 /
-影響が複数モジュールへ広がる / 実装方法が複数あり選択を誤ると手戻りが大きい /
-canonical design が目的だけを定め実装構造を定めていない / Phase の中核となる新機能。
-
-```
-DESIGN: NOT REQUIRED          DESIGN: REQUIRED
-
-Reason:                       Reason:
-Implementation scope:         Design scope:
-Files to read:                Relevant canonical sources:
-Acceptance criteria:          Constraints:
-                              Out of scope:
-                              Questions Sol must resolve:
-```
-
-Detailed Design の成果物は**実装開始前に必ず Reviewer が読む。** 確認するのは、
-canonical design / accepted decision / protocol・schema と矛盾しないこと、
-責務分離・state・lifecycle・failure handling・concurrency 前提が明確なこと、
-将来 Phase を先取りしていないこと、Implementer が追加の重要設計判断をせず書けること、
-そして**詳細すぎてコードの二重管理になっていないこと。**
-問題が無ければ `DESIGN REVIEW: APPROVED` とし、Implementer 向けの実装入口を明示する。
-
-実装後のレビューでは、詳細設計を正しい前提として扱わない。確認は
-**canonical source → 実コード → schema → tests → approved detailed design** の順。
-**設計どおりでも canonical specification に反していれば指摘する。**
-
----
-
-## 3. レビュー修正セッション（Implementer / `fix`）
-
-新機能は実装しない。
-
-### 3.1 開始時
-
-```
-python scripts/ai_status.py fix
-Docs/ai/spec/DESIGN.md    ← 指摘が参照している節だけ
-指摘された実装ファイル
-```
-
-`ai_status.py` が `REVIEW_INBOX.md` の OPEN / IN_PROGRESS 指摘を本文ごと出力する。
-`Docs/ai/SPEC_REVIEW.md` は元仕様への指摘履歴であり、修正対象ではない。
-
-### 3.2 対応順
-
-Critical → High → Medium → Low。
-
-- 「修正は Reviewer が行う」と書かれた指摘は**触らない**
-- Reviewer 推奨が示されている指摘はそれに従う。
-  異論があれば実装せず `OPEN_QUESTIONS.md` へ起票する
-- 設計の形を変える必要がある場合、形は Codex が決めてよい。
-  決めたら `decisions/` へ記録する。**DESIGN.md は書き換えない**
-
-### 3.3 各指摘の完了時
-
-`REVIEW_INBOX.md` の該当項目を編集する。
-
-- `[OPEN]` を `[FIXED]` に変える
-- 直下に `Fix:` の1行を足し、何をどう直したかを書く
-- 対応しない判断は `[REJECTED]` または `[DEFERRED]` にし、理由を書く
-- **項目を削除しない**
-
-### 3.4 終了時
-
-§1.4 と同じ。加えて `REVIEW_INBOX.md` に `[OPEN]` が残っていないか確認する。
-
-報告は「対応した指摘ID / 変更したファイル / テスト結果 / 未対応と理由」を各数行。
-加えて**ローカルLLMを何に使ったか**を1〜2行（使わなかったならその理由）。D034。
-
----
-
-## 4. 詳細設計セッション（Detailed Design / `design`）
-
-**実装しない。テストも書かない。** 成果物は `Docs/ai/design/` の Markdown 1枚。
-
-### 4.1 開始時
-
-```
-python scripts/ai_status.py design
-Docs/ai/design/<対象>_REQUEST.md  ← Reviewer が出した依頼書。これが入力
-Docs/ai/ROADMAP.md                ← 対象サブPhaseの 含む / 含まない / 完了条件
-依頼書の Relevant canonical sources が名指しした節とファイルだけ
-```
-
-依頼書が Out of scope に置いたものは設計しない。
-`ROADMAP.md` のスコープを設計側で広げない。広げたくなったら
-**設計へ書かず Reviewer へ報告する。**
-
-### 4.2 書く
-
-Purpose / Files・modules / Responsibilities / Public interfaces / Data flow /
-State・lifecycle / Main control flow / Failure handling /
-Concurrency assumptions / Explicitly out of scope / Acceptance criteria /
-Required tests。
-
-- **完成コードを書かない。関数内部を1行ずつ指定しない。**
-  シグネチャは公開 API に限る。内部ヘルパーは列挙しない
-- 依頼書の Questions must resolve には全部答える。
-  **採らなかった案と、採らなかった理由を1〜2行ずつ**添える
-- どちらでもよいと判断した点は「決めない」と明示する。
-  Implementer に暗黙の設計判断を残さない
-- canonical（`spec/DESIGN.md` / `ROADMAP.md` / schema / `decisions/`）と
-  矛盾したら設計を曲げる。canonical のほうを直したくなったら Reviewer へ報告する
-
-### 4.3 ファイルと Status の約束
-
-`Docs/ai/design/` には対象サブPhaseごとに、設計単位の REQUEST / DESIGN の対を置く。
-同じサブPhaseに複数の設計単位が並んでもよく、ファイル名の stem で対応付ける。
-同じ設計の改訂は既存の `_DESIGN.md` を `DRAFT` へ戻し REQUEST に Addendum を足す。
-別の設計を追加するときは、新しい stem の REQUEST / DESIGN の対を作る。
-
-各 REQUEST の `Request status:` は `OPEN` または `CLOSED` を取る。
-未記載の既存 REQUEST は `OPEN` とみなす。`CLOSED` は対応する `_DESIGN.md` が
-`Status: APPROVED` で、実装と検証まで完了したときだけ設定する。Design Gate が数えるのは
-開いている REQUEST だけであり、`CLOSED` の要求は除外する。対応設計が未承認・欠落の
-`CLOSED` は除外せず、`check_docs.py` で不整合として報告する。
-
-`Design gate: REQUIRED` のときは開いている REQUEST が1件以上あればよい。
-`CURRENT_STATE.md` の `Next Task` に `Target design:` を1行置いて現在の主対象となる
-`_DESIGN.md` をファイル名で名指しし、Design Gate はその対応設計の `Status: APPROVED`
-を実装許可の条件にする。複数の REQUEST が OPEN でも、主対象以外を暗黙に選ばない。
-
-| ファイル | 誰が書くか | 何のためか |
-|---|---|---|
-| `PHASE<N>_<M>_<名前>_REQUEST.md` | Reviewer / Implementer | 依頼。`DESIGN: REQUIRED` と `Request status:` の宣言 |
-| `PHASE<N>_<M>_<名前>_DESIGN.md` | Detailed Design | 成果物 |
-
-**`Status:` 行は先頭に1行、値は次の語のいずれか1つで始める。**
-そのあとに ` — 一言` を足してよいが、**語の前に何も置かない。**
-散文で「APPROVED 待ち」などと書かない（機械が承認済みと読む）。
-**区切りは em dash `—`（U+2014）だけ。** `-` や `–` は語彙外として扱われ、
-実装が止まる（D052）。
-
-```
-REQUESTED   依頼を出した（REQUEST の既定値）
-DRAFT       設計を書いている途中
-IN_REVIEW   Reviewer のレビュー待ち
-APPROVED    Reviewer が承認した。実装へ渡してよい
-SUPERSEDED  作り直した。後継を1行で指す
-```
-
-**設計作業の承認は `_DESIGN.md` の `Status:` に書く。** `_REQUEST.md` の
-`Status:` は依頼の作業状態として `REQUESTED` のまま置いてよい。
-実装と検証まで終えたときだけ、別行の `Request status: CLOSED` へ更新する。
-Design Gate は `_DESIGN.md` の承認状態、REQUEST の open / closed、
-`CURRENT_STATE.md` の `Target design:` を見る。
-
-### 4.4 終了時
-
-```
-[ ] `Docs/ai/design/<対象>_DESIGN.md` を作成
-[ ] 先頭に `Status: IN_REVIEW` を置く（`APPROVED` へ変えるのは Reviewer）
-[ ] 依頼書の Questions must resolve に全部答えたか確認
-[ ] `python scripts/check_docs.py` を実行
-[ ] 実装へ渡さない。Reviewer の `DESIGN REVIEW: APPROVED` を待つ
-```
-
-報告は「決めたこと / 決めなかったこと / 依頼書から外れた点と理由」を各数行。
+# AIwolf Runbook
+
+Responsibility labels below are model-independent. Current executor preferences live only
+in `MODEL_ASSIGNMENTS.md`. Detailed role contracts are under `roles/`.
+
+## 1. Integrator session (`integrate`)
+
+1. Run `python scripts/ai_status.py integrate`; inspect Git status and the relevant diff.
+2. Reconcile `CURRENT_STATE.md`, `TASKS.md`, handoffs, OPEN reviews, and measured tests.
+3. Select READY work with satisfied dependencies and Design Gate. Compare expected/shared
+   files before parallel dispatch; serialize overlapping writers.
+4. Dispatch one model-neutral packet to each short-lived worker using the host's standard
+   delegation/isolation. Never construct a custom supervisor or automatic merge engine.
+5. Route architecture work to an Architect, implementation to an Implementer, mechanical
+   evidence to a Tester, independent evaluation to a Reviewer, and unclear causes to an
+   Investigator.
+6. On ordinary `CHANGES_REQUIRED`, return the bounded issue to an Implementer, then Tester,
+   then a fresh Reviewer. After three failed rounds on the same cause, use an Investigator.
+7. Ask the user only for a material product choice unresolved by canonical sources,
+   decisions, code, and Architect analysis. Continue independent READY tasks while waiting.
+8. Verify actual diff, tests, findings, handoff, and conflicts. Only then update `TASKS.md`
+   and `CURRENT_STATE.md`; never pre-record another responsibility's approval or evidence.
+9. Keep the main-thread report compact (`▶ START`, `✓ DONE`, `↻ RETRY`, `⚠ DECISION`,
+   `✕ BLOCKED`) and name the exact next action.
+
+## 2. Architect session (`architect`; `design` compatibility alias)
+
+1. Run `python scripts/ai_status.py architect` and read the assigned task packet.
+2. Read the target ROADMAP section, request, canonical specification, and only the needed
+   decisions and implementation facts.
+3. Define scope, non-scope, public interfaces, data ownership, lifecycle/state, failure
+   behavior, concurrency, acceptance criteria, and required tests. Do not implement code.
+4. Escalate a product choice only when sources do not determine it; provide bounded options,
+   effects, and a recommendation to the Integrator.
+5. Leave the design reviewable and write the required handoff. A separate Reviewer session
+   must approve it before implementation becomes READY.
+
+## 3. Implementation session (`implement`)
+
+1. Run `python scripts/ai_status.py implement` and read the assigned task packet.
+2. Read only its canonical sources, approved design, and relevant test policy.
+3. Stop if dependencies, allowed scope, or a required Design Gate are unresolved.
+4. Preserve unrelated changes and modify only expected files unless scope expansion is
+   explicitly coordinated with the Integrator.
+5. Implement the contract without changing product specification. Add focused/regression
+   tests but do not weaken existing assertions or hide production bugs in tests.
+6. Run focused checks and write the packet handoff with exact evidence. Return to the
+   Integrator; do not self-approve or begin adjacent work.
+
+## 4. Review session (`review`)
+
+1. Run `python scripts/ai_status.py review` and read the assigned packet and handoff.
+2. Independently compare canonical specification, actual code/schema, tests, and detailed
+   design in that order. Do not rely on the worker's completion claim.
+3. Apply `AGENTS.md`, inspect the scoped diff, and run proportionate verification.
+4. Return exactly `APPROVED`, `CHANGES_REQUIRED`, or `ARCHITECTURE_REVIEW_REQUIRED` with
+   issues, severity, required fix, test assessment, and regression risk.
+5. Record actionable findings only when assigned that queue write. Never approve a design
+   authored in the same session and never implement fixes while acting only as Reviewer.
+
+## 5. Review-fix session (`fix`)
+
+1. Run `python scripts/ai_status.py fix` and read the assigned findings and task packet.
+2. Address OPEN findings in severity order and only within their required scope.
+3. Preserve user changes, avoid opportunistic redesign, and add or strengthen a regression
+   that fails for the reported defect.
+4. Run focused and relevant normal tests plus document/diff checks. Append measured repair
+   evidence to the task handoff; a separate Reviewer closes the review.
+
+## 6. Test session (`test`)
+
+1. Run `python scripts/ai_status.py test` and read the assigned task packet and handoff.
+2. Verify commands and environment independently. Run focused tests first, then named
+   regressions/completion checks, then the normal project suite when proportionate.
+3. Preserve stdout/stderr, exit codes, pass/fail/skip counts, durations, timeouts, and the
+   first reproducible failure. Do not edit product code or make a design judgment.
+4. For a hang or unexplained/flaky failure, stop the bounded run and return deterministic
+   reproduction evidence to the Integrator for Investigator routing.
+5. Report measured evidence using the handoff format and stop.
+
+## 7. Investigation session (`investigate`)
+
+1. Run `python scripts/ai_status.py investigate` and read the investigation packet.
+2. Reproduce with the smallest safe command; preserve raw exit status and decisive output.
+3. Isolate cause across component boundaries without silently changing specification.
+4. Prefer read-only diagnostics and minimal probes. Do not begin a broad fix.
+5. Write reproduction steps, evidence, likely cause, affected scope, risks, and recommended
+   implementation task to the handoff. Then stop.

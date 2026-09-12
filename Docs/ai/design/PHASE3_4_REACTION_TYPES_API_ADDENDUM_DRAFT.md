@@ -13,13 +13,12 @@ Parent SHA256 reviewed for this draft:
 
 ## Reason and scope
 
-D059 run `overnight-9738f6620f004b829756bd9410749df2` stopped before writing
-tests or source. Its actual `gpt-5.5` planner found that the approved parent fixes
-the required semantics but does not name the public jitter callable or the Python
-records and fields that its generated tests must import. This addendum fixes only
-those names and signatures. Controller behavior, network/world integration, Brain
-changes, transport, process fixtures, and completion scenarios remain governed by
-the parent design and are outside this addendum.
+A pre-implementation contract review stopped before writing tests or source because
+the approved parent fixes the required semantics but does not name the public jitter
+callable or the Python records and fields that tests must import. This addendum fixes
+only those names and signatures. Controller behavior, network/world integration,
+Brain changes, transport, process fixtures, and completion scenarios remain governed
+by the parent design and are outside this addendum.
 
 ## Exact public API
 
@@ -152,11 +151,9 @@ def deterministic_jitter_seconds(
 ## Gate and acceptance
 
 This draft introduces public names that were absent from the approved parent.
-Under D051/D053 it is not implementation authority until a model different from
-the Detailed Design author reviews the exact bytes and changes the status to
-`APPROVED` with a hash-bound review record. The stopped run stays terminal and is not resumed or
-rewritten. A later workpackage must bind the approved addendum hash and use a new
-run.
+Under the Design Gate it is not implementation authority until an independent
+reviewer checks the exact bytes and changes the status to `APPROVED` with a
+hash-bound review record.
 
 An implementation of this isolated unit is acceptable only when generated tests
 import exactly the API above, cover immutability/validation and deterministic

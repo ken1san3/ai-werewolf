@@ -13,10 +13,13 @@ from uuid import uuid4
 from websockets.asyncio.client import connect
 
 
+ACTION_SEND_GUARD_SECONDS = 0.5
+
+
 def request(message_type: str, game_id: str, payload: dict[str, object]) -> str:
     return json.dumps({
         "type": message_type,
-        "protocol_version": "1.0",
+        "protocol_version": "1.1",
         "event_id": str(uuid4()),
         "game_id": game_id,
         "timestamp": 0,
@@ -44,6 +47,7 @@ async def send_available_action(
     game_id: str,
     payload: dict[str, object],
     sent_day_actions: set[tuple[int, str]],
+    action_timing: dict[str, int],
     server_timestamp: object = None,
 ) -> None:
     actions = payload.get("actions")
@@ -53,16 +57,25 @@ async def send_available_action(
     day = payload.get("day")
     daytime = phase == "day" and isinstance(day, int)
     phase_ends_at = payload.get("phase_ends_at")
-    if (
-        daytime
-        and isinstance(phase_ends_at, int)
-        and isinstance(server_timestamp, int)
-        and phase_ends_at <= int(time.monotonic())
-    ):
-        # The state push may have sat in the subprocess pipe until the
-        # authoritative deadline.  Do not deliberately send a known-stale
-        # daytime action and turn a harmless race into a completion failure.
-        return
+
+    async def send_if_fresh(message_type: str, request_payload: dict[str, object]) -> bool:
+        # The server and this same-host completion fixture share the monotonic
+        # clock.  Recheck immediately before every send so an action state that
+        # sat behind Windows process scheduling cannot cross its one-second
+        # authoritative deadline in the test harness.
+        fresh = (
+            isinstance(phase_ends_at, int)
+            and isinstance(server_timestamp, int)
+            and phase_ends_at > server_timestamp
+            and time.monotonic() + ACTION_SEND_GUARD_SECONDS < phase_ends_at
+        )
+        if not fresh:
+            action_timing["stale_suppressed"] += 1
+            return False
+        await socket.send(request(message_type, game_id, request_payload))
+        action_timing["sent"] += 1
+        return True
+
     for action in actions:
         if not isinstance(action, dict):
             continue
@@ -70,11 +83,12 @@ async def send_available_action(
             channel_id = action.get("channel")
             key = (day, "chat")
             if isinstance(channel_id, str) and key not in sent_day_actions:
-                await socket.send(request("chat.send", game_id, {
+                sent = await send_if_fresh("chat.send", {
                     "channel_id": channel_id,
                     "message": "The discussion is open.",
-                }))
-                sent_day_actions.add(key)
+                })
+                if sent:
+                    sent_day_actions.add(key)
             continue
         if daytime and action.get("type") == "co_declare":
             claimed_role_ids = action.get("claimed_role_ids")
@@ -85,18 +99,17 @@ async def send_available_action(
                 and isinstance(claimed_role_ids[0], str)
                 and key not in sent_day_actions
             ):
-                await socket.send(request("co.declare", game_id, {
+                sent = await send_if_fresh("co.declare", {
                     "claimed_role_id": claimed_role_ids[0],
                     "comment": "I claim this role.",
-                }))
-                sent_day_actions.add(key)
+                })
+                if sent:
+                    sent_day_actions.add(key)
             continue
         if action.get("type") == "vote":
             targets = action.get("valid_targets")
             if isinstance(targets, list) and targets:
-                await socket.send(request(
-                    "vote.cast", game_id, {"target_player_id": targets[0]}
-                ))
+                await send_if_fresh("vote.cast", {"target_player_id": targets[0]})
             return
         if action.get("type") == "ability":
             targets = action.get("valid_targets")
@@ -110,14 +123,21 @@ async def send_available_action(
                 and uses_remaining != 0
                 and len(targets) >= count
             ):
-                await socket.send(request("ability.use", game_id, {
+                await send_if_fresh("ability.use", {
                     "ability_id": ability_id,
                     "target_player_ids": targets[:count],
-                }))
+                })
                 return
 
 
-async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, status_path: Path) -> None:
+async def run(
+    uri: str,
+    game_id: str,
+    entry_token: str,
+    credentials_path: Path,
+    readiness_path: Path,
+    status_path: Path,
+) -> None:
     credentials = read_credentials(credentials_path)
     resumed = credentials is not None
     last_seq = int(credentials["last_seq"]) if credentials is not None else 0
@@ -126,6 +146,8 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
     co_declared = False
     action_rejections: list[dict[str, object]] = []
     chat_messages_received = 0
+    action_timing = {"sent": 0, "stale_suppressed": 0}
+    readiness_written = False
     async with connect(uri) as socket:
         if resumed:
             await socket.send(request("session.resume", game_id, {
@@ -140,8 +162,17 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
             sequence = message.get("seq")
             if isinstance(sequence, int):
                 last_seq = sequence
-            if message.get("type") == "session.joined":
+            message_type = message.get("type")
+            if message_type == "session.joined":
                 connection_token = message["payload"]["connection_token"]
+            if message_type in {"session.joined", "session.resumed"} and not readiness_written:
+                write_json(readiness_path, {
+                    "pid": os.getpid(),
+                    "resumed": resumed,
+                    "message_type": message_type,
+                    "observed_at_monotonic": time.monotonic(),
+                })
+                readiness_written = True
             if connection_token:
                 write_json(credentials_path, {
                     "connection_token": connection_token,
@@ -153,6 +184,7 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                     game_id,
                     message["payload"]["action_state"],
                     sent_day_actions,
+                    action_timing,
                     message.get("timestamp"),
                 )
             elif message.get("type") == "player.action_state":
@@ -161,6 +193,7 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                     game_id,
                     message["payload"],
                     sent_day_actions,
+                    action_timing,
                     message.get("timestamp"),
                 )
             elif message.get("type") == "action.rejected":
@@ -187,6 +220,7 @@ async def run(uri: str, game_id: str, entry_token: str, credentials_path: Path, 
                     "co_declared": co_declared,
                     "action_rejections": action_rejections,
                     "chat_messages_received": chat_messages_received,
+                    "action_timing": action_timing,
                 })
                 return
 
@@ -197,6 +231,7 @@ def main() -> None:
     parser.add_argument("--game-id", required=True)
     parser.add_argument("--entry-token", required=True)
     parser.add_argument("--credentials", required=True, type=Path)
+    parser.add_argument("--readiness", required=True, type=Path)
     parser.add_argument("--status", required=True, type=Path)
     arguments = parser.parse_args()
     asyncio.run(run(
@@ -204,6 +239,7 @@ def main() -> None:
         arguments.game_id,
         arguments.entry_token,
         arguments.credentials,
+        arguments.readiness,
         arguments.status,
     ))
 

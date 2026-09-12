@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from random import Random
 from shutil import copytree
@@ -91,11 +91,219 @@ class PlayerInteractionTests(unittest.TestCase):
         game._enter_phase(GamePhase.DAY, 100)
         return game
 
+    def invoke_communication(self, name: str, game: GameState, now: object):
+        if name == "chat.send":
+            return game.submit_chat(now, "wolf", "public", "I spoke")
+        if name == "co.declare":
+            return game.declare_co(now, "wolf", "seer", "I am the seer")
+        if name == "co.report":
+            return game.report_co(now, "wolf", "inspect_result", "target", "not_wolf")
+        raise AssertionError(f"unknown test operation: {name}")
+
+    @staticmethod
+    def communication_mutations(game: GameState):
+        return (
+            dict(game.public_activity_counts),
+            dict(game.co_declaration_counts),
+            tuple((event.type, dict(event.payload)) for event in game.event_bus.events),
+            tuple(
+                (player_id, game.get_state_sync(player_id)["history"])
+                for player_id in game.players
+            ),
+        )
+
+    def test_communication_boundaries_return_frozen_authorization_evidence(self) -> None:
+        for action in ("chat.send", "co.declare", "co.report"):
+            with self.subTest(action=action, boundary="before"):
+                game = self.make_day_game(
+                    {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+                )
+                result = self.invoke_communication(action, game, 109)
+                acceptance = result.acceptance if action == "chat.send" else result
+                self.assertEqual(
+                    (
+                        acceptance.action,
+                        acceptance.player_id,
+                        acceptance.day,
+                        acceptance.phase,
+                        acceptance.accepted_at,
+                        acceptance.phase_deadline,
+                    ),
+                    (action, "wolf", 1, "day", 109, 110),
+                )
+                with self.assertRaises(FrozenInstanceError):
+                    acceptance.accepted_at = 108
+
+            for now in (110, 111):
+                with self.subTest(action=action, now=now):
+                    game = self.make_day_game(
+                        {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+                    )
+                    before = self.communication_mutations(game)
+                    with self.assertRaises(ActionRejected) as raised:
+                        self.invoke_communication(action, game, now)
+                    self.assertEqual(raised.exception.reason, "action_deadline_passed")
+                    self.assertEqual(self.communication_mutations(game), before)
+
+    def test_unavailable_communication_never_interprets_a_deadline(self) -> None:
+        roles = {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+        for phase in (GamePhase.SETUP, GamePhase.DAWN):
+            for action in ("chat.send", "co.declare", "co.report"):
+                game = self.make_day_game(roles)
+                game._enter_phase(phase, 100)
+                times = (101,)
+                if phase is GamePhase.DAWN:
+                    self.assertIsNotNone(game.phase_ends_at)
+                    times = (
+                        game.phase_ends_at - 1,
+                        game.phase_ends_at,
+                        game.phase_ends_at + 1,
+                    )
+                for now in times:
+                    with self.subTest(phase=phase.value, action=action, now=now):
+                        before = self.communication_mutations(game)
+                        with self.assertRaises(ActionRejected) as raised:
+                            self.invoke_communication(action, game, now)
+                        self.assertEqual(raised.exception.reason, "action_unavailable")
+                        self.assertEqual(self.communication_mutations(game), before)
+
+    def test_offered_communication_requires_a_complete_authoritative_window(self) -> None:
+        roles = {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+        for action in ("chat.send", "co.declare", "co.report"):
+            for missing_field in ("phase_started_at", "phase_ends_at"):
+                with self.subTest(action=action, missing=missing_field):
+                    game = self.make_day_game(roles)
+                    setattr(game, missing_field, None)
+                    before = self.communication_mutations(game)
+                    with self.assertRaisesRegex(
+                        RuntimeError, "communication actions require an authoritative deadline"
+                    ):
+                        self.invoke_communication(action, game, 101)
+                    self.assertEqual(self.communication_mutations(game), before)
+
+    def test_offered_communication_validates_receipt_time_without_mutation(self) -> None:
+        roles = {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+        for action in ("chat.send", "co.declare", "co.report"):
+            with self.subTest(action=action, now="before start"):
+                game = self.make_day_game(roles)
+                before = self.communication_mutations(game)
+                with self.assertRaises(ActionRejected) as raised:
+                    self.invoke_communication(action, game, 99)
+                self.assertEqual(raised.exception.reason, "action_unavailable")
+                self.assertEqual(self.communication_mutations(game), before)
+            for now in (True, 101.0, "101"):
+                with self.subTest(action=action, invalid_now=now):
+                    game = self.make_day_game(roles)
+                    before = self.communication_mutations(game)
+                    with self.assertRaises(TypeError):
+                        self.invoke_communication(action, game, now)
+                    self.assertEqual(self.communication_mutations(game), before)
+
+    def test_semantic_rejections_precede_communication_deadline_checks(self) -> None:
+        cases = (
+            ("chat.send", lambda game: game.submit_chat(110, "wolf", "public", ""), "invalid_message"),
+            (
+                "co.declare",
+                lambda game: game.declare_co(110, "wolf", "missing-role", "claim"),
+                "unknown_claimed_role",
+            ),
+            (
+                "co.report",
+                lambda game: game.report_co(
+                    110, "wolf", "inspect_result", "missing-player", "not_wolf"
+                ),
+                "unknown_target",
+            ),
+        )
+        for action, operation, expected_reason in cases:
+            with self.subTest(action=action):
+                game = self.make_day_game(
+                    {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+                )
+                before = self.communication_mutations(game)
+                with self.assertRaises(ActionRejected) as raised:
+                    operation(game)
+                self.assertEqual(raised.exception.reason, expected_reason)
+                self.assertEqual(self.communication_mutations(game), before)
+
+    def test_receipt_order_uses_the_deadline_snapshot_at_authorization(self) -> None:
+        roles = {"wolf": "werewolf", "seer": "seer", "target": "villager"}
+
+        request_first = self.make_day_game(roles)
+        accepted_before_tick = request_first.submit_chat(109, "wolf", "public", "before tick")
+        self.assertTrue(request_first.advance_if_due(110))
+        self.assertEqual(accepted_before_tick.acceptance.phase_deadline, 110)
+        self.assertNotEqual(request_first.phase, GamePhase.DAY)
+
+        tick_first = self.make_day_game(roles)
+        self.assertTrue(tick_first.advance_if_due(110))
+        with self.assertRaisesRegex(ActionRejected, "action_unavailable"):
+            tick_first.submit_chat(110, "wolf", "public", "after tick")
+
+        extension_first = self.make_day_game(roles)
+        extension_first.rules = replace(
+            extension_first.rules,
+            extension=replace(extension_first.rules.extension, max_count=1),
+        )
+        self.assertTrue(
+            extension_first.approve_day_extension(105, tuple(extension_first.players))
+        )
+        accepted_after_extension = extension_first.submit_chat(
+            110, "wolf", "public", "after extension"
+        )
+        self.assertEqual(
+            accepted_after_extension.acceptance.phase_deadline,
+            extension_first.phase_ends_at,
+        )
+        self.assertGreater(extension_first.phase_ends_at, 110)
+
+        acceptance_first = self.make_day_game(roles)
+        acceptance_first.rules = replace(
+            acceptance_first.rules,
+            extension=replace(acceptance_first.rules.extension, max_count=1),
+            shortening=replace(acceptance_first.rules.shortening, enabled=True),
+        )
+        accepted_before_extension = acceptance_first.submit_chat(
+            104, "wolf", "public", "before extension"
+        )
+        self.assertTrue(
+            acceptance_first.approve_day_extension(105, tuple(acceptance_first.players))
+        )
+        self.assertEqual(accepted_before_extension.acceptance.phase_deadline, 110)
+        self.assertGreater(acceptance_first.phase_ends_at, 110)
+
+        shortening_first = self.make_day_game(roles)
+        shortening_first.rules = replace(
+            shortening_first.rules,
+            shortening=replace(shortening_first.rules.shortening, enabled=True),
+        )
+        self.assertTrue(
+            shortening_first.approve_day_shortening(105, tuple(shortening_first.players))
+        )
+        with self.assertRaisesRegex(ActionRejected, "action_deadline_passed"):
+            shortening_first.submit_chat(105, "wolf", "public", "after shortening")
+
+        acceptance_before_shortening = self.make_day_game(roles)
+        acceptance_before_shortening.rules = replace(
+            acceptance_before_shortening.rules,
+            shortening=replace(acceptance_before_shortening.rules.shortening, enabled=True),
+        )
+        accepted = acceptance_before_shortening.submit_chat(
+            104, "wolf", "public", "before shortening"
+        )
+        self.assertTrue(
+            acceptance_before_shortening.approve_day_shortening(
+                105, tuple(acceptance_before_shortening.players)
+            )
+        )
+        self.assertEqual(accepted.acceptance.phase_deadline, 110)
+        self.assertEqual(acceptance_before_shortening.phase_ends_at, 105)
+
     def test_false_co_is_public_but_quota_removes_declaration_action_and_rejects_more(self) -> None:
         game = self.make_day_game({"wolf": "werewolf", "seer": "seer", "villager": "villager"})
 
         for number in range(1, 4):
-            game.declare_co("wolf", "seer", f"claim {number}")
+            game.declare_co(101, "wolf", "seer", f"claim {number}")
         declarations = [event for event in game.event_bus.events if event.type == "CO_DECLARED"]
         self.assertEqual(len(declarations), 3)
         self.assertEqual(declarations[0].payload["claimed_role_id"], "seer")
@@ -104,17 +312,17 @@ class PlayerInteractionTests(unittest.TestCase):
         )
         self.assertIn("co_report", [action.type for action in game.get_available_actions("wolf")])
         with self.assertRaisesRegex(ActionRejected, "co_limit_reached"):
-            game.declare_co("wolf", "seer", "one too many")
+            game.declare_co(101, "wolf", "seer", "one too many")
 
     def test_dead_players_cannot_co_and_reports_do_not_validate_claim_truth(self) -> None:
         game = self.make_day_game({"wolf": "werewolf", "target": "villager"})
 
-        game.report_co("wolf", "inspect_result", "target", "not_wolf")
+        game.report_co(101, "wolf", "inspect_result", "target", "not_wolf")
         report = next(event for event in game.event_bus.events if event.type == "CO_REPORTED")
         self.assertEqual(report.payload["claimed_result"], "not_wolf")
         game._record_player_death("wolf", "lynched")
         with self.assertRaisesRegex(ActionRejected, "action_unavailable"):
-            game.declare_co("wolf", "seer", "too late")
+            game.declare_co(101, "wolf", "seer", "too late")
 
     def test_claimable_roles_are_enumerated_and_enforced_from_content(self) -> None:
         game = self.make_day_game(
@@ -124,14 +332,14 @@ class PlayerInteractionTests(unittest.TestCase):
         self.assertNotIn("villager", declaration.claimed_role_ids)
         self.assertIn("werewolf", declaration.claimed_role_ids)
         with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
-            game.declare_co("wolf", "villager", "I am a villager")
+            game.declare_co(101, "wolf", "villager", "I am a villager")
 
         permitted = self.make_day_game(
             {"wolf": "werewolf", "villager": "villager"}, allow_villager_claim=True
         )
         declaration = next(action for action in permitted.get_available_actions("wolf") if action.type == "co_declare")
         self.assertIn("villager", declaration.claimed_role_ids)
-        permitted.declare_co("wolf", "villager", "I am a villager")
+        permitted.declare_co(101, "wolf", "villager", "I am a villager")
 
     def test_claim_candidates_are_limited_to_the_preset_role_distribution(self) -> None:
         game = self.make_standard_day_game()
@@ -152,7 +360,7 @@ class PlayerInteractionTests(unittest.TestCase):
             if role_id not in self.preset.role_counts and role.claimable
         )
         with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
-            game.declare_co(player_id, missing_role_id, "not in this game")
+            game.declare_co(101, player_id, missing_role_id, "not in this game")
 
         with TemporaryDirectory() as temporary_directory:
             extended_root = Path(temporary_directory) / "content"
@@ -223,7 +431,7 @@ class PlayerInteractionTests(unittest.TestCase):
 
         with patch.object(ActionAvailability, "phase_actions", without_seer):
             with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
-                game.declare_co("wolf", "seer", "filtered by enumeration")
+                game.declare_co(101, "wolf", "seer", "filtered by enumeration")
 
     def test_renamed_unclaimable_role_needs_no_python_change(self) -> None:
         townie = replace(self.content.roles["villager"], id="townie")
@@ -241,22 +449,22 @@ class PlayerInteractionTests(unittest.TestCase):
         declaration = next(action for action in game.get_available_actions("wolf") if action.type == "co_declare")
         self.assertNotIn("townie", declaration.claimed_role_ids)
         with self.assertRaisesRegex(ActionRejected, "claim_not_allowed"):
-            game.declare_co("wolf", "townie", "I am a townie")
+            game.declare_co(101, "wolf", "townie", "I am a townie")
 
     def test_chat_requires_an_enumerated_channel(self) -> None:
         game = self.make_day_game({"wolf": "werewolf", "villager": "villager"})
 
         with self.assertRaisesRegex(ActionRejected, "action_unavailable"):
-            game.submit_chat("wolf", "wolf", "wolves only")
-        submission = game.submit_chat("wolf", "public", "I spoke")
+            game.submit_chat(101, "wolf", "wolf", "wolves only")
+        submission = game.submit_chat(101, "wolf", "public", "I spoke")
         self.assertEqual(submission.channel_id, "public")
 
     def test_sudden_death_runs_before_vote_and_evaluates_the_win_immediately(self) -> None:
         game = self.make_day_game(
             {"wolf": "werewolf", "speaker": "seer", "silent": "villager"}, sudden_death=True
         )
-        game.submit_chat("wolf", "public", "I spoke")
-        game.declare_co("speaker", "seer", "I am the seer")
+        game.submit_chat(101, "wolf", "public", "I spoke")
+        game.declare_co(101, "speaker", "seer", "I am the seer")
 
         self.assertTrue(game.advance_if_due(110))
 
@@ -272,10 +480,10 @@ class PlayerInteractionTests(unittest.TestCase):
 
     def test_each_public_operation_records_activity_for_sudden_death(self) -> None:
         operations = {
-            "chat": lambda game: game.submit_chat("reporter", "public", "I spoke"),
-            "co_declare": lambda game: game.declare_co("reporter", "seer", "I am the seer"),
+            "chat": lambda game: game.submit_chat(101, "reporter", "public", "I spoke"),
+            "co_declare": lambda game: game.declare_co(101, "reporter", "seer", "I am the seer"),
             "co_report": lambda game: game.report_co(
-                "reporter", "inspect_result", "silent", "not_wolf"
+                101, "reporter", "inspect_result", "silent", "not_wolf"
             ),
         }
 
