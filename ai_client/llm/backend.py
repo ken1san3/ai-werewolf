@@ -56,13 +56,53 @@ def _backend_error(
     http_status: int | None = None,
     retryable: bool = False,
     provider_quiescence: ProviderQuiescence = ProviderQuiescence.UNKNOWN,
+    backend_error_detail: str | None = None,
 ) -> LLMBackendError:
     return LLMBackendError(
         code,
         http_status=http_status,
         retryable=retryable,
         provider_quiescence=provider_quiescence,
+        backend_error_detail=backend_error_detail,
     )
+
+
+def _extract_http_error_detail(encoded: bytes) -> str | None:
+    """Extract a bounded diagnostic from one fully drained HTTP error body."""
+    if not isinstance(encoded, bytes):
+        raise TypeError("encoded must be bytes")
+
+    def pairs(values: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            encoded.decode("utf-8", errors="strict"),
+            object_pairs_hook=pairs,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError, RecursionError):
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("error"), dict):
+        return None
+    error = value["error"]
+    parts: list[str] = []
+    for key in ("type", "code", "message"):
+        item = error.get(key)
+        if key == "code":
+            valid = (type(item) is int) or (isinstance(item, str) and bool(item))
+        else:
+            valid = isinstance(item, str) and bool(item)
+        if valid:
+            cleaned = "".join(character if character.isprintable() else " " for character in str(item))
+            parts.append(f"{key}={cleaned}")
+    detail = " ".join(parts)[:256]
+    return detail or None
 
 
 def _is_retryable_status(status: int) -> bool:
@@ -270,6 +310,12 @@ class OpenAICompatibleBackend:
             "stream": False,
             "temperature": self._config.generation.temperature,
         }
+        if self._config.llama_cpp_structured_output is not None:
+            profile = self._config.llama_cpp_structured_output
+            body["reasoning_format"] = profile.reasoning_format
+            body["chat_template_kwargs"] = {
+                "enable_thinking": profile.enable_thinking,
+            }
         try:
             payload = json.dumps(
                 body,
@@ -354,6 +400,7 @@ class OpenAICompatibleBackend:
                             http_status=response.status_code,
                             retryable=_is_retryable_status(response.status_code),
                             provider_quiescence=ProviderQuiescence.PROVEN_TERMINAL,
+                            backend_error_detail=_extract_http_error_detail(encoded),
                         )
                     if invalid_content_length:
                         raise _backend_error(

@@ -5,23 +5,11 @@ in `MODEL_ASSIGNMENTS.md`. Detailed role contracts are under `roles/`.
 
 ## 1. Integrator session (`integrate`)
 
-1. Run `python scripts/ai_status.py integrate`; inspect Git status and the relevant diff.
-2. Reconcile `CURRENT_STATE.md`, `TASKS.md`, handoffs, OPEN reviews, and measured tests.
-3. Select READY work with satisfied dependencies and Design Gate. Compare expected/shared
-   files before parallel dispatch; serialize overlapping writers.
-4. Dispatch one model-neutral packet to each short-lived worker using the host's standard
-   delegation/isolation. Never construct a custom supervisor or automatic merge engine.
-5. Route architecture work to an Architect, implementation to an Implementer, mechanical
-   evidence to a Tester, independent evaluation to a Reviewer, and unclear causes to an
-   Investigator.
-6. On ordinary `CHANGES_REQUIRED`, return the bounded issue to an Implementer, then Tester,
-   then a fresh Reviewer. After three failed rounds on the same cause, use an Investigator.
-7. Ask the user only for a material product choice unresolved by canonical sources,
-   decisions, code, and Architect analysis. Continue independent READY tasks while waiting.
-8. Verify actual diff, tests, findings, handoff, and conflicts. Only then update `TASKS.md`
-   and `CURRENT_STATE.md`; never pre-record another responsibility's approval or evidence.
-9. Keep the main-thread report compact (`▶ START`, `✓ DONE`, `↻ RETRY`, `⚠ DECISION`,
-   `✕ BLOCKED`) and name the exact next action.
+Run `python scripts/ai_status.py integrate`; inspect Git and the selected packet/evidence.
+Follow `INDEX.md` authority and `OPERATIONS.md` for dispatch, reconciliation and continuation.
+Choose local work or responsibilities by risk; preserve required independent gates. Verify
+results before updating TASKS and CURRENT_STATE. A worker/task/wave ending is not Main's stop
+condition; continue the authorized objective unless completed, explicitly held, or unsafe.
 
 ## 2. Architect session (`architect`; `design` compatibility alias)
 

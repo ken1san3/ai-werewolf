@@ -14,7 +14,8 @@
 1.6 WinCondition 評価と勝敗 / 1.7 get_available_actions /
 1.8 13役職の動作確認と完走テスト
 
-完了条件: 13役職の standard_9 preset が LLM 無しで完走し、勝敗が確定する。
+完了条件: 13役職すべてが LLM 無しの content-only 構成で完走し、
+`standard_9`（9席・6種類の役職）でも勝敗が確定する。
 
 サブPhaseごとの 含む / 含まない / 完了条件は
 `Docs/ai/roadmap_archive/PHASE1_SCOPE.md` に退避した（内容は当時のまま）。
@@ -261,7 +262,8 @@ LLM 無しで動く Dummy Brain を置き、Phase 4 の LLM Brain が同じ境�
 完了条件:
 - 生存する全席が各 vote / runoff round で投票を送る
 - 能力を持つ席が、その夜に使える能力を送る
-- 13役職の standard_9 preset で9プロセスが完走する
+- `standard_9`（9席・6種類の役職）で9プロセスが完走する。
+  妖狐・猫又・賢狼等を強制する決定論的な別役職network completionは Phase 8
 - 同じ seed から同じ選択が出る
 - 列挙に無い対象を選ばない。拒否を受けたことを観測できる
 - LLM 無しでテストが完走する
@@ -286,14 +288,38 @@ LLM 無しで動く Dummy Brain を置き、Phase 4 の LLM Brain が同じ境�
 完了条件: AI 9人で自動ゲーム完走。OPEN_QUESTIONS Q8 の実測を行う
 
 Status: **COMPLETE** — T154 exact canonical-9B standard Q8 PASS; T155 fresh closure review APPROVED.
-Phase 6 work begins only after the user-authorized Phase 5 Git checkpoint is committed and pushed.
+This completion proves the `standard_9` nine-client transport/runtime, admission, audit, game-end,
+and cleanup path. It does not prove responsive conversation or discussion quality.
+
+The bounded external-review remediation is independently approved, and D069 records the user's
+Q8 baseline selection. Phase 6 implementation begins only after its detailed design passes an
+independent Design Gate. The Phase 5 checkpoint is already committed and pushed.
 
 # Phase 6 — 議論品質
 
 Belief / Suspicion / Strategy / 重要イベント記憶 / 反応スコア /
 質問応答・反論・意見変更・ライン切り・CO判断・投票前再評価
 
-完了条件: 前の発言を受けた会話が成立する
+完了条件（D072のユーザー決定。以下の5条件のみ）:
+
+1. 9 AIで1ゲーム完走し、serverがgame endに到達、owned process残存0。
+2. 他人の発言を受けたaccepted responsive chatが1件以上。
+3. 質問→回答、主張→反論、意見変更のいずれかを独立Reviewerが原文で1件以上確認。
+4. private channel本文・自分のprivate結果・tokenの公開境界への漏洩0。
+5. 正規化後の同一文が同一playerの直前発言と一致せず、全ゲームで3回以上出現しない。
+
+初期Phase6専用profileは200chars/600bytes/20–120 text token/whole-response512。
+旧Phase5/Q8 profile、privacy/authorization/structured validationは維持する。
+調整実行は受入証拠にせず、受入一回は直前ユーザー承認と独立Tester/Reviewerを要する。
+製品scopeは `decisions/D072_PHASE6_REBASELINE.md`。最新運用はD073と
+`PHASE6_MASTER_TEST_PLAN.md` に従い、現在はコード不変で計画/FREEZE候補を提示して停止。
+
+入口証拠: T158 Investigator と T160 Reviewer が、T154 のprivate auditを本文非転載の
+集計形式で内容監査した。transport/runtimeは成立している一方、発言は少数の反復的な
+役職主張に偏り、実役職との不一致も観測された。Phase 6 Design Gate は、本人に許可された
+役職・目的context、bounded memory summary + recent history、欠落表示、privacy、hard byte/
+token bounds、およびprivate transcript quality reviewを定義する。800〜1,000 tokenやprefix
+cache効果は未検証の仮説であり、acceptanceとして先に固定しない。
 
 # Phase 7 — UI
 
@@ -303,6 +329,10 @@ Web UI（チャット / 生死 / 残り時間 / 投票 / 能力 / 入力中 / �
 
 第三陣営の追加 / Passive・Effect・WinCondition の拡張 / MODローダー /
 具体的な Modifier（恋人・狐憑き・手玉・呪い）/ Role Replacement（変化系・怪盗）
+
+`standard_9` に含まれない妖狐・猫又・賢狼・狂人variant等について、呪殺、道連れ、
+private knowledge、death masking、chat visibilityを強制する決定論的なnetwork completionを
+追加する。単一の確率的presetだけで網羅したとは扱わない。
 
 ---
 

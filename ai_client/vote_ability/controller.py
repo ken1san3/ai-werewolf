@@ -20,13 +20,24 @@ from ai_client.brain import (
     FeatureControllerExitReason,
     VoteDecision,
 )
+from ai_client.discussion import (
+    BoundDiscussionContext,
+    DiscussionObservationStatus,
+    DiscussionTerminalReason,
+    DiscussionTrigger,
+    EvidenceRef,
+    evidence_ref_for_record,
+)
 from ai_client.network import AbilityAction, VoteAction
 from ai_client.world import (
     ActionAcceptedObservation,
     ActionRejectionObservation,
     Freshness,
+    PhaseTimingObservation,
     ResumeRecoveryBarrier,
+    TransportObservation,
     TransportObservationQuery,
+    TransportObservationView,
     WorldState,
 )
 
@@ -51,6 +62,16 @@ class _Candidate:
     action: str
 
 
+@dataclass(frozen=True)
+class _ObservationResolution:
+    outcome_status: VoteAbilityOutcomeStatus
+    discussion_status: DiscussionObservationStatus
+    reason: DiscussionTerminalReason
+    evidence_record: TransportObservation | None = None
+    observation_generation: int | None = None
+    rejection_reason: str | None = None
+
+
 class VoteAbilityController:
     """Send one deterministic final reservation per server reservation slot."""
 
@@ -59,6 +80,7 @@ class VoteAbilityController:
         *,
         world: WorldState,
         invoker: BrainInvocationArbiter,
+        discussion_context: BoundDiscussionContext | None = None,
         config: VoteAbilityConfig = VoteAbilityConfig(),
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -66,12 +88,19 @@ class VoteAbilityController:
             raise TypeError("world must be WorldState")
         if not isinstance(invoker, BrainInvocationArbiter):
             raise TypeError("invoker must be BrainInvocationArbiter")
+        if discussion_context is not None and not isinstance(
+            discussion_context, BoundDiscussionContext
+        ):
+            raise TypeError(
+                "discussion_context must be BoundDiscussionContext when supplied"
+            )
         if not isinstance(config, VoteAbilityConfig):
             raise TypeError("config must be VoteAbilityConfig")
         if not callable(clock):
             raise TypeError("clock must be callable")
         self.world = world
         self.invoker = invoker
+        self.discussion_context = discussion_context
         self.config = config
         self._clock = clock
         self._lifecycle = VoteAbilityLifecycle.NEW
@@ -83,6 +112,7 @@ class VoteAbilityController:
         self._transport_cursor = 0
         self._pending_count = 0
         self._unresolved: UnresolvedReservation | None = None
+        self._finalization_task: asyncio.Task[None] | None = None
         self._terminal: set[ReservationKey] = set()
         self._invoked_mappings: set[tuple[OpportunityKey, int]] = set()
         self._attempts: dict[ReservationKey, int] = {}
@@ -156,7 +186,7 @@ class VoteAbilityController:
         error_type: str | None = None
         try:
             while self._lifecycle is VoteAbilityLifecycle.RUNNING:
-                self._observe_transport()
+                await self._observe_transport()
                 snapshot = self.world.snapshot()
                 self._current_phase = (
                     None
@@ -165,7 +195,15 @@ class VoteAbilityController:
                 )
                 if snapshot.freshness in {Freshness.ENDED, Freshness.FAILED}:
                     if self._unresolved is not None:
-                        self._finalize_unresolved(VoteAbilityOutcomeStatus.UNKNOWN)
+                        cancelled = await self._finalize_unresolved(
+                            _ObservationResolution(
+                                VoteAbilityOutcomeStatus.UNKNOWN,
+                                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                                DiscussionTerminalReason.PHASE_CHANGED,
+                            )
+                        )
+                        if cancelled:
+                            raise asyncio.CancelledError
                     reason = (
                         FeatureControllerExitReason.WORLD_ENDED
                         if snapshot.freshness is Freshness.ENDED
@@ -236,6 +274,7 @@ class VoteAbilityController:
                             connection_generation=candidate.key.connection_generation,
                             action_generation=candidate.key.action_generation,
                             not_after_monotonic=candidate.cutoff,
+                            discussion_trigger=self._discussion_trigger(candidate),
                         ),
                     )
                 finally:
@@ -249,6 +288,23 @@ class VoteAbilityController:
                         decision, (VoteDecision, AbilityDecision)
                     ):
                         raise RuntimeError("reservation SENT result is incomplete")
+                    discussion = outcome.discussion
+                    if self.discussion_context is None:
+                        if discussion is not None:
+                            raise RuntimeError(
+                                "context-free reservation returned discussion correlation"
+                            )
+                    elif discussion is None:
+                        raise RuntimeError(
+                            "contextful reservation omitted discussion correlation"
+                        )
+                    elif (
+                        discussion.context_sha256
+                        != self.discussion_context.context_sha256
+                    ):
+                        raise RuntimeError(
+                            "discussion correlation context does not match sealed context"
+                        )
                     self._unresolved = UnresolvedReservation(
                         opportunity_key=candidate.key,
                         mapping_order=candidate.mapping_order,
@@ -272,18 +328,44 @@ class VoteAbilityController:
                         send_connection_generation=receipt.connection_generation,
                         attempt_ordinal=self._attempts[key],
                         transport_after_order=self._transport_cursor,
+                        discussion=discussion,
                     )
                     continue
                 await self._handle_non_sent(candidate, outcome)
         except asyncio.CancelledError:
-            if self._unresolved is not None:
-                self._finalize_unresolved(VoteAbilityOutcomeStatus.CANCELLED)
-            if self._lifecycle is not VoteAbilityLifecycle.STOPPING:
+            self._clear_current_cancellation()
+            try:
+                if self._finalization_task is not None:
+                    await self._join_finalization()
+                elif self._unresolved is not None:
+                    await self._finalize_unresolved(
+                        _ObservationResolution(
+                            VoteAbilityOutcomeStatus.CANCELLED,
+                            DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                            DiscussionTerminalReason.OWNER_STOPPED,
+                        )
+                    )
+            except BaseException as finalization_error:
                 reason = FeatureControllerExitReason.FAILED
-                error_type = "CancelledError"
+                error_type = type(finalization_error).__name__
+            else:
+                if self._lifecycle is not VoteAbilityLifecycle.STOPPING:
+                    reason = FeatureControllerExitReason.FAILED
+                    error_type = "CancelledError"
         except Exception as error:
-            if self._unresolved is not None:
-                self._finalize_unresolved(VoteAbilityOutcomeStatus.UNKNOWN)
+            try:
+                if self._finalization_task is not None:
+                    await self._join_finalization()
+                elif self._unresolved is not None:
+                    await self._finalize_unresolved(
+                        _ObservationResolution(
+                            VoteAbilityOutcomeStatus.UNKNOWN,
+                            DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                            DiscussionTerminalReason.OWNER_STOPPED,
+                        )
+                    )
+            except BaseException as finalization_error:
+                error = finalization_error
             reason = FeatureControllerExitReason.FAILED
             error_type = type(error).__name__
         self._exit = FeatureControllerExit("vote_ability", reason, error_type)
@@ -502,65 +584,343 @@ class VoteAbilityController:
         if status is VoteAbilityOutcomeStatus.DEADLINE_SUPPRESSED:
             self._deadline_suppressed_count += 1
 
-    def _observe_transport(self) -> None:
+    def _discussion_trigger(self, candidate: _Candidate) -> DiscussionTrigger | None:
+        if self.discussion_context is None:
+            return None
+        return DiscussionTrigger(
+            owner="vote_ability",
+            kind=(
+                "PRE_VOTE"
+                if candidate.key.reservation.family == "vote"
+                else "ABILITY"
+            ),
+            day=candidate.key.reservation.day,
+            phase=candidate.key.reservation.phase,
+            connection_generation=candidate.key.connection_generation,
+            action_generation=candidate.key.action_generation,
+            mapping_order=candidate.mapping_order,
+            source=None,
+        )
+
+    async def _observe_transport(self) -> None:
         view = self.world.transport_observations(
             TransportObservationQuery(after_order=self._transport_cursor)
         )
         unresolved = self._unresolved
-        matched = False
-        if unresolved is not None:
-            for observation in view.observations:
-                if isinstance(observation, ActionAcceptedObservation) and (
-                    observation.action == unresolved.action
-                    and observation.request_event_id == unresolved.request_event_id
-                    and observation.observation_connection_generation
-                    >= unresolved.send_connection_generation
-                ):
-                    self._finalize_unresolved(
-                        VoteAbilityOutcomeStatus.ACCEPTED,
-                        observation_generation=observation.observation_connection_generation,
-                    )
-                    matched = True
-                    break
-                if isinstance(observation, ActionRejectionObservation) and (
-                    observation.action == unresolved.action
-                    and observation.request_event_id == unresolved.request_event_id
-                    and observation.observation_connection_generation
-                    >= unresolved.send_connection_generation
-                ):
-                    self._finalize_unresolved(
-                        VoteAbilityOutcomeStatus.REJECTED,
-                        observation_generation=observation.observation_connection_generation,
-                        rejection_reason=observation.reason,
-                    )
-                    matched = True
-                    break
-            if not matched and self._unresolved is not None:
-                for observation in view.observations:
-                    if (
-                        isinstance(observation, ResumeRecoveryBarrier)
-                        and observation.complete
-                        and observation.connection_generation
-                        > unresolved.send_connection_generation
-                    ):
-                        self._finalize_unresolved(
-                            VoteAbilityOutcomeStatus.UNKNOWN,
-                            observation_generation=observation.connection_generation,
-                        )
-                        break
+        if unresolved is not None and self._finalization_task is None:
+            resolution = (
+                self._resolve_context_free_observation_batch(unresolved, view)
+                if unresolved.discussion is None
+                else self._resolve_observation_batch(unresolved, view)
+            )
+            if resolution is not None:
+                cancelled = await self._finalize_unresolved(resolution)
+                if cancelled:
+                    raise asyncio.CancelledError
         if view.last_order is not None:
             self._transport_cursor = max(self._transport_cursor, view.last_order)
 
-    def _finalize_unresolved(
+    @staticmethod
+    def _resolve_context_free_observation_batch(
+        unresolved: UnresolvedReservation,
+        view: TransportObservationView,
+    ) -> _ObservationResolution | None:
+        # Preserve the Phase 3--5 public observer contract: retained exact
+        # responses are considered in order, independently of retention-gap
+        # metadata, and only their absence permits a later complete barrier.
+        for observation in view.observations:
+            if isinstance(observation, ActionAcceptedObservation) and (
+                observation.action == unresolved.action
+                and observation.request_event_id == unresolved.request_event_id
+                and observation.observation_connection_generation
+                >= unresolved.send_connection_generation
+            ):
+                return _ObservationResolution(
+                    VoteAbilityOutcomeStatus.ACCEPTED,
+                    DiscussionObservationStatus.ACCEPTED,
+                    DiscussionTerminalReason.AUTHORITATIVE_ACCEPTED,
+                    observation_generation=(
+                        observation.observation_connection_generation
+                    ),
+                )
+            if isinstance(observation, ActionRejectionObservation) and (
+                observation.action == unresolved.action
+                and observation.request_event_id == unresolved.request_event_id
+                and observation.observation_connection_generation
+                >= unresolved.send_connection_generation
+            ):
+                return _ObservationResolution(
+                    VoteAbilityOutcomeStatus.REJECTED,
+                    DiscussionObservationStatus.REJECTED,
+                    DiscussionTerminalReason.AUTHORITATIVE_REJECTED,
+                    observation_generation=(
+                        observation.observation_connection_generation
+                    ),
+                    rejection_reason=observation.reason,
+                )
+        for observation in view.observations:
+            if (
+                isinstance(observation, ResumeRecoveryBarrier)
+                and observation.complete
+                and observation.connection_generation
+                > unresolved.send_connection_generation
+            ):
+                return _ObservationResolution(
+                    VoteAbilityOutcomeStatus.UNKNOWN,
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+                    observation_generation=observation.connection_generation,
+                )
+        return None
+
+    def _resolve_observation_batch(
         self,
-        status: VoteAbilityOutcomeStatus,
-        *,
-        observation_generation: int | None = None,
-        rejection_reason: str | None = None,
-    ) -> None:
+        unresolved: UnresolvedReservation,
+        view: TransportObservationView,
+    ) -> _ObservationResolution | None:
+        observations = tuple(
+            observation
+            for observation in view.observations
+            if observation.order > unresolved.transport_after_order
+        )
+
+        # A missing prefix prevents a uniqueness proof even when one matching
+        # response survived retention.
+        if view.gap_before_first:
+            return _ObservationResolution(
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                DiscussionTerminalReason.RECOVERY_GAP,
+            )
+
+        exact: list[
+            tuple[
+                VoteAbilityOutcomeStatus,
+                DiscussionObservationStatus,
+                DiscussionTerminalReason,
+                ActionAcceptedObservation | ActionRejectionObservation,
+                str | None,
+            ]
+        ] = []
+        insufficient: list[ActionRejectionObservation] = []
+        for observation in observations:
+            if (
+                isinstance(observation, ActionAcceptedObservation)
+                and observation.action == unresolved.action
+                and observation.request_event_id == unresolved.request_event_id
+                and observation.observation_connection_generation
+                >= unresolved.send_connection_generation
+            ):
+                exact.append(
+                    (
+                        VoteAbilityOutcomeStatus.ACCEPTED,
+                        DiscussionObservationStatus.ACCEPTED,
+                        DiscussionTerminalReason.AUTHORITATIVE_ACCEPTED,
+                        observation,
+                        None,
+                    )
+                )
+            elif (
+                isinstance(observation, ActionRejectionObservation)
+                and observation.action == unresolved.action
+                and observation.observation_connection_generation
+                >= unresolved.send_connection_generation
+            ):
+                if observation.request_event_id == unresolved.request_event_id:
+                    exact.append(
+                        (
+                            VoteAbilityOutcomeStatus.REJECTED,
+                            DiscussionObservationStatus.REJECTED,
+                            DiscussionTerminalReason.AUTHORITATIVE_REJECTED,
+                            observation,
+                            observation.reason,
+                        )
+                    )
+                elif observation.request_event_id is None:
+                    insufficient.append(observation)
+
+        if len(exact) == 1 and not insufficient:
+            outcome_status, discussion_status, reason, record, rejection = exact[0]
+            return _ObservationResolution(
+                outcome_status,
+                discussion_status,
+                reason,
+                record,
+                record.observation_connection_generation,
+                rejection,
+            )
+        if len(exact) > 1 or (exact and insufficient):
+            return _ObservationResolution(
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+            )
+
+        gap_barriers = tuple(
+            observation
+            for observation in observations
+            if isinstance(observation, ResumeRecoveryBarrier)
+            and observation.complete is True
+            and observation.connection_generation
+            > unresolved.send_connection_generation
+            and observation.replay_gap_or_floor is True
+            and observation.replay_contiguous is False
+        )
+        if gap_barriers:
+            return _ObservationResolution(
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                DiscussionTerminalReason.RECOVERY_GAP,
+                gap_barriers[0] if len(gap_barriers) == 1 else None,
+                max(item.connection_generation for item in gap_barriers),
+            )
+
+        snapshot = self.world.snapshot()
+        phase_changed = snapshot.phase is not None and (
+            snapshot.phase.day,
+            snapshot.phase.phase,
+        ) != (
+            unresolved.opportunity_key.reservation.day,
+            unresolved.opportunity_key.reservation.phase,
+        )
+        if phase_changed:
+            assert snapshot.phase is not None
+            current_phase_key = (snapshot.phase.day, snapshot.phase.phase)
+            phase_records = tuple(
+                observation
+                for observation in observations
+                if isinstance(observation, PhaseTimingObservation)
+                and (observation.day, observation.phase) == current_phase_key
+            )
+            return _ObservationResolution(
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                DiscussionTerminalReason.PHASE_CHANGED,
+                phase_records[0] if len(phase_records) == 1 else None,
+                (
+                    max(item.connection_generation for item in phase_records)
+                    if phase_records
+                    else None
+                ),
+            )
+
+        contiguous_barriers = tuple(
+            observation
+            for observation in observations
+            if isinstance(observation, ResumeRecoveryBarrier)
+            and observation.complete is True
+            and observation.connection_generation
+            > unresolved.send_connection_generation
+            and observation.replay_contiguous is True
+            and observation.replay_gap_or_floor is False
+        )
+        if contiguous_barriers:
+            return _ObservationResolution(
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+                contiguous_barriers[0] if len(contiguous_barriers) == 1 else None,
+                max(item.connection_generation for item in contiguous_barriers),
+            )
+
+        if insufficient:
+            return _ObservationResolution(
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+                insufficient[0] if len(insufficient) == 1 else None,
+                (
+                    insufficient[0].observation_connection_generation
+                    if len(insufficient) == 1
+                    else None
+                ),
+            )
+        return None
+
+    async def _finalize_unresolved(
+        self,
+        resolution: _ObservationResolution,
+    ) -> bool:
+        if self._finalization_task is not None:
+            return await self._join_finalization()
         unresolved = self._unresolved
         if unresolved is None:
-            return
+            return False
+        evidence: EvidenceRef | None = None
+        correlation = unresolved.discussion
+        if correlation is None:
+            if self.discussion_context is not None:
+                raise RuntimeError(
+                    "contextful unresolved reservation omitted discussion correlation"
+                )
+            self._complete_unresolved(unresolved, resolution)
+            return False
+
+        context = self.discussion_context
+        if context is None or correlation.context_sha256 != context.context_sha256:
+            raise RuntimeError(
+                "discussion correlation context does not match sealed context"
+            )
+        if resolution.evidence_record is not None:
+            evidence = evidence_ref_for_record(
+                resolution.evidence_record,
+                context,
+            )
+
+        task = asyncio.create_task(
+            self._finalize_unresolved_owned(unresolved, resolution, evidence),
+            name="aiwolf-vote-ability-observation-finalization",
+        )
+        self._finalization_task = task
+        return await self._join_finalization()
+
+    async def _join_finalization(self) -> bool:
+        task = self._finalization_task
+        if task is None:
+            return False
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+                self._clear_current_cancellation()
+        if task.cancelled():
+            raise RuntimeError("discussion observation finalizer was cancelled")
+        task.result()
+        if self._finalization_task is task:
+            self._finalization_task = None
+        return cancelled
+
+    @staticmethod
+    def _clear_current_cancellation() -> None:
+        current = asyncio.current_task()
+        if current is not None:
+            current.uncancel()
+
+    async def _finalize_unresolved_owned(
+        self,
+        unresolved: UnresolvedReservation,
+        resolution: _ObservationResolution,
+        evidence: EvidenceRef | None,
+    ) -> None:
+        if unresolved.discussion is not None:
+            await self.invoker.finalize_discussion_observation(
+                owner="vote_ability",
+                correlation=unresolved.discussion,
+                status=resolution.discussion_status,
+                reason=resolution.reason,
+                evidence=evidence,
+            )
+        self._complete_unresolved(unresolved, resolution)
+
+    def _complete_unresolved(
+        self,
+        unresolved: UnresolvedReservation,
+        resolution: _ObservationResolution,
+    ) -> None:
+        if self._unresolved is not unresolved:
+            raise RuntimeError("unresolved reservation changed before completion")
         self._outcomes.append(
             VoteAbilityOutcome(
                 opportunity_key=unresolved.opportunity_key,
@@ -571,20 +931,21 @@ class VoteAbilityController:
                 ability_target_player_ids=unresolved.ability_target_player_ids,
                 request_event_id=unresolved.request_event_id,
                 send_connection_generation=unresolved.send_connection_generation,
-                observation_connection_generation=observation_generation,
-                status=status,
-                rejection_reason=rejection_reason,
+                observation_connection_generation=resolution.observation_generation,
+                status=resolution.outcome_status,
+                rejection_reason=resolution.rejection_reason,
                 attempts=unresolved.attempt_ordinal,
+                discussion=unresolved.discussion,
             )
         )
         key = unresolved.opportunity_key.reservation
         self._terminal.add(key)
         self._unresolved = None
-        if status is VoteAbilityOutcomeStatus.ACCEPTED:
+        if resolution.outcome_status is VoteAbilityOutcomeStatus.ACCEPTED:
             self._accepted_count += 1
-        elif status is VoteAbilityOutcomeStatus.REJECTED:
+        elif resolution.outcome_status is VoteAbilityOutcomeStatus.REJECTED:
             self._rejected_count += 1
-        elif status is VoteAbilityOutcomeStatus.UNKNOWN:
+        elif resolution.outcome_status is VoteAbilityOutcomeStatus.UNKNOWN:
             self._unknown_count += 1
 
     def _record(

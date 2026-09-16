@@ -7,6 +7,15 @@ from enum import Enum
 import math
 from typing import Literal, TypeAlias
 
+from ai_client.discussion.model import (
+    AiDiscussionGenerationStatus,
+    DiscussionCapture,
+    DiscussionDispatchCorrelation,
+    DiscussionGenerationAck,
+    DiscussionProposal,
+    DiscussionTrigger,
+)
+from ai_client.discussion.context import canonical_sha256
 from ai_client.network import ActionHandle, SendReceipt
 from ai_client.world import (
     AbilityResultView,
@@ -51,6 +60,13 @@ class BrainInput:
     history: HistoryView
     co: CoView
     ability_results: AbilityResultView
+    discussion: DiscussionCapture | None = None
+
+    def __post_init__(self) -> None:
+        if self.discussion is not None and not isinstance(
+            self.discussion, DiscussionCapture
+        ):
+            raise TypeError("discussion must be DiscussionCapture or None")
 
 
 @dataclass(frozen=True)
@@ -104,6 +120,85 @@ BrainDecision: TypeAlias = (
 )
 
 
+def brain_decision_identity(decision: BrainDecision) -> tuple[str, str | None]:
+    """Return the closed Phase 6 proposal identity for a network decision."""
+
+    if isinstance(decision, NoDecision):
+        return "none", None
+    if isinstance(decision, ChatDecision):
+        return "chat", decision.option_id
+    if isinstance(decision, VoteDecision):
+        return "vote", decision.option_id
+    if isinstance(decision, AbilityDecision):
+        return "ability", decision.option_id
+    if isinstance(decision, CoDeclareDecision):
+        return "co_declare", decision.option_id
+    if isinstance(decision, CoReportDecision):
+        return "co_report", decision.option_id
+    raise TypeError("decision must be a BrainDecision")
+
+
+@dataclass(frozen=True)
+class BrainResult:
+    """One contextful network decision and its private semantic transaction."""
+
+    decision: BrainDecision
+    discussion: DiscussionProposal | None
+    audit_ack: DiscussionGenerationAck | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.decision,
+            (
+                NoDecision,
+                ChatDecision,
+                VoteDecision,
+                AbilityDecision,
+                CoDeclareDecision,
+                CoReportDecision,
+            ),
+        ):
+            raise TypeError("decision must be a BrainDecision")
+        if self.discussion is not None and not isinstance(
+            self.discussion, DiscussionProposal
+        ):
+            raise TypeError("discussion must be DiscussionProposal or None")
+        if self.audit_ack is not None and not isinstance(
+            self.audit_ack, DiscussionGenerationAck
+        ):
+            raise TypeError("audit_ack must be DiscussionGenerationAck or None")
+        if (self.discussion is None) is not (self.audit_ack is None):
+            raise ValueError("discussion proposal and audit acknowledgement must be paired")
+        if self.discussion is None:
+            return
+        if isinstance(self.decision, CoReportDecision):
+            raise ValueError("contextful co_report is not supported")
+        kind, option_id = brain_decision_identity(self.decision)
+        if (
+            self.discussion.decision_kind != kind
+            or self.discussion.option_id != option_id
+        ):
+            raise ValueError("decision identity does not match discussion proposal")
+        assert self.audit_ack is not None
+        if self.audit_ack.generation_status not in {
+            AiDiscussionGenerationStatus.DECISION,
+            AiDiscussionGenerationStatus.EXPLICIT_NO_DECISION,
+            AiDiscussionGenerationStatus.REPAIR_SUCCEEDED,
+        }:
+            raise ValueError("BrainResult requires a successful generation acknowledgement")
+        if self.audit_ack.proposal_sha256 != canonical_sha256(self.discussion):
+            raise ValueError("generation acknowledgement does not bind the proposal")
+        if (
+            self.audit_ack.generation_status
+            is AiDiscussionGenerationStatus.EXPLICIT_NO_DECISION
+        ) != isinstance(self.decision, NoDecision):
+            if self.audit_ack.generation_status is not AiDiscussionGenerationStatus.REPAIR_SUCCEEDED:
+                raise ValueError("generation status does not match decision identity")
+
+
+BrainOutput: TypeAlias = BrainDecision | BrainResult
+
+
 class DecisionStatus(str, Enum):
     NO_DECISION = "NO_DECISION"
     SENT = "SENT"
@@ -135,6 +230,7 @@ class DecisionOutcome:
     vote_target_player_id: str | None = None
     ability_id: str | None = None
     ability_target_player_ids: tuple[str, ...] = ()
+    discussion: DiscussionDispatchCorrelation | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -164,6 +260,14 @@ class DecisionOutcome:
             for player_id in self.ability_target_player_ids
         ):
             raise ValueError("ability targets must be non-empty strings")
+        if self.discussion is not None and not isinstance(
+            self.discussion, DiscussionDispatchCorrelation
+        ):
+            raise TypeError(
+                "discussion must be DiscussionDispatchCorrelation or None"
+            )
+        if self.discussion is not None and self.status is not DecisionStatus.SENT:
+            raise ValueError("discussion correlation is only valid for SENT")
 
 
 @dataclass(frozen=True)
@@ -201,6 +305,7 @@ class DispatchDeadline:
     connection_generation: int
     action_generation: int
     not_after_monotonic: float
+    discussion_trigger: DiscussionTrigger | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -222,6 +327,22 @@ class DispatchDeadline:
             or self.not_after_monotonic < 0
         ):
             raise ValueError("not_after_monotonic must be a finite non-negative number")
+        if self.discussion_trigger is not None:
+            if not isinstance(self.discussion_trigger, DiscussionTrigger):
+                raise TypeError(
+                    "discussion_trigger must be DiscussionTrigger or None"
+                )
+            trigger = self.discussion_trigger
+            if (
+                trigger.mapping_order != self.mapping_order
+                or trigger.phase != self.phase
+                or trigger.day != self.day
+                or trigger.connection_generation != self.connection_generation
+                or trigger.action_generation != self.action_generation
+            ):
+                raise ValueError(
+                    "discussion_trigger must match the dispatch deadline identity"
+                )
 
 
 class FeatureControllerExitReason(str, Enum):

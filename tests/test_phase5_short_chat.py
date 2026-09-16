@@ -19,6 +19,7 @@ from ai_client.llm.types import (
     AuditWriteAck,
     BackendIdentity,
     DecisionValidationCode,
+    DiscussionChatConfig,
     GenerationSettings,
     LLMBackendError,
     LLMBackendErrorCode,
@@ -819,3 +820,40 @@ class Phase5ShortProfileBrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(backend.requests), 2)
         self.assertEqual(len(audit.records), 2)
         self.assertIs(audit.records[-1].status, AiAuditStatus.REPAIR_FAILED)
+def test_phase6_discussion_profile_defaults_bounds_and_runtime_types():
+    profile = DiscussionChatConfig()
+    assert (
+        profile.target_min_text_tokens,
+        profile.target_max_text_tokens,
+        profile.max_text_chars,
+        profile.max_text_utf8_bytes,
+    ) == (20, 120, 200, 600)
+    assert LLMBrainConfig(short_chat=profile).short_chat is profile
+    assert DiscussionChatConfig(
+        target_min_text_tokens=1,
+        target_max_text_tokens=512,
+        max_text_chars=1,
+        max_text_utf8_bytes=960,
+    )
+    assert DiscussionChatConfig(1, 1, 1, 1)
+    assert DiscussionChatConfig(512, 512, 240, 960)
+    for values in (
+        {"target_min_text_tokens": 0},
+        {"target_min_text_tokens": 513, "target_max_text_tokens": 512},
+        {"target_max_text_tokens": 0},
+        {"target_min_text_tokens": True},
+        {"target_max_text_tokens": True},
+        {"max_text_chars": True},
+        {"max_text_utf8_bytes": True},
+        {"target_max_text_tokens": 513},
+        {"max_text_chars": 0},
+        {"max_text_chars": 241},
+        {"max_text_utf8_bytes": 0},
+        {"max_text_utf8_bytes": 961},
+        {"target_min_text_tokens": 121, "target_max_text_tokens": 120},
+        {"max_text_chars": 201, "max_text_utf8_bytes": 200},
+    ):
+        with pytest.raises(ValueError):
+            DiscussionChatConfig(**values)
+    with pytest.raises(TypeError):
+        LLMBrainConfig(short_chat=object())  # type: ignore[arg-type]

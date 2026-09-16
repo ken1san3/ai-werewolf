@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 import math
 import time
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 from uuid import uuid4
 
 from ai_client.network import (
@@ -17,6 +17,13 @@ from ai_client.network import (
     CoDeclareAction,
     CoReportAction,
     VoteAction,
+)
+from ai_client.discussion.model import (
+    DiscussionDispatchCorrelation,
+    DiscussionObservationStatus,
+    DiscussionTerminalReason,
+    EvidenceRef,
+    ObservationAck,
 )
 
 from .controller import BrainController
@@ -76,6 +83,9 @@ class _PendingInvocation:
     result: asyncio.Future[BrainDispatchResult]
     admission_invocation_id: str | None = None
     cancel_requested: bool = False
+    result_consumed: bool = False
+    parked_terminal: BrainDispatchResult | None = None
+    execution_complete: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(frozen=True)
@@ -88,6 +98,30 @@ class _ReplacementTransition:
 class _AttachedSuccessor:
     pending: _PendingInvocation
     handle: SuccessorReservation
+
+
+@dataclass
+class _ObservationGate:
+    owner: BrainInvocationOwner
+    correlation: DiscussionDispatchCorrelation
+    pending: _PendingInvocation
+    attempt: tuple[
+        DiscussionObservationStatus,
+        DiscussionTerminalReason,
+        EvidenceRef | None,
+    ] | None = None
+    task: asyncio.Task[ObservationAck] | None = None
+    controller_was_unresponsive: bool | None = None
+
+
+@dataclass(frozen=True)
+class _CompletedObservation:
+    owner: BrainInvocationOwner
+    correlation: DiscussionDispatchCorrelation
+    status: DiscussionObservationStatus
+    reason: DiscussionTerminalReason
+    evidence: EvidenceRef | None
+    acknowledgement: ObservationAck
 
 
 def _uuid4_string() -> str:
@@ -136,6 +170,14 @@ class BrainInvocationArbiter:
         self._admission_lease: GenerationLease | None = None
         self._suspended_reaction: _PendingInvocation | None = None
         self._attached_successor: _AttachedSuccessor | None = None
+        self._observation_gate: _ObservationGate | None = None
+        self._completed_observation: _CompletedObservation | None = None
+        self._poisoned = False
+        self._fatal_error: BaseException | None = None
+        self._poison_shutdown_task: asyncio.Task[None] | None = None
+        self._controller_stop_task: asyncio.Task[None] | None = None
+        self._admission_closed = False
+        self._stop_task: asyncio.Task[None] | None = None
 
     async def invoke(
         self,
@@ -173,37 +215,119 @@ class BrainInvocationArbiter:
     async def stop(self) -> None:
         """Permanently stop new work, pending grants, and the owned controller."""
 
-        if self._admission is None:
-            await self._stop_direct()
-            return
-        async with self._lock:
-            self._stopped = True
-            pending = tuple(self._pending.values())
-            self._pending.clear()
-            for invocation in pending:
-                self._finish(invocation, self._cancelled_result())
-            if self._suspended_reaction is not None:
-                suspended = self._suspended_reaction
-                self._suspended_reaction = None
-                suspended.cancel_requested = True
-                self._finish(suspended, self._cancelled_result())
-            if self._active is not None:
-                self._active.cancel_requested = True
-            if self._attached_successor is not None:
-                self._attached_successor.pending.cancel_requested = True
-            driver = self._admission_driver
-            self._admission_changed.set()
-        await self.controller.stop()
-        if driver is not None and driver is not asyncio.current_task():
-            await asyncio.gather(driver, return_exceptions=True)
+        # There is deliberately no await between selecting and retaining this
+        # task.  Event-loop execution therefore installs the sole stop owner
+        # before caller cancellation can be delivered.
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(
+                self._stop_owned(), name="aiwolf-brain-arbiter-stop"
+            )
+        task = self._stop_task
+        await asyncio.shield(task)
+
+    async def finalize_discussion_observation(
+        self,
+        *,
+        owner: BrainInvocationOwner,
+        correlation: DiscussionDispatchCorrelation,
+        status: DiscussionObservationStatus,
+        reason: DiscussionTerminalReason,
+        evidence: EvidenceRef | None = None,
+    ) -> ObservationAck:
+        """Durably close the exact contextful local send owned by a feature."""
+
+        self._validate_observation_call(
+            owner=owner,
+            correlation=correlation,
+            status=status,
+            reason=reason,
+            evidence=evidence,
+        )
+        # Retain an Arbiter-owned wrapper before this public coroutine's first
+        # await.  Cancellation can discard only the caller's wait, never the
+        # sole gate selection or Controller delegate.
+        owned = asyncio.create_task(
+            self._finalize_discussion_observation_owned(
+                owner=owner,
+                correlation=correlation,
+                status=status,
+                reason=reason,
+                evidence=evidence,
+            ),
+            name="aiwolf-discussion-observation-request",
+        )
+        owned.add_done_callback(self._consume_task)
+        return await asyncio.shield(owned)
+
+    async def _finalize_discussion_observation_owned(
+        self,
+        *,
+        owner: BrainInvocationOwner,
+        correlation: DiscussionDispatchCorrelation,
+        status: DiscussionObservationStatus,
+        reason: DiscussionTerminalReason,
+        evidence: EvidenceRef | None,
+    ) -> ObservationAck:
+        key = (status, reason, evidence)
+        while True:
+            prior_conflict: asyncio.Task[ObservationAck] | None = None
+            async with self._lock:
+                if self._poisoned:
+                    raise RuntimeError("BrainInvocationArbiter is poisoned")
+                completed = self._completed_observation
+                if completed is not None and completed.correlation == correlation:
+                    if completed.owner != owner or (
+                        completed.status,
+                        completed.reason,
+                        completed.evidence,
+                    ) != key:
+                        raise RuntimeError("conflicting discussion observation")
+                    return completed.acknowledgement
+                gate = self._observation_gate
+                if (
+                    gate is None
+                    or gate.owner != owner
+                    or gate.correlation != correlation
+                ):
+                    raise RuntimeError(
+                        "discussion observation does not match the registered owner"
+                    )
+                if gate.attempt is not None and gate.attempt != key:
+                    prior_conflict = gate.task
+                    if prior_conflict is None:
+                        raise RuntimeError(
+                            "discussion observation task is unavailable"
+                        )
+                else:
+                    task = self._select_finalization_locked(
+                        gate,
+                        status=status,
+                        reason=reason,
+                        evidence=evidence,
+                    )
+            if prior_conflict is None:
+                return await asyncio.shield(task)
+            # A differently keyed call that reached Controller validation first
+            # may still prove to be a non-consuming precondition rejection.
+            # Serialize behind it once; the next locked pass either selects the
+            # now-empty gate or observes its completed/poisoned outcome.
+            try:
+                await asyncio.shield(prior_conflict)
+            except BaseException:
+                pass
 
     async def _invoke_direct(
         self, pending: _PendingInvocation
     ) -> BrainDispatchResult:
         async with self._lock:
+            if self._poisoned:
+                raise RuntimeError("BrainInvocationArbiter is poisoned")
             if self._stopped:
                 raise RuntimeError("BrainInvocationArbiter is stopped")
-            if pending.owner in self._pending:
+            if pending.owner in self._pending or (
+                self._observation_gate is not None
+                and self._observation_gate.owner == pending.owner
+            ):
                 raise RuntimeError(
                     f"owner {pending.owner!r} already has a pending invocation"
                 )
@@ -211,35 +335,36 @@ class BrainInvocationArbiter:
             self._grant_next_locked()
 
         try:
-            return await asyncio.shield(pending.result)
+            result = await asyncio.shield(pending.result)
+            # This is the exact no-await ownership-transfer boundary.  Merely
+            # publishing the Future does not transfer a local-send correlation.
+            pending.result_consumed = True
+            return result
         except asyncio.CancelledError:
-            async with self._lock:
-                if self._pending.get(pending.owner) is pending:
-                    del self._pending[pending.owner]
-                    pending.result.cancel()
-                elif pending.result.done():
-                    self._consume_future(pending.result)
-                else:
-                    pending.result.add_done_callback(self._consume_future)
+            cleanup = asyncio.create_task(
+                self._cancel_direct_caller(pending),
+                name="aiwolf-brain-direct-owner-loss",
+            )
+            await self._wait_task_ignoring_cancellation(cleanup)
             raise
 
-    async def _stop_direct(self) -> None:
+    async def _cancel_direct_caller(self, pending: _PendingInvocation) -> None:
         async with self._lock:
-            self._stopped = True
-            pending = tuple(self._pending.values())
-            self._pending.clear()
-            active_task = self._active_task
-            for invocation in pending:
-                if not invocation.result.done():
-                    invocation.result.set_result(self._cancelled_result())
-        await self.controller.stop()
-        if active_task is not None and active_task is not asyncio.current_task():
-            await asyncio.gather(active_task, return_exceptions=True)
+            pending.cancel_requested = True
+            if self._pending.get(pending.owner) is pending:
+                del self._pending[pending.owner]
+                self._finish(pending, self._cancelled_result())
+                pending.execution_complete.set()
+            self._admission_changed.set()
+        await pending.execution_complete.wait()
+        await self._recover_unconsumed_local_send(pending)
 
     def _grant_next_locked(self) -> None:
         if (
             self._admission is not None
             or self._stopped
+            or self._poisoned
+            or self._observation_gate is not None
             or self._active is not None
             or not self._pending
         ):
@@ -256,9 +381,14 @@ class BrainInvocationArbiter:
             result = await self._execute_direct(pending)
         except BaseException as caught:  # propagate the exact failure to this owner
             error = caught
+        recover = False
         async with self._lock:
+            if error is None and result is not None:
+                self._register_observation_gate_locked(pending, result)
             if not pending.result.done():
-                if error is None:
+                if pending.cancel_requested:
+                    pending.result.set_result(self._cancelled_result())
+                elif error is None:
                     assert result is not None
                     pending.result.set_result(result)
                 elif isinstance(error, asyncio.CancelledError):
@@ -269,6 +399,14 @@ class BrainInvocationArbiter:
                 self._active = None
                 self._active_task = None
             self._grant_next_locked()
+            pending.execution_complete.set()
+            recover = (
+                pending.cancel_requested
+                and not pending.result_consumed
+                and self._gate_belongs_to_locked(pending)
+            )
+        if recover:
+            await self._recover_unconsumed_local_send(pending)
 
     async def _execute_direct(
         self, pending: _PendingInvocation
@@ -299,6 +437,8 @@ class BrainInvocationArbiter:
         self, pending: _PendingInvocation
     ) -> BrainDispatchResult:
         async with self._lock:
+            if self._poisoned:
+                raise RuntimeError("BrainInvocationArbiter is poisoned")
             if self._stopped:
                 raise RuntimeError("BrainInvocationArbiter is stopped")
             if self._owner_is_occupied_locked(pending.owner):
@@ -312,29 +452,33 @@ class BrainInvocationArbiter:
                 )
             self._admission_changed.set()
         try:
-            return await asyncio.shield(pending.result)
+            result = await asyncio.shield(pending.result)
+            # See the direct path: this assignment is intentionally adjacent
+            # to the shield return and has no intervening await.
+            pending.result_consumed = True
+            return result
         except asyncio.CancelledError:
-            await self._cancel_admitted_caller(pending)
+            cleanup = asyncio.create_task(
+                self._cancel_admitted_caller(pending),
+                name="aiwolf-brain-admitted-owner-loss",
+            )
+            await self._wait_task_ignoring_cancellation(cleanup)
             raise
 
     async def _cancel_admitted_caller(self, pending: _PendingInvocation) -> None:
-        must_wait = False
         async with self._lock:
             pending.cancel_requested = True
             if self._pending.get(pending.owner) is pending:
                 del self._pending[pending.owner]
                 self._finish(pending, self._cancelled_result())
+                pending.execution_complete.set()
             elif self._suspended_reaction is pending:
                 self._suspended_reaction = None
                 self._finish(pending, self._cancelled_result())
-            else:
-                must_wait = not pending.result.done()
+                pending.execution_complete.set()
             self._admission_changed.set()
-        if must_wait:
-            try:
-                await asyncio.shield(pending.result)
-            except (asyncio.CancelledError, Exception):
-                pass
+        await pending.execution_complete.wait()
+        await self._recover_unconsumed_local_send(pending)
 
     async def _drive_admission(self) -> None:
         try:
@@ -342,11 +486,18 @@ class BrainInvocationArbiter:
                 async with self._lock:
                     if self._active is not None:
                         raise RuntimeError("admission driver retained an active invocation")
+                    if self._poisoned or self._stopped:
+                        self._admission_state = "IDLE"
+                        return
+                    if self._observation_gate is not None:
+                        self._admission_state = "OBSERVATION_GATED"
+                        return
                     if not self._pending:
                         self._admission_state = "IDLE"
                         return
                     pending = self._select_pending_locked()
                     del self._pending[pending.owner]
+                    pending.execution_complete.clear()
                     self._active = pending
                     self._admission_state = "WAITING_ADMISSION"
                     self._admission_changed.clear()
@@ -357,7 +508,12 @@ class BrainInvocationArbiter:
                     self._admission_driver = None
                 if self._active is None:
                     self._admission_state = "IDLE"
-                if self._pending and not self._stopped:
+                if (
+                    self._pending
+                    and not self._stopped
+                    and not self._poisoned
+                    and self._observation_gate is None
+                ):
                     self._admission_driver = asyncio.create_task(
                         self._drive_admission(), name="aiwolf-brain-admission"
                     )
@@ -385,6 +541,7 @@ class BrainInvocationArbiter:
                     self._active = None
                 if self._admission_wait_task is offer_task:
                     self._admission_wait_task = None
+                pending.execution_complete.set()
 
     async def _run_admitted_inner(
         self,
@@ -393,6 +550,11 @@ class BrainInvocationArbiter:
         offer_task: asyncio.Task[AdmissionResult] | None,
         successor_handle: SuccessorReservation | None,
     ) -> None:
+        if pending.parked_terminal is not None:
+            terminal = pending.parked_terminal
+            pending.parked_terminal = None
+            self._finish(pending, terminal)
+            return
         if pending.cancel_requested or self._stopped:
             if offer_task is not None:
                 await self._cancel_offer_wait(
@@ -467,6 +629,15 @@ class BrainInvocationArbiter:
             return
         self._admission_wait_task = None
         if isinstance(claim_result, BrainDispatchResult):
+            # A completed GRANTED task cannot be cancelled. Retain its cleanup
+            # ownership even when the waiter returns a stale/cancel terminal.
+            if (
+                claim.done() and not claim.cancelled() and claim.exception() is None
+                and claim.result() is AdmissionStatus.GRANTED
+            ):
+                self._admission_lease = lease
+                await lease.release()
+                self._admission_lease = None
             self._finish(pending, claim_result)
             return
         if claim_result is not AdmissionStatus.GRANTED:
@@ -488,7 +659,7 @@ class BrainInvocationArbiter:
         await self._attach_pending_reservation(pending)
         result: BrainDispatchResult | None = None
         execution_error: BaseException | None = None
-        release_error: Exception | None = None
+        release_error: BaseException | None = None
         try:
             with lease.activate():
                 brain_task = asyncio.create_task(
@@ -499,15 +670,83 @@ class BrainInvocationArbiter:
                 result = await self._monitor_active_brain(pending, brain_task)
         except BaseException as error:
             execution_error = error
-        finally:
-            self._admission_brain_task = None
-            async with self._lock:
-                self._admission_state = "RELEASING"
+        self._admission_brain_task = None
+
+        gate_registered = False
+        attached_for_gate: _AttachedSuccessor | None = None
+        suspended_for_gate: _PendingInvocation | None = None
+        async with self._lock:
+            gate_registered = self._gate_belongs_to_locked(pending)
+            self._admission_state = "RELEASING"
+            if gate_registered:
+                # The handle is removed from the runnable topology before its
+                # one cancellation, but remains broker-attached until that
+                # acknowledgement.  Parent release therefore cannot promote it.
+                attached_for_gate = self._attached_successor
+                self._attached_successor = None
+                if self._suspended_reaction is not None:
+                    suspended_for_gate = self._suspended_reaction
+                    self._suspended_reaction = None
+
+        successor_status: AdmissionStatus | None = None
+        successor_error: BaseException | None = None
+        if attached_for_gate is not None:
             try:
-                await lease.release()
-            except Exception as error:
-                release_error = error
-            self._admission_lease = None
+                successor_status = await attached_for_gate.handle.cancel()
+                if successor_status not in {
+                    AdmissionStatus.CANCELLED,
+                    AdmissionStatus.EXPIRED,
+                }:
+                    raise RuntimeError(
+                        "successor cancellation returned an invalid terminal status"
+                    )
+            except BaseException as error:
+                successor_error = error
+        try:
+            await lease.release()
+        except BaseException as error:
+            release_error = error
+        self._admission_lease = None
+
+        if gate_registered and (
+            successor_error is not None or release_error is not None
+        ):
+            await self._poison_after_post_send_cleanup_failure(
+                pending,
+                attached=attached_for_gate,
+                suspended=suspended_for_gate,
+                failure=(
+                    successor_error
+                    if successor_error is not None
+                    else release_error
+                ),
+            )
+            return
+
+        if gate_registered:
+            await self._park_gate_cleanup_waiters(
+                attached=attached_for_gate,
+                successor_status=successor_status,
+                suspended=suspended_for_gate,
+            )
+            if execution_error is not None:
+                # A registered local send is the result; replacing it with a
+                # correlation-less error would strand terminal ownership.
+                await self._poison_after_post_send_cleanup_failure(
+                    pending,
+                    attached=None,
+                    suspended=None,
+                    failure=execution_error,
+                )
+                return
+            assert result is not None
+            if pending.cancel_requested or self._stopped:
+                self._finish(pending, self._cancelled_result())
+                await self._recover_unconsumed_local_send(pending)
+            else:
+                self._finish(pending, result)
+            return
+
         if execution_error is not None:
             self._finish_error(pending, execution_error)
         elif release_error is not None:
@@ -524,6 +763,7 @@ class BrainInvocationArbiter:
     ) -> None:
         replacement = transition.replacement
         async with self._lock:
+            replacement.execution_complete.clear()
             self._active = replacement
             self._admission_state = "WAITING_ADMISSION"
         await self._run_admitted(replacement, offer_task=transition.offer_task)
@@ -531,8 +771,16 @@ class BrainInvocationArbiter:
             resume = self._suspended_reaction is suspended
             if resume:
                 self._suspended_reaction = None
-                self._active = suspended
-                self._admission_state = "WAITING_ADMISSION"
+                if self._observation_gate is not None:
+                    suspended.admission_invocation_id = None
+                    self._pending[suspended.owner] = suspended
+                    self._active = None
+                    self._admission_state = "OBSERVATION_GATED"
+                    resume = False
+                else:
+                    suspended.execution_complete.clear()
+                    self._active = suspended
+                    self._admission_state = "WAITING_ADMISSION"
         if not resume:
             return
         if suspended.cancel_requested or self._stopped:
@@ -639,6 +887,11 @@ class BrainInvocationArbiter:
             to_attach: _PendingInvocation | None = None
             cancel_attached = False
             async with self._lock:
+                if brain_task.done():
+                    self._admission_state = "RELEASING"
+                    result = brain_task.result()
+                    self._register_observation_gate_locked(pending, result)
+                    return result
                 if (
                     pending.owner == "reaction_chat"
                     and self._attached_successor is None
@@ -653,9 +906,6 @@ class BrainInvocationArbiter:
                     )
                 ):
                     cancel_attached = True
-                elif brain_task.done():
-                    self._admission_state = "RELEASING"
-                    return brain_task.result()
                 cancel_brain = pending.cancel_requested or self._stopped
                 self._admission_changed.clear()
             if to_attach is not None:
@@ -730,6 +980,7 @@ class BrainInvocationArbiter:
             self._finish(pending, self._cancelled_result())
             return
         async with self._lock:
+            pending.execution_complete.clear()
             self._active = pending
             self._admission_state = "WAITING_ADMISSION"
         offer_task = asyncio.create_task(
@@ -752,6 +1003,7 @@ class BrainInvocationArbiter:
         except Exception:
             pass
         self._finish(attached.pending, self._cancelled_result())
+        attached.pending.execution_complete.set()
 
     async def _replace_before_claim_if_needed(
         self, pending: _PendingInvocation
@@ -882,6 +1134,446 @@ class BrainInvocationArbiter:
             raise RuntimeError("SENT dispatch decision is unavailable")
         return BrainDispatchResult(outcome, decision)
 
+    def _register_observation_gate_locked(
+        self,
+        pending: _PendingInvocation,
+        result: BrainDispatchResult,
+    ) -> None:
+        correlation = result.outcome.discussion
+        if result.outcome.status is not DecisionStatus.SENT:
+            if correlation is not None:
+                raise RuntimeError("non-SENT result cannot register discussion observation")
+            return
+        if correlation is None:
+            return
+        expected_owner = (
+            "reaction_chat"
+            if correlation.action in {"chat", "co_declare"}
+            else "vote_ability"
+        )
+        if pending.owner != expected_owner:
+            raise RuntimeError("discussion correlation action does not match owner")
+        if self._observation_gate is not None:
+            raise RuntimeError("a discussion observation gate is already registered")
+        self._completed_observation = None
+        self._observation_gate = _ObservationGate(
+            owner=pending.owner,
+            correlation=correlation,
+            pending=pending,
+        )
+        same_owner_waiter = self._pending.pop(pending.owner, None)
+        if same_owner_waiter is not None:
+            self._finish_error(
+                same_owner_waiter,
+                RuntimeError(
+                    f"owner {pending.owner!r} cannot wait behind its observation gate"
+                ),
+            )
+            same_owner_waiter.execution_complete.set()
+        self._admission_state = "OBSERVATION_GATED"
+
+    def _gate_belongs_to_locked(self, pending: _PendingInvocation) -> bool:
+        gate = self._observation_gate
+        return gate is not None and gate.pending is pending
+
+    def _select_finalization_locked(
+        self,
+        gate: _ObservationGate,
+        *,
+        status: DiscussionObservationStatus,
+        reason: DiscussionTerminalReason,
+        evidence: EvidenceRef | None,
+    ) -> asyncio.Task[ObservationAck]:
+        key = (status, reason, evidence)
+        if gate.attempt is None:
+            gate.attempt = key
+            gate.controller_was_unresponsive = self.controller.unresponsive
+            gate.task = asyncio.create_task(
+                self._run_observation_finalization(
+                    gate,
+                    status=status,
+                    reason=reason,
+                    evidence=evidence,
+                ),
+                name="aiwolf-discussion-observation-finalize",
+            )
+        elif gate.attempt != key:
+            raise RuntimeError("conflicting discussion observation")
+        if gate.task is None:  # pragma: no cover - state-machine defense
+            raise RuntimeError("discussion observation task is unavailable")
+        return gate.task
+
+    async def _run_observation_finalization(
+        self,
+        gate: _ObservationGate,
+        *,
+        status: DiscussionObservationStatus,
+        reason: DiscussionTerminalReason,
+        evidence: EvidenceRef | None,
+    ) -> ObservationAck:
+        try:
+            acknowledgement = await self.controller.finalize_discussion_observation(
+                correlation=gate.correlation,
+                status=status,
+                reason=reason,
+                evidence=evidence,
+            )
+        except BaseException as error:
+            async with self._lock:
+                if (
+                    gate.controller_was_unresponsive is False
+                    and not self.controller.unresponsive
+                ):
+                    # Controller validation and retained-material checks occur
+                    # before its attempt/state/audit boundary.  Restore only
+                    # this provisional Arbiter selection so a corrected fact
+                    # can use the still-unconsumed public seam.
+                    if (
+                        self._observation_gate is gate
+                        and gate.task is asyncio.current_task()
+                    ):
+                        gate.attempt = None
+                        gate.task = None
+                        gate.controller_was_unresponsive = None
+                else:
+                    if self._fatal_error is None:
+                        self._fatal_error = error
+                    self._mark_poisoned_locked()
+                    self._ensure_poison_shutdown_locked(asyncio.current_task())
+            raise
+
+        async with self._lock:
+            if self._observation_gate is not gate:
+                raise RuntimeError("discussion observation gate ownership changed")
+            self._completed_observation = _CompletedObservation(
+                owner=gate.owner,
+                correlation=gate.correlation,
+                status=status,
+                reason=reason,
+                evidence=evidence,
+                acknowledgement=acknowledgement,
+            )
+            self._observation_gate = None
+            self._admission_state = "IDLE"
+            if not self._poisoned and not self._stopped:
+                self._resume_after_observation_locked()
+            self._admission_changed.set()
+        return acknowledgement
+
+    async def _recover_unconsumed_local_send(
+        self, pending: _PendingInvocation
+    ) -> None:
+        owned = asyncio.create_task(
+            self._recover_unconsumed_local_send_owned(pending),
+            name="aiwolf-discussion-owner-loss-recovery",
+        )
+        try:
+            await self._wait_task_ignoring_cancellation(owned)
+        except BaseException:
+            # The finalizer itself records poison and owns shutdown.  The
+            # cancelled feature has no second terminal or useful result path.
+            return
+
+    async def _recover_unconsumed_local_send_owned(
+        self, pending: _PendingInvocation
+    ) -> None:
+        async with self._lock:
+            gate = self._observation_gate
+            if (
+                gate is None
+                or gate.pending is not pending
+                or pending.result_consumed
+            ):
+                return
+            task = self._select_finalization_locked(
+                gate,
+                status=DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                reason=DiscussionTerminalReason.OWNER_STOPPED,
+                evidence=None,
+            )
+        await self._wait_task_ignoring_cancellation(task)
+
+    async def _park_gate_cleanup_waiters(
+        self,
+        *,
+        attached: _AttachedSuccessor | None,
+        successor_status: AdmissionStatus | None,
+        suspended: _PendingInvocation | None,
+    ) -> None:
+        from ai_client.llm.admission_types import AdmissionStatus
+
+        async with self._lock:
+            for item, terminal in (
+                (
+                    None if attached is None else attached.pending,
+                    (
+                        self._deadline_suppressed_result()
+                        if successor_status is AdmissionStatus.EXPIRED
+                        else None
+                    ),
+                ),
+                (suspended, None),
+            ):
+                if item is None:
+                    continue
+                item.admission_invocation_id = None
+                if item.cancel_requested or self._stopped:
+                    self._finish(item, self._cancelled_result())
+                    item.execution_complete.set()
+                    continue
+                item.parked_terminal = terminal
+                if item.owner in self._pending:
+                    raise RuntimeError("gate parking found duplicate owner")
+                self._pending[item.owner] = item
+            self._admission_changed.set()
+
+    def _resume_after_observation_locked(self) -> None:
+        for owner, pending in tuple(self._pending.items()):
+            if pending.cancel_requested:
+                del self._pending[owner]
+                self._finish(pending, self._cancelled_result())
+                pending.execution_complete.set()
+            elif pending.parked_terminal is not None:
+                del self._pending[owner]
+                terminal = pending.parked_terminal
+                pending.parked_terminal = None
+                self._finish(pending, terminal)
+                pending.execution_complete.set()
+        if self._admission is None:
+            self._grant_next_locked()
+        elif self._pending and (
+            self._admission_driver is None or self._admission_driver.done()
+        ):
+            self._admission_driver = asyncio.create_task(
+                self._drive_admission(), name="aiwolf-brain-admission"
+            )
+
+    async def _poison_after_post_send_cleanup_failure(
+        self,
+        pending: _PendingInvocation,
+        *,
+        attached: _AttachedSuccessor | None,
+        suspended: _PendingInvocation | None,
+        failure: BaseException | None,
+    ) -> None:
+        async with self._lock:
+            gate = self._observation_gate
+            if gate is None or gate.pending is not pending:
+                raise RuntimeError("post-send cleanup lost its observation gate")
+            terminal_task = self._select_finalization_locked(
+                gate,
+                status=DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                reason=DiscussionTerminalReason.OWNER_STOPPED,
+                evidence=None,
+            )
+            if failure is not None and self._fatal_error is None:
+                self._fatal_error = failure
+            self._mark_poisoned_locked(
+                additional=tuple(
+                    item
+                    for item in (
+                        None if attached is None else attached.pending,
+                        suspended,
+                    )
+                    if item is not None
+                )
+            )
+            shutdown = self._ensure_poison_shutdown_locked(terminal_task)
+        await asyncio.shield(shutdown)
+
+    def _mark_poisoned_locked(
+        self, *, additional: tuple[_PendingInvocation, ...] = ()
+    ) -> None:
+        self._poisoned = True
+        error = RuntimeError("BrainInvocationArbiter is poisoned")
+        invocations: list[_PendingInvocation] = list(self._pending.values())
+        self._pending.clear()
+        if self._suspended_reaction is not None:
+            invocations.append(self._suspended_reaction)
+            self._suspended_reaction = None
+        if self._attached_successor is not None:
+            invocations.append(self._attached_successor.pending)
+            self._attached_successor = None
+        invocations.extend(additional)
+        if self._active is not None:
+            invocations.append(self._active)
+        seen: set[int] = set()
+        for pending in invocations:
+            identity = id(pending)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            pending.cancel_requested = True
+            self._finish_error(pending, error)
+            pending.execution_complete.set()
+        self._admission_changed.set()
+
+    def _ensure_poison_shutdown_locked(
+        self, terminal_task: asyncio.Task[ObservationAck] | None
+    ) -> asyncio.Task[None]:
+        if self._poison_shutdown_task is None:
+            self._poison_shutdown_task = asyncio.create_task(
+                self._poison_shutdown(terminal_task),
+                name="aiwolf-brain-arbiter-poison-shutdown",
+            )
+        return self._poison_shutdown_task
+
+    async def _poison_shutdown(
+        self, terminal_task: asyncio.Task[ObservationAck] | None
+    ) -> None:
+        if terminal_task is not None:
+            try:
+                await self._wait_task_ignoring_cancellation(terminal_task)
+            except BaseException:
+                pass
+        if self._admission is not None:
+            should_close = False
+            async with self._lock:
+                if not self._admission_closed:
+                    self._admission_closed = True
+                    should_close = True
+            if should_close:
+                try:
+                    await self._admission.aclose()
+                except BaseException as error:
+                    async with self._lock:
+                        if self._fatal_error is None:
+                            self._fatal_error = error
+        try:
+            await self._ensure_controller_stopped()
+        except BaseException as error:
+            async with self._lock:
+                if self._fatal_error is None:
+                    self._fatal_error = error
+
+    async def _stop_owned(self) -> None:
+        async with self._lock:
+            self._stopped = True
+            pending = tuple(self._pending.values())
+            self._pending.clear()
+            for invocation in pending:
+                invocation.cancel_requested = True
+                self._finish(invocation, self._cancelled_result())
+                invocation.execution_complete.set()
+            if self._suspended_reaction is not None:
+                suspended = self._suspended_reaction
+                self._suspended_reaction = None
+                suspended.cancel_requested = True
+                self._finish(suspended, self._cancelled_result())
+                suspended.execution_complete.set()
+            if self._active is not None:
+                self._active.cancel_requested = True
+            if self._attached_successor is not None:
+                self._attached_successor.pending.cancel_requested = True
+            active_task = self._active_task
+            driver = self._admission_driver
+            poison_shutdown = self._poison_shutdown_task
+            self._admission_changed.set()
+
+        if poison_shutdown is not None:
+            await asyncio.shield(poison_shutdown)
+        for task in (active_task, driver):
+            if task is not None and task is not asyncio.current_task():
+                await asyncio.gather(task, return_exceptions=True)
+        if poison_shutdown is not None:
+            if self._fatal_error is not None:
+                raise self._fatal_error
+            return
+
+        finalization_error: BaseException | None = None
+        while True:
+            async with self._lock:
+                gate = self._observation_gate
+                if gate is None:
+                    finalization = None
+                elif gate.task is None:
+                    finalization = self._select_finalization_locked(
+                        gate,
+                        status=DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                        reason=DiscussionTerminalReason.OWNER_STOPPED,
+                        evidence=None,
+                    )
+                else:
+                    finalization = gate.task
+            if finalization is None:
+                break
+            try:
+                await self._wait_task_ignoring_cancellation(finalization)
+            except BaseException as error:
+                async with self._lock:
+                    retry_after_precondition = (
+                        not self._poisoned
+                        and self._observation_gate is gate
+                        and gate.task is None
+                        and gate.attempt is None
+                    )
+                if retry_after_precondition:
+                    continue
+                finalization_error = error
+            break
+        async with self._lock:
+            late_poison_shutdown = self._poison_shutdown_task
+        if late_poison_shutdown is not None:
+            await asyncio.shield(late_poison_shutdown)
+        else:
+            await self._ensure_controller_stopped()
+        if finalization_error is not None:
+            raise finalization_error
+        if self._fatal_error is not None:
+            raise self._fatal_error
+
+    async def _ensure_controller_stopped(self) -> None:
+        async with self._lock:
+            if self._controller_stop_task is None:
+                self._controller_stop_task = asyncio.create_task(
+                    self.controller.stop(), name="aiwolf-brain-controller-stop"
+                )
+            task = self._controller_stop_task
+        await asyncio.shield(task)
+
+    @staticmethod
+    async def _wait_event_ignoring_cancellation(event: asyncio.Event) -> None:
+        task = asyncio.create_task(event.wait())
+        await BrainInvocationArbiter._wait_task_ignoring_cancellation(task)
+
+    @staticmethod
+    async def _wait_task_ignoring_cancellation(task: asyncio.Task[Any]) -> Any:
+        while True:
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if task.cancelled():
+                    raise
+                if task.done():
+                    return task.result()
+
+    @staticmethod
+    def _validate_observation_call(
+        *,
+        owner: object,
+        correlation: object,
+        status: object,
+        reason: object,
+        evidence: object,
+    ) -> None:
+        if owner not in {"reaction_chat", "vote_ability"}:
+            raise ValueError("owner must be 'vote_ability' or 'reaction_chat'")
+        if not isinstance(correlation, DiscussionDispatchCorrelation):
+            raise TypeError("correlation must be DiscussionDispatchCorrelation")
+        if not isinstance(status, DiscussionObservationStatus):
+            raise TypeError("status must be DiscussionObservationStatus")
+        if not isinstance(reason, DiscussionTerminalReason):
+            raise TypeError("reason must be DiscussionTerminalReason")
+        if evidence is not None and not isinstance(evidence, EvidenceRef):
+            raise TypeError("evidence must be EvidenceRef when supplied")
+        expected_owner = (
+            "reaction_chat"
+            if correlation.action in {"chat", "co_declare"}
+            else "vote_ability"
+        )
+        if owner != expected_owner:
+            raise ValueError("owner does not match discussion correlation action")
+
     def _new_admission_request(
         self, pending: _PendingInvocation
     ) -> AdmissionRequest:
@@ -946,6 +1638,10 @@ class BrainInvocationArbiter:
         return (
             owner in self._pending
             or (self._active is not None and self._active.owner == owner)
+            or (
+                self._observation_gate is not None
+                and self._observation_gate.owner == owner
+            )
             or (
                 self._suspended_reaction is not None
                 and self._suspended_reaction.owner == owner

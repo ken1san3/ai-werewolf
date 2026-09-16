@@ -9,6 +9,7 @@ from typing import Literal, Mapping
 from .types import (
     AiAuditWriterConfig,
     GenerationSettings,
+    LlamaCppStructuredOutputConfig,
     LLMBrainConfig,
     OpenAICompatibleBackendConfig,
     _validate_endpoint,
@@ -32,6 +33,7 @@ class LocalLLMSettings:
     max_request_bytes: int = 65536
     max_response_bytes: int = 65536
     structured_mode: Literal["json_schema", "json_object"] = "json_schema"
+    llama_cpp_structured_output: LlamaCppStructuredOutputConfig | None = None
     brain: LLMBrainConfig = LLMBrainConfig()
     audit: AiAuditWriterConfig = AiAuditWriterConfig()
 
@@ -59,6 +61,13 @@ class LocalLLMSettings:
                 raise ValueError(f"{name} must be an int >= 1024")
         if self.structured_mode not in {"json_schema", "json_object"}:
             raise ValueError("structured_mode must be json_schema or json_object")
+        if self.llama_cpp_structured_output is not None and not isinstance(
+            self.llama_cpp_structured_output, LlamaCppStructuredOutputConfig
+        ):
+            raise TypeError(
+                "llama_cpp_structured_output must be "
+                "LlamaCppStructuredOutputConfig or None"
+            )
 
     @classmethod
     def from_env(
@@ -88,4 +97,5 @@ class LocalLLMSettings:
             max_request_bytes=self.max_request_bytes,
             max_response_bytes=self.max_response_bytes,
             structured_mode=self.structured_mode,
+            llama_cpp_structured_output=self.llama_cpp_structured_output,
         )

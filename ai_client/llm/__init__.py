@@ -25,15 +25,24 @@ from .admission_types import (
 from .backend import OpenAICompatibleBackend, StructuredLLMBackend
 from .brain import AiAuditSink, LLMBrain, LLMInvocationError
 from .config import LocalLLMSettings
-from .decision import DecisionValidationError, parse_llm_decision
+from .decision import (
+    DecisionValidationError,
+    ParsedDiscussionOutput,
+    parse_llm_decision,
+    parse_llm_output,
+)
 from .prompt import PromptProjectionError, project_brain_input
 from .types import (
+    ChatOutputProfile,
+    DiscussionChatConfig,
     AiAuditDecision,
     AiAuditError,
     AiAuditErrorCode,
+    AiAuditEntry,
     AiAuditRecord,
     AiAuditStatus,
     AiAuditWriterConfig,
+    AiDiscussionGenerationRecord,
     AuditWriteAck,
     BackendIdentity,
     DecisionValidationCode,
@@ -56,10 +65,12 @@ from .types import (
     ShortChatConfig,
     StructuredGenerationRequest,
     StructuredGenerationResponse,
+    discussion_generation_record_sha256,
     serialize_ai_audit,
 )
 
 __all__ = [
+    "ChatOutputProfile",
     "GENERATION_IPC_PROTOCOL",
     "AdmissionBrokerSnapshot",
     "AdmissionCredentials",
@@ -71,10 +82,12 @@ __all__ = [
     "AiAuditDecision",
     "AiAuditError",
     "AiAuditErrorCode",
+    "AiAuditEntry",
     "AiAuditRecord",
     "AiAuditSink",
     "AiAuditStatus",
     "AiAuditWriterConfig",
+    "AiDiscussionGenerationRecord",
     "AuditWriteAck",
     "BackendIdentity",
     "BrokerAdmissionSession",
@@ -82,6 +95,7 @@ __all__ = [
     "BrokeredStructuredLLMBackend",
     "DecisionValidationCode",
     "DecisionValidationError",
+    "DiscussionChatConfig",
     "GenerationSettings",
     "GenerationAdmission",
     "GenerationAdmissionBroker",
@@ -104,6 +118,7 @@ __all__ = [
     "OpenAICompatibleBackendConfig",
     "PromptProjection",
     "PromptProjectionError",
+    "ParsedDiscussionOutput",
     "StructuredGenerationRequest",
     "StructuredGenerationResponse",
     "StructuredLLMBackend",
@@ -115,7 +130,9 @@ __all__ = [
     "ShortChatConfig",
     "SuccessorReservation",
     "parse_llm_decision",
+    "parse_llm_output",
     "project_brain_input",
     "serialize_ai_audit",
+    "discussion_generation_record_sha256",
     "serialize_admission_metric",
 ]

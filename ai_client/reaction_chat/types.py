@@ -7,6 +7,8 @@ from enum import Enum
 import math
 from typing import TYPE_CHECKING
 
+from ai_client.discussion import DiscussionDispatchCorrelation
+
 if TYPE_CHECKING:
     from .frequency import FrequencySuppression, SpeakingFrequencyState
 
@@ -103,6 +105,7 @@ class ReactionOutcome:
     frequency_draw: float | None = None
     frequency_source_fingerprint: str | None = None
     frequency_suppression: FrequencySuppression | None = None
+    discussion: DiscussionDispatchCorrelation | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.trigger, ReactionTrigger):
@@ -141,6 +144,27 @@ class ReactionOutcome:
 
             if not isinstance(self.frequency_suppression, FrequencySuppression):
                 raise TypeError("frequency_suppression must be FrequencySuppression")
+        if self.discussion is not None:
+            if not isinstance(self.discussion, DiscussionDispatchCorrelation):
+                raise TypeError(
+                    "discussion must be DiscussionDispatchCorrelation or None"
+                )
+            if self.status not in {
+                ReactionOutcomeStatus.ACCEPTED,
+                ReactionOutcomeStatus.REJECTED,
+                ReactionOutcomeStatus.TRANSPORT_GAP,
+            }:
+                raise ValueError(
+                    "discussion correlation requires a finalized local-send status"
+                )
+            expected_action_kind = {
+                "chat": "chat.send",
+                "co_declare": "co.declare",
+            }.get(self.discussion.action)
+            if self.action_kind != expected_action_kind:
+                raise ValueError(
+                    "discussion correlation does not match the Reaction action kind"
+                )
         if (
             self.status is ReactionOutcomeStatus.FREQUENCY_SUPPRESSED
             and self.frequency_suppression is None

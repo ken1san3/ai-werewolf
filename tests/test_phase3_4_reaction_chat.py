@@ -1054,7 +1054,7 @@ class ReactionControllerTests(unittest.IsolatedAsyncioTestCase):
             minimum_accepted_chat_interval_seconds=0,
             deadline_guard_seconds=0.01,
             minimum_start_budget_seconds=0.001,
-            brain_timeout_seconds=0.01,
+            brain_timeout_seconds=0.2,
         )
         reaction, _controller, world, source, sender, _brain = _make_stack(
             brain=brain, config=config, clock=clock  # type: ignore[arg-type]
@@ -1150,7 +1150,11 @@ class ReactionControllerTests(unittest.IsolatedAsyncioTestCase):
         reaction, _controller, world, source, _sender, _brain = _make_stack(brain=brain)
         reaction.start()
         try:
-            await _wait_until(lambda: len(brain.requests) == 1)
+            # 延長前の機会が完了した後で、残りの機会を検証する。
+            await _wait_until(
+                lambda: reaction.snapshot().intentional_silence_count == 1
+            )
+            self.assertEqual(len(brain.requests), 1)
             source.advance(2)
             world._consume(  # noqa: SLF001
                 _event(

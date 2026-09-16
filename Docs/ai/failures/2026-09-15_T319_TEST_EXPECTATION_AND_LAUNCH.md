@@ -1,0 +1,9 @@
+# T319 固定検証の失敗と起動記録
+
+対象はR10修正後の独立検証。旧T316実gameと別結果である。
+
+R1初回は301件中3 FAIL。3つとも `test_private_review_accepts_exact_v1_v2_generation_linkage_and_rejects_unknown_version` の異なるversion組合せで、同じ不正な期待値 `assert not rejected.json.exists()` による。既存processorはlinkage不正を検出すると安全なfailure aggregateを保存し非zero終了する。T322/Mainが既存code/testへ照合し、製品を変更せず追加testをhuman_quality_pass=false/linkage_failure_count=1/本文非漏洩へ訂正。全4batch終了後の固定R1再測定として扱い、初回を成功へ改変しない。rawは `logs/t319-r10-repair/test`、訂正後は別 `logs/t319-r10-repair/retest` に保存する。
+
+F1は最初のlauncher引数が同一stdout/stderr出力先のため拒否され、訂正後にpytest一回実行。予約変数への代入衝突でPID取得不能、開始通知も遅れた。日時はF1.status.jsonを正本としPIDは欠測のまま。初回親launcherがHiddenを指定せず、ユーザーが短時間コンソール出現を観測。二重pytest起動なしというTester報告を記録するが欠測PIDを補作しない。再測定ではHidden/固有変数/異なるstdoutとstderr出力先/開始直後のPID通知を既存起動手順へ適用する。テストコードをウィンドウ対策のために変更しない。
+
+初回check_docs FAILはMainが更新したCURRENT_STATEのNext Integration Actionに実在pathのbacktick参照がなかったため。既存handoffへの参照を訂正。pytest再実行理由はこの文書不備ではなく上記test修正である。

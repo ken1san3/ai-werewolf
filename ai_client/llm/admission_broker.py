@@ -284,23 +284,27 @@ class GenerationAdmissionBroker:
             backend_request_timeout_seconds = getattr(
                 backend_config, "request_timeout_seconds", None
             )
-        if backend_request_timeout_seconds is not None:
-            if (
-                isinstance(backend_request_timeout_seconds, bool)
-                or not isinstance(backend_request_timeout_seconds, (int, float))
-                or not math.isfinite(backend_request_timeout_seconds)
-                or backend_request_timeout_seconds <= 0
-            ):
-                raise ValueError("backend request timeout must be finite and positive")
-            if config.provider_drain_grace_seconds < backend_request_timeout_seconds:
-                raise ValueError(
-                    "provider_drain_grace_seconds must cover backend request timeout"
-                )
+        if backend_request_timeout_seconds is None:
+            backend_request_timeout_seconds = config.provider_drain_grace_seconds
+        if (
+            isinstance(backend_request_timeout_seconds, bool)
+            or not isinstance(backend_request_timeout_seconds, (int, float))
+            or not math.isfinite(backend_request_timeout_seconds)
+            or backend_request_timeout_seconds <= 0
+        ):
+            raise ValueError("backend request timeout must be finite and positive")
+        if config.provider_drain_grace_seconds < backend_request_timeout_seconds:
+            raise ValueError(
+                "provider_drain_grace_seconds must cover backend request timeout"
+            )
         self._registry = copied_registry
         self._backend = backend
         self._fairness_seed = fairness_seed
         self._config = config
         self._clock = clock
+        self._backend_request_timeout_seconds = float(
+            backend_request_timeout_seconds
+        )
         self._metrics = metrics or AdmissionMetrics(
             config.metrics_queue_capacity
         )
@@ -435,7 +439,12 @@ class GenerationAdmissionBroker:
                         *(asyncio.shield(task) for task in provider_tasks),
                         return_exceptions=True,
                     )
-                await self._metrics.flush()
+                metrics_error: Exception | None = None
+                try:
+                    await self._metrics.flush()
+                except Exception as error:
+                    metrics_error = error
+                    self._cleanup_incomplete = True
                 connections = tuple(self._connections.values())
                 await asyncio.gather(
                     *(connection.close() for connection in connections),
@@ -443,8 +452,15 @@ class GenerationAdmissionBroker:
                 )
                 if server is not None:
                     await server.wait_closed()
-                await self._metrics.aclose()
+                try:
+                    await self._metrics.aclose()
+                except Exception as error:
+                    if metrics_error is None:
+                        metrics_error = error
+                    self._cleanup_incomplete = True
                 await self._backend.aclose()
+                if metrics_error is not None:
+                    raise metrics_error
         except TimeoutError:
             self._cleanup_incomplete = True
             async with self._lock:
@@ -899,11 +915,8 @@ class GenerationAdmissionBroker:
             self._finish_active_slot_locked(slot, "ABANDONED_DRAINED")
             return
         if slot.state is _SlotState.ACTIVE:
-            slot.consumer_current = False
-            slot.state = _SlotState.DRAINING
-            self._record(slot, "DRAINING", consumer_state="abandoned")
+            self._begin_draining_locked(slot)
             self._emit_ack(slot.client_id, invocation_id, AdmissionStatus.CANCELLED)
-            self._ensure_drain_watch_locked(slot)
             return
         if slot.state is _SlotState.DRAINING:
             self._emit_ack(slot.client_id, invocation_id, AdmissionStatus.CANCELLED)
@@ -937,6 +950,9 @@ class GenerationAdmissionBroker:
         request: StructuredGenerationRequest,
     ) -> None:
         self._require_invocation_owner(connection, invocation_id)
+        terminal = self._terminal_status.get(invocation_id)
+        if terminal == AdmissionStatus.EXPIRED.value:
+            return
         if self._poisoned:
             self._emit_backend_error(
                 connection.client_id,
@@ -962,8 +978,7 @@ class GenerationAdmissionBroker:
         slot.call_count = ordinal
         slot.request_ids.add(request.request_id)
         slot.request_bytes = _structured_request_size(request)
-        remaining = slot.request.not_after_monotonic - self._clock()
-        if remaining <= 0:
+        if self._clock() >= slot.request.not_after_monotonic:
             self._record_call(
                 slot,
                 ordinal,
@@ -974,22 +989,18 @@ class GenerationAdmissionBroker:
                 response=None,
                 poison_transition=False,
             )
-            self._emit_backend_error(
-                slot.client_id,
-                invocation_id,
-                ordinal,
-                LLMBackendError(
-                    LLMBackendErrorCode.ADMISSION_EXPIRED,
-                    retryable=False,
-                    provider_quiescence=ProviderQuiescence.NOT_STARTED,
-                ),
-            )
+            self._terminal_slot_locked(slot, AdmissionStatus.EXPIRED, notify=True)
+            self._offer_next_locked()
             return
         slot.state = _SlotState.ACTIVE
         slot.provider_started_at = self._clock()
         task = asyncio.create_task(
             self._run_backend_call(
-                slot.client_id, invocation_id, ordinal, request, remaining
+                slot.client_id,
+                invocation_id,
+                ordinal,
+                request,
+                self._backend_request_timeout_seconds,
             ),
             name=f"aiwolf-admission-provider-{invocation_id}-{ordinal}",
         )
@@ -1006,6 +1017,33 @@ class GenerationAdmissionBroker:
         response: StructuredGenerationResponse | None = None
         error: LLMBackendError | None = None
         unclassified = False
+        task = asyncio.current_task()
+        assert task is not None
+        async with self._lock:
+            slot = self._slots.get(client_id)
+            if (
+                slot is None
+                or slot.request.invocation_id != invocation_id
+                or slot.call_count != ordinal
+                or slot.provider_task is not task
+            ):
+                return
+            if self._clock() >= slot.request.not_after_monotonic:
+                self._record_call(
+                    slot,
+                    ordinal,
+                    LLMBackendErrorCode.ADMISSION_EXPIRED.value,
+                    None,
+                    False,
+                    ProviderQuiescence.NOT_STARTED,
+                    response=None,
+                    poison_transition=False,
+                )
+                self._terminal_slot_locked(
+                    slot, AdmissionStatus.EXPIRED, notify=True
+                )
+                self._offer_next_locked()
+                return
         try:
             async with asyncio.timeout(timeout_seconds):
                 response = await self._backend.generate(request)
@@ -1053,6 +1091,7 @@ class GenerationAdmissionBroker:
             if error is not None and not self._source_error_is_valid(error):
                 error = None
                 unclassified = True
+            cutoff_reached = self._clock() >= slot.request.not_after_monotonic
             if response is not None:
                 quiescence = ProviderQuiescence.PROVEN_TERMINAL
                 backend_code = None
@@ -1083,7 +1122,12 @@ class GenerationAdmissionBroker:
                 quiescence,
                 response=response,
                 poison_transition=not safe and not self._poisoned,
+                backend_error_detail=(error.backend_error_detail if error is not None else None),
             )
+            if cutoff_reached and slot.consumer_current:
+                slot.consumer_current = False
+                slot.state = _SlotState.DRAINING
+                self._record(slot, "DRAINING", consumer_state="abandoned")
             if not safe:
                 original_error = error
                 consumer_current = slot.consumer_current
@@ -1127,6 +1171,14 @@ class GenerationAdmissionBroker:
                     )
             else:
                 self._finish_active_slot_locked(slot, "ABANDONED_DRAINED")
+
+    def _begin_draining_locked(self, slot: _Slot) -> None:
+        if not slot.consumer_current:
+            return
+        slot.consumer_current = False
+        slot.state = _SlotState.DRAINING
+        self._record(slot, "DRAINING", consumer_state="abandoned")
+        self._ensure_drain_watch_locked(slot)
 
     def _ensure_drain_watch_locked(self, slot: _Slot) -> None:
         if slot.drain_watch is not None or slot.provider_task is None:
@@ -1191,13 +1243,21 @@ class GenerationAdmissionBroker:
                     return
                 if (
                     slot.request.invocation_id == invocation_id
-                    and slot.state in {_SlotState.ENQUEUED, _SlotState.OFFERED}
                     and self._clock() >= cutoff
                 ):
-                    self._terminal_slot_locked(
-                        slot, AdmissionStatus.EXPIRED, notify=True
-                    )
-                    self._offer_next_locked()
+                    if slot.state in {_SlotState.ENQUEUED, _SlotState.OFFERED}:
+                        self._terminal_slot_locked(
+                            slot, AdmissionStatus.EXPIRED, notify=True
+                        )
+                        self._offer_next_locked()
+                    elif slot.state is _SlotState.CLAIMED:
+                        slot.consumer_current = False
+                        self._terminal_slot_locked(
+                            slot, AdmissionStatus.EXPIRED, notify=True
+                        )
+                        self._offer_next_locked()
+                    elif slot.state is _SlotState.ACTIVE:
+                        self._begin_draining_locked(slot)
         except asyncio.CancelledError:
             return
 
@@ -1214,9 +1274,7 @@ class GenerationAdmissionBroker:
                     slot, AdmissionStatus.UNAVAILABLE, notify=False
                 )
             if slot.state in {_SlotState.ACTIVE, _SlotState.DRAINING}:
-                slot.consumer_current = False
-                slot.state = _SlotState.DRAINING
-                self._ensure_drain_watch_locked(slot)
+                self._begin_draining_locked(slot)
             else:
                 self._terminal_slot_locked(
                     slot, AdmissionStatus.UNAVAILABLE, notify=False
@@ -1403,6 +1461,7 @@ class GenerationAdmissionBroker:
         *,
         response: StructuredGenerationResponse | None,
         poison_transition: bool,
+        backend_error_detail: str | None = None,
     ) -> None:
         started_at = slot.provider_started_at
         generation_latency = (
@@ -1422,6 +1481,7 @@ class GenerationAdmissionBroker:
                 priority=slot.request.priority,
                 call_ordinal=ordinal,
                 backend_code=backend_code,
+                backend_error_detail=backend_error_detail,
                 http_status=http_status,
                 retryable=retryable,
                 provider_quiescence=quiescence,
@@ -1522,6 +1582,15 @@ class GenerationAdmissionBroker:
                 or (
                     error.code is not LLMBackendErrorCode.HTTP_STATUS
                     and error.http_status is None
+                )
+            )
+            and (
+                error.backend_error_detail is None
+                or (
+                    error.code is LLMBackendErrorCode.HTTP_STATUS
+                    and type(error.backend_error_detail) is str
+                    and 1 <= len(error.backend_error_detail) <= 256
+                    and all(character.isprintable() for character in error.backend_error_detail)
                 )
             )
         )

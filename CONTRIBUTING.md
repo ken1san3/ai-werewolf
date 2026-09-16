@@ -28,11 +28,15 @@ approve its own design in the same session, and a worker cannot approve its own 
 4. Read only the packet's canonical/design sources.
 5. Inspect Git status and the relevant diff.
 
-Do not require previous chat history. Current facts belong in `CURRENT_STATE.md`; current
-work belongs in `TASKS.md`; one worker assignment belongs in `tasks/T*.md`; one concise
-result belongs in `handoffs/tasks/T*.md`.
+Do not require previous chat history. `Docs/ai/INDEX.md` defines authority: CURRENT_STATE
+owns phase/target/holds and evidence pointers; TASKS owns lifecycle; packets own scope;
+handoffs record attributed evidence, not dispatch instructions.
 
 ## Work lifecycle
+
+Responsibilities are selected by risk and acceptance, not a fixed pipeline. The example
+below applies when separate worker/review assignments are required. Main may perform bounded
+work locally where independence is not required; D051 and packet-specific gates remain binding.
 
 ```text
 Integrator: READY packet and non-overlapping scope
@@ -53,7 +57,7 @@ Integrator unless the packet explicitly assigns another writer.
 | Workflow lifecycle | `Docs/ai/WORKFLOW.md` |
 | Stable system and coordination boundaries | `Docs/ai/ARCHITECTURE.md` |
 | Delegation, escalation, recovery, and long-test procedures | `Docs/ai/OPERATIONS.md` |
-| Current facts and measured tests | `Docs/ai/CURRENT_STATE.md` |
+| Phase/target/holds and evidence pointers | `Docs/ai/CURRENT_STATE.md` |
 | Current board | `Docs/ai/TASKS.md` |
 | Current model preferences | `Docs/ai/MODEL_ASSIGNMENTS.md` |
 | Phase scope and completion | `Docs/ai/ROADMAP.md` |
@@ -102,5 +106,6 @@ force push. Do not commit unless the user explicitly authorizes it.
 - Review the scoped diff.
 - Write the packet's task handoff.
 - Record new decisions or repeatable failures in their canonical directories.
-- Return to the Integrator for verification.
-- Stop without beginning the next task.
+- Workers return to the Integrator for verification and stop at their assignment boundary.
+- Main continues safe user-authorized work across packets/waves; honor explicit holds and
+  stop at the user objective boundary. See `Docs/ai/OPERATIONS.md`.

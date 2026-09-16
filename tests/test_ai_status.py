@@ -483,5 +483,95 @@ class DesignGateTests(unittest.TestCase):
         self.assertTrue(any("EVENT_B" in problem for problem in check_docs.problems))
 
 
+class CoordinationRecoveryTests(unittest.TestCase):
+    """Adversarial recovery fixtures use no temporary filesystem or product runtime."""
+
+    def record(self, state: str = "IN_PROGRESS") -> dict[str, str]:
+        return {"Task ID": "T900", "State": state,
+                "Handoff path": "Docs/ai/handoffs/tasks/T900.md"}
+
+    def test_returned_pass_does_not_close_or_redispatch_in_progress(self) -> None:
+        record = self.record()
+        with patch.object(Path, "is_file", return_value=True):
+            warnings = ai_status.coordination_warnings(
+                "Active task: T900\nTask state: IN_PROGRESS\n", [record])
+        self.assertEqual(record["State"], "IN_PROGRESS")
+        self.assertTrue(any("do not redispatch or auto-close" in w for w in warnings))
+        self.assertTrue(any("host ownership UNKNOWN" in w for w in warnings))
+
+    def test_done_task_in_stale_active_pointer_is_not_redispatched(self) -> None:
+        warnings = ai_status.coordination_warnings(
+            "Active task: T900\nTask state: IN_PROGRESS\n", [self.record("DONE")])
+        self.assertTrue(any("TASKS owns lifecycle" in w for w in warnings))
+        self.assertTrue(any("do not redispatch from an old pointer" in w for w in warnings))
+
+    def test_missing_and_duplicate_authority_need_reconciliation(self) -> None:
+        for records in ([], [self.record(), self.record()]):
+            with patch.object(Path, "is_file", return_value=False):
+                warnings = ai_status.coordination_warnings("Active task: T900\n", records)
+            self.assertTrue(any("missing/ambiguous" in w for w in warnings))
+
+    def test_ready_with_old_result_requires_inspection(self) -> None:
+        with patch.object(Path, "is_file", return_value=True):
+            warnings = ai_status.coordination_warnings(
+                "Active task: T900\nTask state: READY\n", [self.record("READY")])
+        self.assertTrue(any("handoff exists" in w for w in warnings))
+
+    def test_evidence_hash_and_claims_do_not_expose_old_instructions(self) -> None:
+        import hashlib
+        body = b"Status: COMPLETE\nVerdict: **PASS**\nNext action: dispatch T899\n"
+        with patch.object(Path, "read_bytes", return_value=body):
+            summary = ai_status.handoff_summary(self.record())
+        self.assertIn(hashlib.sha256(body).hexdigest(), summary)
+        self.assertIn("Verdict: **PASS**", summary)
+        self.assertIn("not integrated approval", summary)
+        self.assertNotIn("dispatch T899", summary)
+
+    def test_unreadable_evidence_is_not_absent_worker(self) -> None:
+        with patch.object(Path, "read_bytes", side_effect=PermissionError):
+            self.assertIn("missing or unreadable", ai_status.handoff_summary(self.record()))
+
+    def test_default_cold_start_is_selective_and_surfaces_hold(self) -> None:
+        state = ("## Current Phase\nPhase 9 fixture\n## Current Target\n"
+                 "Active task: T900\nTask state: IN_PROGRESS\n"
+                 "## Continuation Hold\nHuman review before product resumption.\n"
+                 "## Current Blockers\nReturned result needs reconciliation.\n"
+                 "## Critical Path\nVerify result before required independent review.\n"
+                 "## Next Integration Action\nHonor hold.\n")
+        board = ("## T900\nTask ID: T900\nState: IN_PROGRESS\n"
+                 "Task packet: Docs/ai/tasks/T900.md\n"
+                 "Handoff path: Docs/ai/handoffs/tasks/T900.md\n")
+        sources = {"CURRENT_STATE.md": state, "TASKS.md": board,
+                   "REVIEW_INBOX.md": "", "OPEN_QUESTIONS.md": ""}
+
+        def read(path: Path) -> str:
+            # Fails on preload of history, RUNBOOK, unrelated packets or docs.
+            return sources[path.name]
+
+        output = io.StringIO()
+        with (patch.object(ai_status, "read", side_effect=read),
+              patch.object(ai_status, "git_summary", return_value="fixture HEAD; dirty"),
+              patch.object(ai_status, "print_design_gate"),
+              patch.object(Path, "is_file", return_value=True),
+              patch.object(Path, "read_bytes", return_value=b"Status: COMPLETE\nVerdict: PASS\n"),
+              patch("sys.argv", ["ai_status.py", "integrate"]), redirect_stdout(output)):
+            self.assertEqual(ai_status.main(), 0)
+        rendered = output.getvalue()
+        for expected in ("Phase 9 fixture", "T900 [IN_PROGRESS]", "CONTINUATION HOLD",
+                         "Human review", "host ownership UNKNOWN", "Verdict: PASS",
+                         "do not redispatch", "TASKS lifecycle", "Honor hold"):
+            self.assertIn(expected, rendered)
+        self.assertNotIn("RUNBOOK:", rendered)
+
+    def test_bootstrap_discovers_state_and_preserves_human_boundary(self) -> None:
+        prompt = ai_status.read(ai_status.AI / "MAIN_INTEGRATOR_PROMPT.md")
+        self.assertNotRegex(prompt, r"T\d{3}|Phase \d")
+        self.assertIn("ai_status.py integrate", prompt)
+        self.assertIn("across packet/wave boundaries", prompt)
+        self.assertIn("explicit hold", prompt)
+        self.assertIn("irreconcilable authority", prompt)
+        self.assertIn("missing external", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

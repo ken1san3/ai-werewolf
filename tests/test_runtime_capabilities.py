@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import unittest
 
@@ -24,9 +25,26 @@ from server.aiwolf_core.wins import PRIMARY_WIN_CONDITION_DISPATCH_IDS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONTENT_ROOT = PROJECT_ROOT / "content"
+AI_CLIENT_ROOT = PROJECT_ROOT / "ai_client"
 
 
 class RuntimeCapabilityRegistryTests(unittest.TestCase):
+    def test_production_ai_client_has_no_server_import(self) -> None:
+        violations: list[str] = []
+        for path in sorted(AI_CLIENT_ROOT.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                modules: tuple[str, ...]
+                if isinstance(node, ast.Import):
+                    modules = tuple(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom):
+                    modules = (() if node.module is None else (node.module,))
+                else:
+                    continue
+                if any(module == "server" or module.startswith("server.") for module in modules):
+                    violations.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+        self.assertEqual(violations, [])
+
     def test_implemented_capabilities_are_registered_content_vocabulary(self) -> None:
         content = load_content(CONTENT_ROOT)
 

@@ -29,6 +29,8 @@ from .vote_ability import (
     VoteAbilitySnapshot,
 )
 from .llm import (
+    ChatOutputProfile,
+    DiscussionChatConfig,
     GENERATION_IPC_PROTOCOL,
     AdmissionBrokerSnapshot,
     AdmissionCredentials,
@@ -117,6 +119,7 @@ from .runtime import (
 )
 
 __all__ = [
+    "ChatOutputProfile",
     "GENERATION_IPC_PROTOCOL",
     "AdmissionBrokerSnapshot",
     "AdmissionCredentials",
@@ -163,6 +166,7 @@ __all__ = [
     "BrokeredStructuredLLMBackend",
     "DecisionValidationCode",
     "DecisionValidationError",
+    "DiscussionChatConfig",
     "GenerationSettings",
     "GenerationAdmission",
     "GenerationAdmissionBroker",

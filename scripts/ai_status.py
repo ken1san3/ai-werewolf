@@ -8,6 +8,7 @@ Read-only: this script never modifies the repository.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
@@ -159,6 +160,56 @@ def display_task(record: dict[str, str]) -> str:
     state = record.get("State", "(unknown)")
     packet = record.get("Task packet", "(missing packet)").replace("`", "")
     return f"{task_id} [{state}] {title} — {responsibility}\n  packet: {packet}"
+
+
+def handoff_summary(record: dict[str, str]) -> str:
+    """Show attributable bytes/claims, never infer acceptance or worker liveness."""
+    name = record.get("Handoff path", "").strip().strip("`")
+    if not name:
+        return "  evidence: no handoff pointer"
+    path = ROOT / name
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return f"  evidence: {name} (missing or unreadable)"
+    body = data.decode("utf-8", errors="replace")
+    claims = re.findall(r"(?im)^(?:Status|Verdict):[^\n]*", body)
+    return (f"  evidence: {name}\n  SHA-256: {hashlib.sha256(data).hexdigest()}\n"
+            f"  reported: {'; '.join(claims) or '(inspect artifact)'}; not integrated approval")
+
+
+def coordination_warnings(state: str, records: list[dict[str, str]]) -> list[str]:
+    """Small structural/staleness checks, not a second acceptance/dependency engine."""
+    warnings: list[str] = []
+    ids = [r.get("Task ID", r.get("Header ID", "")) for r in records]
+    if len(ids) != len(set(ids)):
+        warnings.append("Duplicate task IDs: reconcile TASKS before dispatch.")
+    active = active_task_id(state)
+    selected = [r for r in records if r.get("Task ID") == active]
+    if active is None or len(selected) != 1:
+        warnings.append("Active task is missing/ambiguous: reconcile CURRENT_STATE and TASKS.")
+    else:
+        board_state = selected[0].get("State")
+        mirrors = re.findall(r"(?m)^Task state:\s*(\w+)\s*$", state)
+        if mirrors != [board_state]:
+            warnings.append("Task state mirror differs from TASKS; TASKS owns lifecycle.")
+        if board_state not in LIVE_TASK_STATES:
+            warnings.append(f"Active {active} is {board_state}: do not redispatch from an old pointer.")
+    for record in records:
+        task_id = record.get("Task ID", record.get("Header ID", "?"))
+        lifecycle = record.get("State")
+        if lifecycle not in TASK_STATES:
+            warnings.append(f"{task_id}: invalid lifecycle; reconcile before dispatch.")
+        if lifecycle not in LIVE_TASK_STATES:
+            continue
+        name = record.get("Handoff path", "").strip().strip("`")
+        if name and (ROOT / name).is_file():
+            warnings.append(f"{task_id} [{lifecycle}]: handoff exists; inspect returned evidence "
+                            "and reconcile, do not redispatch or auto-close.")
+        if lifecycle == "IN_PROGRESS":
+            warnings.append(f"{task_id}: host ownership UNKNOWN to this read-only script; "
+                            "inspect host before recovery, never duplicate dispatch.")
+    return warnings
 
 
 def git_summary() -> str:
@@ -403,8 +454,10 @@ def parse_args() -> argparse.Namespace:
         "role",
         nargs="?",
         choices=tuple(ROLE_SECTIONS),
-        help="append only the matching RUNBOOK section",
+        help="select responsibility context; use --details for its RUNBOOK",
     )
+    parser.add_argument("--details", action="store_true",
+                        help="expand test evidence routing and the selected RUNBOOK")
     return parser.parse_args()
 
 
@@ -414,6 +467,13 @@ def main() -> int:
     state = read(AI / "CURRENT_STATE.md")
     inbox = read(AI / "REVIEW_INBOX.md")
     questions = read(AI / "OPEN_QUESTIONS.md")
+    records = task_records()
+
+    print("AUTHORITY: CURRENT_STATE phase/holds; TASKS lifecycle; packets scope; handoffs evidence.")
+    print("Historical next actions never authorize dispatch. Host/process ownership: UNKNOWN here.")
+    hold = section(state, "Continuation Hold")
+    if hold:
+        print("CONTINUATION HOLD\n" + hold + "\n")
 
     print("=" * 60)
     print("CURRENT PHASE")
@@ -432,10 +492,14 @@ def main() -> int:
     print("=" * 60)
     live_tasks = [
         record
-        for record in task_records()
+        for record in records
         if record.get("State") in LIVE_TASK_STATES
     ]
-    print("\n".join(display_task(record) for record in live_tasks) or "none")
+    print("\n".join(display_task(record) + "\n" + handoff_summary(record)
+                    for record in live_tasks) or "none")
+    print("\nRECONCILIATION")
+    print("\n".join(coordination_warnings(state, records)) or
+          "No structural warning; still verify dependencies, evidence and host ownership.")
 
     print()
     print("=" * 60)
@@ -459,6 +523,7 @@ def main() -> int:
     if args.role:
         print()
         print_design_gate(state)
+        print("Design permission only; continuation holds, task scope and independent gates still apply.")
 
     if role in {"integrate", "implement", "review", "fix", "test", "investigate"}:
         print()
@@ -471,7 +536,7 @@ def main() -> int:
         else:
             print("none")
 
-    if role not in {"architect", "design"}:
+    if args.details and role not in {"architect", "design"}:
         print()
         print("=" * 60)
         print("TEST STATUS")
@@ -492,13 +557,16 @@ def main() -> int:
     print("=" * 60)
     print(git_summary())
 
-    if args.role:
+    if args.role and args.details:
         print()
         print("=" * 60)
         print(f"RUNBOOK: {args.role}")
         print("=" * 60)
         selected = runbook_section(read(AI / "RUNBOOK.md"), ROLE_SECTIONS[args.role])
         print(selected or "(RUNBOOK section not found)")
+    else:
+        print("\nRouting: Docs/ai/INDEX.md; policy: AGENTS.md; operating contract: "
+              "Docs/ai/OPERATIONS.md. Use --details only as needed.")
     return 0
 
 

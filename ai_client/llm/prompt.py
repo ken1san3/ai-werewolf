@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from typing import Mapping
 
 from ai_client.brain import BrainInput
+from ai_client.discussion.projection import (
+    DiscussionPromptConfig,
+    build_discussion_repair_projection,
+    project_discussion_brain_input,
+)
 from ai_client.network import (
     AbilityAction,
     ChatAction,
@@ -33,11 +39,11 @@ from ai_client.world import (
 )
 
 from .types import (
+    ChatOutputProfile,
     DecisionValidationCode,
     LLMBrainConfig,
     LLMMessage,
     PromptProjection,
-    ShortChatConfig,
 )
 
 
@@ -48,7 +54,7 @@ _SYSTEM_MESSAGE = (
 )
 
 
-def _system_message(short_chat: ShortChatConfig | None) -> str:
+def _system_message(short_chat: ChatOutputProfile | None) -> str:
     if short_chat is None:
         return _SYSTEM_MESSAGE
     return (
@@ -355,7 +361,7 @@ def _make_projection(
     *,
     included: int,
     omitted: int,
-    short_chat: ShortChatConfig | None,
+    short_chat: ChatOutputProfile | None,
 ) -> PromptProjection:
     prompt_json = canonical_prompt_json(messages, schema)
     encoded = prompt_json.encode("utf-8")
@@ -372,7 +378,10 @@ def _make_projection(
 
 
 def project_brain_input(
-    request: BrainInput, *, config: LLMBrainConfig
+    request: BrainInput,
+    *,
+    config: LLMBrainConfig,
+    discussion_config: DiscussionPromptConfig = DiscussionPromptConfig(),
 ) -> PromptProjection:
     """Build the complete bounded provider-visible contract from authorized values only."""
 
@@ -380,6 +389,57 @@ def project_brain_input(
         raise TypeError("request must be BrainInput")
     if not isinstance(config, LLMBrainConfig):
         raise TypeError("config must be LLMBrainConfig")
+    if not isinstance(discussion_config, DiscussionPromptConfig):
+        raise TypeError("discussion_config must be DiscussionPromptConfig")
+    if request.discussion is not None:
+        try:
+            return project_discussion_brain_input(
+                request,
+                llm_config=config,
+                config=discussion_config,
+                system_message=_system_message(config.short_chat),
+            )
+        except PromptProjectionError:
+            raise
+        except ValueError as error:
+            code = str(error)
+            if code not in {"PROMPT_INVALID", "PROMPT_TOO_LARGE"}:
+                raise
+            rejected = _make_projection(
+                (
+                    LLMMessage(role="system", content=_system_message(config.short_chat)),
+                    LLMMessage(
+                        role="user",
+                        content=json.dumps(
+                            {
+                                "projection_rejected": code,
+                                "schema_version": "aiwolf.discussion-prompt-rejected.v1",
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    ),
+                ),
+                {
+                    "additionalProperties": False,
+                    "properties": {},
+                    "required": [],
+                    "type": "object",
+                },
+                {
+                    "projection_rejected": code,
+                    "schema_version": "aiwolf.discussion-prompt-rejected.v1",
+                },
+                included=0,
+                omitted=len(request.discussion.evidence),
+                short_chat=config.short_chat,
+            )
+            rejected = replace(
+                rejected,
+                token_proxy_units=0,
+                discussion_capture=request.discussion,
+            )
+            raise PromptProjectionError(code, projection=rejected) from None
 
     records = sorted(request.history.records, key=lambda record: record.order)
     if config.max_history_records:
@@ -511,8 +571,18 @@ def build_repair_projection(
     validation_code: DecisionValidationCode,
     invalid_output: str,
     config: LLMBrainConfig,
+    discussion_config: DiscussionPromptConfig = DiscussionPromptConfig(),
 ) -> PromptProjection:
     """Append one bounded untrusted repair datum without changing the schema/options."""
+
+    if projection.discussion_capture is not None:
+        return build_discussion_repair_projection(
+            projection,
+            validation_code=validation_code,
+            invalid_output=invalid_output,
+            llm_config=config,
+            config=discussion_config,
+        )
 
     response_bytes = invalid_output.encode("utf-8")
     repair = json.dumps(

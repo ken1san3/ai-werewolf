@@ -24,6 +24,7 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "completion: separate-process completion and driver integration tests",
+    "windows_private: durable private evidence and Windows CPython 3.13 filesystem validation",
 ]
 
 [tool.setuptools.packages.find]

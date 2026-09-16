@@ -9,6 +9,15 @@ import inspect
 import time
 from typing import Callable
 
+from ai_client.discussion import (
+    BoundDiscussionContext,
+    DiscussionDispatchCorrelation,
+    DiscussionObservationStatus,
+    DiscussionTerminalReason,
+    DiscussionTrigger as Phase6DiscussionTrigger,
+    EvidenceRef,
+    evidence_ref_for_record,
+)
 from ai_client.brain import (
     BrainDecision,
     BrainInvocationArbiter,
@@ -29,8 +38,12 @@ from ai_client.world import (
     CoDeclarationRecord,
     CoReportRecord,
     Freshness,
+    GameLifecycleRecord,
     HistoryQuery,
     PhaseDeadlineReachedObservation,
+    PhaseTimingObservation,
+    PhaseTransitionRecord,
+    ResumeRecoveryBarrier,
     TransportObservationQuery,
     WorldState,
 )
@@ -66,6 +79,7 @@ class _PendingOpportunity:
     mapping_order: int | None = None
     source_player_id: str | None = None
     source_message: str | None = None
+    source_record: ChatRecord | None = None
     cooldown_deferred: bool = False
 
 
@@ -77,6 +91,20 @@ class _FrequencyEvidence:
     draw: float | None = None
     source_fingerprint: str | None = None
     suppression: FrequencySuppression | None = None
+
+
+@dataclass(frozen=True)
+class _DiscussionFinalization:
+    public_status: ReactionOutcomeStatus
+    observation_status: DiscussionObservationStatus
+    reason: DiscussionTerminalReason
+    evidence: EvidenceRef | None
+
+
+@dataclass(frozen=True)
+class _DiscussionFinalizationResult:
+    public_status: ReactionOutcomeStatus
+    cancelled: bool = False
 
 
 class ReactionChatController:
@@ -91,6 +119,7 @@ class ReactionChatController:
         config: ReactionChatConfig = ReactionChatConfig(),
         frequency_policy: SpeakingFrequencyPolicy | None = None,
         clock: Callable[[], float] = time.monotonic,
+        discussion_context: BoundDiscussionContext | None = None,
     ) -> None:
         if not isinstance(config, ReactionChatConfig):
             raise TypeError("config must be ReactionChatConfig")
@@ -100,6 +129,12 @@ class ReactionChatController:
             raise ValueError("master_seed must be an integer")
         if not callable(clock):
             raise TypeError("clock must be callable")
+        if discussion_context is not None and not isinstance(
+            discussion_context, BoundDiscussionContext
+        ):
+            raise TypeError(
+                "discussion_context must be BoundDiscussionContext or None"
+            )
         frequency_profile: SpeakingProfile | None = None
         if frequency_policy is not None:
             try:
@@ -136,6 +171,7 @@ class ReactionChatController:
         self.frequency_policy = frequency_policy
         self._frequency_profile = frequency_profile
         self._clock = clock
+        self.discussion_context = discussion_context
 
         self._lifecycle = ReactionChatLifecycle.NEW
         self._task: asyncio.Task[FeatureControllerExit] | None = None
@@ -191,6 +227,11 @@ class ReactionChatController:
             self._exit = FeatureControllerExit(
                 "reaction_chat", FeatureControllerExitReason.STOP_REQUESTED
             )
+            return
+        if self._lifecycle is ReactionChatLifecycle.STOPPING:
+            task = self._task
+            if task is not None and task is not asyncio.current_task():
+                await asyncio.shield(task)
             return
         self._lifecycle = ReactionChatLifecycle.STOPPING
         task = self._task
@@ -387,7 +428,11 @@ class ReactionChatController:
         co_handles = tuple(
             handle
             for handle in actions.actions
-            if isinstance(handle, (CoDeclareAction, CoReportAction))
+            if isinstance(handle, CoDeclareAction)
+            or (
+                self.discussion_context is None
+                and isinstance(handle, CoReportAction)
+            )
         )
         if chat_handles and not self._initial_generated:
             self._initial_generated = True
@@ -454,6 +499,7 @@ class ReactionChatController:
                 observed_at=self._clock(),
                 source_player_id=record.player_id,
                 source_message=record.message,
+                source_record=record,
             )
 
     @staticmethod
@@ -532,6 +578,7 @@ class ReactionChatController:
         observed_at: float | None = None,
         source_player_id: str | None = None,
         source_message: str | None = None,
+        source_record: ChatRecord | None = None,
         cooldown_deferred: bool = False,
     ) -> _PendingOpportunity:
         key = self._phase_key
@@ -567,6 +614,7 @@ class ReactionChatController:
             self._mapping_order,
             source_player_id,
             source_message,
+            source_record,
             cooldown_deferred,
         )
 
@@ -636,7 +684,11 @@ class ReactionChatController:
             relevant = tuple(
                 handle
                 for handle in actions
-                if isinstance(handle, (CoDeclareAction, CoReportAction))
+                if isinstance(handle, CoDeclareAction)
+                or (
+                    self.discussion_context is None
+                    and isinstance(handle, CoReportAction)
+                )
             )
         elif pending.channel is not None:
             relevant = tuple(
@@ -651,6 +703,13 @@ class ReactionChatController:
                 self._chat_deadline_closed = True
             else:
                 self._close_co()
+            return
+        discussion_trigger = self._discussion_trigger_for(
+            pending=pending,
+            relevant=relevant,
+            mapping_order=deadline.mapping_order,
+        )
+        if self.discussion_context is not None and discussion_trigger is None:
             return
         if is_chat:
             self._phase_chat_invocations += 1
@@ -672,7 +731,10 @@ class ReactionChatController:
             connection_generation=deadline.connection_generation,
             action_generation=deadline.action_generation,
             not_after_monotonic=cutoff,
+            discussion_trigger=discussion_trigger,
         )
+        history_after = self._history_cursor
+        transport_after = self._transport_cursor
         result = await self.invoker.invoke(
             owner="reaction_chat",
             priority=BrainInvocationPriority.REACTION,
@@ -686,14 +748,43 @@ class ReactionChatController:
             self._send_count += 1
             dispatched_decision = result.dispatched_decision
             assert dispatched_decision is not None
-            status = await self._await_finalization(
+            discussion = outcome.discussion
+            cancelled = False
+            if self.discussion_context is None:
+                status = await self._await_finalization(
+                    pending,
+                    action_kind,
+                    dispatched_decision,
+                    history_after=history_after,
+                    transport_after=transport_after,
+                )
+            else:
+                selected_handle = self._selected_handle(relevant, outcome)
+                discussion = self._require_discussion_correlation(
+                    pending=pending,
+                    action_kind=action_kind,
+                    selected_handle=selected_handle,
+                    dispatched_decision=dispatched_decision,
+                    correlation=discussion,
+                )
+                finalized = await self._await_discussion_finalization(
+                    pending=pending,
+                    action_kind=action_kind,
+                    selected_handle=selected_handle,
+                    dispatched_decision=dispatched_decision,
+                    correlation=discussion,
+                    history_after=history_after,
+                    transport_after=transport_after,
+                )
+                status = finalized.public_status
+                cancelled = finalized.cancelled
+            self._record_outcome(
                 pending,
+                outcome,
                 action_kind,
-                dispatched_decision,
-                history_after=self._history_cursor,
-                transport_after=self._transport_cursor,
+                status,
+                discussion=discussion,
             )
-            self._record_outcome(pending, outcome, action_kind, status)
             if status is ReactionOutcomeStatus.ACCEPTED:
                 self._accepted_count += 1
                 if is_chat:
@@ -711,6 +802,8 @@ class ReactionChatController:
                     self._close_co()
             if not is_chat:
                 self._close_co()
+            if cancelled:
+                raise asyncio.CancelledError
         else:
             status = self._map_brain_outcome(outcome)
             self._record_outcome(pending, outcome, action_kind, status)
@@ -872,6 +965,13 @@ class ReactionChatController:
                 pending, True, frequency=evaluated_evidence
             )
             return
+        discussion_trigger = self._discussion_trigger_for(
+            pending=pending,
+            relevant=relevant,
+            mapping_order=deadline.mapping_order,
+        )
+        if self.discussion_context is not None and discussion_trigger is None:
+            return
         dispatch_deadline = DispatchDeadline(
             mapping_order=deadline.mapping_order,
             phase=deadline.phase,
@@ -879,6 +979,7 @@ class ReactionChatController:
             connection_generation=deadline.connection_generation,
             action_generation=deadline.action_generation,
             not_after_monotonic=cutoff,
+            discussion_trigger=discussion_trigger,
         )
 
         committed = False
@@ -898,6 +999,8 @@ class ReactionChatController:
             timeout_seconds=timeout,
             dispatch_deadline=dispatch_deadline,
         )
+        history_after = self._history_cursor
+        transport_after = self._transport_cursor
         result = await self.invoker.invoke(
             **invoke_arguments,
             on_brain_start=on_brain_start,
@@ -909,15 +1012,43 @@ class ReactionChatController:
             self._send_count += 1
             dispatched_decision = result.dispatched_decision
             assert dispatched_decision is not None
-            status = await self._await_finalization(
-                pending,
-                action_kind,
-                dispatched_decision,
-                history_after=self._history_cursor,
-                transport_after=self._transport_cursor,
-            )
+            discussion = outcome.discussion
+            cancelled = False
+            if self.discussion_context is None:
+                status = await self._await_finalization(
+                    pending,
+                    action_kind,
+                    dispatched_decision,
+                    history_after=history_after,
+                    transport_after=transport_after,
+                )
+            else:
+                selected_handle = self._selected_handle(relevant, outcome)
+                discussion = self._require_discussion_correlation(
+                    pending=pending,
+                    action_kind=action_kind,
+                    selected_handle=selected_handle,
+                    dispatched_decision=dispatched_decision,
+                    correlation=discussion,
+                )
+                finalized = await self._await_discussion_finalization(
+                    pending=pending,
+                    action_kind=action_kind,
+                    selected_handle=selected_handle,
+                    dispatched_decision=dispatched_decision,
+                    correlation=discussion,
+                    history_after=history_after,
+                    transport_after=transport_after,
+                )
+                status = finalized.public_status
+                cancelled = finalized.cancelled
             self._record_outcome(
-                pending, outcome, action_kind, status, frequency=evaluated_evidence
+                pending,
+                outcome,
+                action_kind,
+                status,
+                frequency=evaluated_evidence,
+                discussion=discussion,
             )
             if status is ReactionOutcomeStatus.ACCEPTED:
                 self._accepted_count += 1
@@ -927,6 +1058,8 @@ class ReactionChatController:
             elif status is ReactionOutcomeStatus.TRANSPORT_GAP:
                 self._transport_gap_closed = True
                 self._chat_deadline_closed = True
+            if cancelled:
+                raise asyncio.CancelledError
         else:
             status = self._map_brain_outcome(outcome)
             self._record_outcome(
@@ -984,6 +1117,422 @@ class ReactionChatController:
             and max(current, key=lambda record: record.order).player_id
             == self_view.player_id
         )
+
+    def _discussion_trigger_for(
+        self,
+        *,
+        pending: _PendingOpportunity,
+        relevant: tuple[object, ...],
+        mapping_order: int,
+    ) -> Phase6DiscussionTrigger | None:
+        bound_context = self.discussion_context
+        if bound_context is None:
+            return None
+        source: EvidenceRef | None = None
+        kind = {
+            ReactionTriggerKind.INITIAL_CHAT: "INITIAL_CHAT",
+            ReactionTriggerKind.REACTION_CHAT: "PEER_CHAT",
+            ReactionTriggerKind.CO_ACTION: "CO_OPPORTUNITY",
+        }[pending.trigger.kind]
+        if pending.trigger.kind is ReactionTriggerKind.REACTION_CHAT:
+            record = self._current_peer_source(pending, relevant)
+            if record is None:
+                return None
+            source = evidence_ref_for_record(record, bound_context)
+        key = pending.trigger.phase_key
+        return Phase6DiscussionTrigger(
+            owner="reaction_chat",
+            kind=kind,  # type: ignore[arg-type]
+            day=key.day,
+            phase=key.phase,
+            connection_generation=key.connection_generation,
+            action_generation=key.action_generation,
+            mapping_order=mapping_order,
+            source=source,
+        )
+
+    def _current_peer_source(
+        self,
+        pending: _PendingOpportunity,
+        relevant: tuple[object, ...],
+    ) -> ChatRecord | None:
+        source = pending.source_record
+        snapshot = self.world.snapshot()
+        self_view = snapshot.self_view
+        if (
+            not isinstance(source, ChatRecord)
+            or self_view is None
+            or source.player_id is None
+            or source.player_id == self_view.player_id
+            or source.order != pending.trigger.source_order
+            or source.day != pending.trigger.phase_key.day
+            or source.phase != pending.trigger.phase_key.phase
+            or source.channel != pending.channel
+            or not relevant
+            or any(
+                not isinstance(handle, ChatAction)
+                or handle.channel != source.channel
+                for handle in relevant
+            )
+        ):
+            return None
+        retained = tuple(
+            record
+            for record in self.world.history(
+                HistoryQuery(kinds=frozenset({"chat"}))
+            ).records
+            if isinstance(record, ChatRecord) and record.order == source.order
+        )
+        if len(retained) != 1 or retained[0] != source:
+            return None
+        return retained[0]
+
+    @staticmethod
+    def _selected_handle(
+        allowed_handles: tuple[object, ...], outcome: DecisionOutcome
+    ) -> object | None:
+        if outcome.option_id is None:
+            return None
+        return next(
+            (
+                handle
+                for index, handle in enumerate(allowed_handles)
+                if f"action:{index}" == outcome.option_id
+            ),
+            None,
+        )
+
+    def _require_discussion_correlation(
+        self,
+        *,
+        pending: _PendingOpportunity,
+        action_kind: str | None,
+        selected_handle: object | None,
+        dispatched_decision: BrainDecision,
+        correlation: DiscussionDispatchCorrelation | None,
+    ) -> DiscussionDispatchCorrelation:
+        bound_context = self.discussion_context
+        if bound_context is None:  # pragma: no cover - guarded by caller
+            raise RuntimeError("discussion correlation requires a bound context")
+        if not isinstance(correlation, DiscussionDispatchCorrelation):
+            raise RuntimeError("contextful local send requires discussion correlation")
+        if correlation.context_sha256 != bound_context.context_sha256:
+            raise RuntimeError("discussion correlation does not match bound context")
+        if correlation.send_connection_generation != pending.trigger.phase_key.connection_generation:
+            raise RuntimeError("discussion correlation has a stale connection generation")
+        if isinstance(selected_handle, ChatAction) and isinstance(
+            dispatched_decision, ChatDecision
+        ):
+            if action_kind != "chat.send" or correlation.action != "chat":
+                raise RuntimeError("chat send correlation has the wrong action")
+            if pending.trigger.kind is ReactionTriggerKind.REACTION_CHAT:
+                source = pending.source_record
+                if (
+                    not isinstance(source, ChatRecord)
+                    or source.channel != selected_handle.channel
+                ):
+                    raise RuntimeError(
+                        "peer discussion send does not match its source channel"
+                    )
+            return correlation
+        if isinstance(selected_handle, CoDeclareAction) and isinstance(
+            dispatched_decision, CoDeclareDecision
+        ):
+            if action_kind != "co.declare" or correlation.action != "co_declare":
+                raise RuntimeError("CO send correlation has the wrong action")
+            return correlation
+        raise RuntimeError("contextful Reaction send used an ineligible action")
+
+    async def _await_discussion_finalization(
+        self,
+        *,
+        pending: _PendingOpportunity,
+        action_kind: str | None,
+        selected_handle: object | None,
+        dispatched_decision: BrainDecision,
+        correlation: DiscussionDispatchCorrelation,
+        history_after: int,
+        transport_after: int,
+    ) -> _DiscussionFinalizationResult:
+        cancelled = False
+        try:
+            finalization = await self._resolve_discussion_observation(
+                pending=pending,
+                action_kind=action_kind,
+                selected_handle=selected_handle,
+                dispatched_decision=dispatched_decision,
+                correlation=correlation,
+                history_after=history_after,
+                transport_after=transport_after,
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            self._clear_current_cancellation()
+            finalization = _DiscussionFinalization(
+                public_status=ReactionOutcomeStatus.TRANSPORT_GAP,
+                observation_status=DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                reason=DiscussionTerminalReason.OWNER_STOPPED,
+                evidence=None,
+            )
+
+        finalizer_task = asyncio.create_task(
+            self.invoker.finalize_discussion_observation(
+                owner="reaction_chat",
+                correlation=correlation,
+                status=finalization.observation_status,
+                reason=finalization.reason,
+                evidence=finalization.evidence,
+            )
+        )
+        while not finalizer_task.done():
+            try:
+                await asyncio.shield(finalizer_task)
+            except asyncio.CancelledError:
+                cancelled = True
+                self._clear_current_cancellation()
+        finalizer_task.result()
+        return _DiscussionFinalizationResult(finalization.public_status, cancelled)
+
+    @staticmethod
+    def _clear_current_cancellation() -> None:
+        current = asyncio.current_task()
+        if current is not None:
+            current.uncancel()
+
+    async def _resolve_discussion_observation(
+        self,
+        *,
+        pending: _PendingOpportunity,
+        action_kind: str | None,
+        selected_handle: object | None,
+        dispatched_decision: BrainDecision,
+        correlation: DiscussionDispatchCorrelation,
+        history_after: int,
+        transport_after: int,
+    ) -> _DiscussionFinalization:
+        bound_context = self.discussion_context
+        assert bound_context is not None
+        while self._lifecycle is ReactionChatLifecycle.RUNNING:
+            self._observe()
+            history = self.world.history(HistoryQuery(after_order=history_after))
+            transport = self.world.transport_observations(
+                TransportObservationQuery(after_order=transport_after)
+            )
+            records = history.records
+            observations = transport.observations
+
+            acceptance_candidates = self._discussion_acceptance_candidates(
+                pending=pending,
+                action_kind=action_kind,
+                selected_handle=selected_handle,
+                dispatched_decision=dispatched_decision,
+                records=records,
+            )
+            rejection_candidates = tuple(
+                observation
+                for observation in observations
+                if isinstance(observation, ActionRejectionObservation)
+                and observation.action == action_kind
+                and observation.connection_generation
+                == correlation.send_connection_generation
+                and observation.request_event_id == correlation.request_event_id
+            )
+            missing_id_rejections = tuple(
+                observation
+                for observation in observations
+                if isinstance(observation, ActionRejectionObservation)
+                and observation.action == action_kind
+                and observation.connection_generation
+                == correlation.send_connection_generation
+                and observation.request_event_id is None
+            )
+
+            if transport.gap_before_first or not history.complete:
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.TRANSPORT_GAP,
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    DiscussionTerminalReason.RECOVERY_GAP,
+                    None,
+                )
+
+            ambiguous = (
+                len(acceptance_candidates) > 1
+                or len(rejection_candidates) > 1
+                or bool(acceptance_candidates and rejection_candidates)
+                or bool(missing_id_rejections)
+            )
+            if ambiguous:
+                insufficient = (
+                    missing_id_rejections[0]
+                    if (
+                        len(missing_id_rejections) == 1
+                        and not acceptance_candidates
+                        and not rejection_candidates
+                    )
+                    else None
+                )
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.TRANSPORT_GAP,
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+                    (
+                        evidence_ref_for_record(insufficient, bound_context)
+                        if insufficient is not None
+                        else None
+                    ),
+                )
+            if len(acceptance_candidates) == 1:
+                accepted = acceptance_candidates[0]
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.ACCEPTED,
+                    DiscussionObservationStatus.ACCEPTED,
+                    DiscussionTerminalReason.AUTHORITATIVE_ACCEPTED,
+                    evidence_ref_for_record(accepted, bound_context),
+                )
+            if len(rejection_candidates) == 1:
+                rejected = rejection_candidates[0]
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.REJECTED,
+                    DiscussionObservationStatus.REJECTED,
+                    DiscussionTerminalReason.AUTHORITATIVE_REJECTED,
+                    evidence_ref_for_record(rejected, bound_context),
+                )
+
+            gap_barriers = tuple(
+                observation
+                for observation in observations
+                if isinstance(observation, ResumeRecoveryBarrier)
+                and observation.complete is True
+                and observation.connection_generation
+                > correlation.send_connection_generation
+                and observation.replay_gap_or_floor is True
+                and observation.replay_contiguous is False
+            )
+            if gap_barriers:
+                evidence = (
+                    evidence_ref_for_record(gap_barriers[0], bound_context)
+                    if len(gap_barriers) == 1
+                    else None
+                )
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.TRANSPORT_GAP,
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    DiscussionTerminalReason.RECOVERY_GAP,
+                    evidence,
+                )
+
+            snapshot = self.world.snapshot()
+            phase_changed = (
+                snapshot.phase is None
+                or snapshot.phase.day != pending.trigger.phase_key.day
+                or snapshot.phase.phase != pending.trigger.phase_key.phase
+                or snapshot.freshness in {Freshness.ENDED, Freshness.FAILED}
+            )
+            if phase_changed:
+                phase_records = tuple(
+                    record
+                    for record in records
+                    if isinstance(record, (PhaseTransitionRecord, GameLifecycleRecord))
+                ) + tuple(
+                    observation
+                    for observation in observations
+                    if isinstance(observation, PhaseTimingObservation)
+                    and (
+                        observation.day != pending.trigger.phase_key.day
+                        or observation.phase != pending.trigger.phase_key.phase
+                    )
+                )
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.TRANSPORT_GAP,
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    DiscussionTerminalReason.PHASE_CHANGED,
+                    (
+                        evidence_ref_for_record(phase_records[0], bound_context)
+                        if len(phase_records) == 1
+                        else None
+                    ),
+                )
+
+            contiguous_barriers = tuple(
+                observation
+                for observation in observations
+                if isinstance(observation, ResumeRecoveryBarrier)
+                and observation.complete is True
+                and observation.connection_generation
+                > correlation.send_connection_generation
+                and observation.replay_contiguous is True
+                and observation.replay_gap_or_floor is False
+            )
+            deadline_records = tuple(
+                observation
+                for observation in observations
+                if isinstance(observation, PhaseDeadlineReachedObservation)
+                and observation.connection_generation
+                == pending.trigger.phase_key.connection_generation
+                and observation.action_generation
+                == pending.trigger.phase_key.action_generation
+            )
+            ambiguity_records = contiguous_barriers + deadline_records
+            if ambiguity_records:
+                return _DiscussionFinalization(
+                    ReactionOutcomeStatus.TRANSPORT_GAP,
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+                    (
+                        evidence_ref_for_record(ambiguity_records[0], bound_context)
+                        if len(ambiguity_records) == 1
+                        else None
+                    ),
+                )
+
+            version = snapshot.version
+            await self.world.wait_for_update(version)
+
+        raise asyncio.CancelledError
+
+    def _discussion_acceptance_candidates(
+        self,
+        *,
+        pending: _PendingOpportunity,
+        action_kind: str | None,
+        selected_handle: object | None,
+        dispatched_decision: BrainDecision,
+        records: tuple[object, ...],
+    ) -> tuple[object, ...]:
+        snapshot = self.world.snapshot()
+        player_id = snapshot.self_view.player_id if snapshot.self_view is not None else None
+        if player_id is None:
+            return ()
+        key = pending.trigger.phase_key
+        if isinstance(selected_handle, ChatAction) and isinstance(
+            dispatched_decision, ChatDecision
+        ):
+            return tuple(
+                record
+                for record in records
+                if isinstance(record, ChatRecord)
+                and record.player_id == player_id
+                and record.day == key.day
+                and record.phase == key.phase
+                and record.channel == selected_handle.channel
+                and record.message == dispatched_decision.message
+            )
+        if (
+            action_kind == "co.declare"
+            and isinstance(selected_handle, CoDeclareAction)
+            and isinstance(dispatched_decision, CoDeclareDecision)
+        ):
+            return tuple(
+                record
+                for record in records
+                if isinstance(record, CoDeclarationRecord)
+                and record.player_id == player_id
+                and record.day == key.day
+                and record.phase == key.phase
+                and record.claimed_role_id == dispatched_decision.claimed_role_id
+                and record.comment == dispatched_decision.comment
+            )
+        return ()
 
     @staticmethod
     def _validate_frequency_decision(
@@ -1203,6 +1752,7 @@ class ReactionChatController:
         status: ReactionOutcomeStatus,
         *,
         frequency: _FrequencyEvidence | None = None,
+        discussion: DiscussionDispatchCorrelation | None = None,
     ) -> None:
         evidence = frequency or _FrequencyEvidence()
         self._outcomes.append(
@@ -1220,6 +1770,7 @@ class ReactionChatController:
                 frequency_draw=evidence.draw,
                 frequency_source_fingerprint=evidence.source_fingerprint,
                 frequency_suppression=evidence.suppression,
+                discussion=discussion,
             )
         )
 
@@ -1263,6 +1814,7 @@ class ReactionChatController:
                     observed_at=observed_at,
                     source_player_id=pending.source_player_id,
                     source_message=pending.source_message,
+                    source_record=pending.source_record,
                     cooldown_deferred=pending.cooldown_deferred,
                 ),
             )

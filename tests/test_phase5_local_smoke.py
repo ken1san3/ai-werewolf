@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import asdict, replace
+from contextlib import ExitStack, contextmanager
+from dataclasses import asdict, dataclass, replace
 import io
 import json
 import os
@@ -11,8 +12,10 @@ import stat
 import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from typing import get_type_hints
 import unittest
 from unittest.mock import AsyncMock, patch
+import pytest
 
 from ai_client.llm import GenerationPriority, GenerationSettings
 from scripts import run_phase5_local_smoke as runner
@@ -90,6 +93,8 @@ def _args(output_dir: Path, **changes: object) -> argparse.Namespace:
         "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
         "model": "local-test-model",
         "q8": False,
+        "phase6_read_timeout_seconds": None,
+        "phase6_request_timeout_seconds": None,
         "q8_provider_timing_diagnostic": False,
         "gpu_model_pid": None,
         "provider_serving_executable_sha256": None,
@@ -2021,5 +2026,940 @@ class PhaseFiveRunnerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(process.terminate_count, 0)
 
 
+
+class Phase6RunnerProfileTests(unittest.TestCase):
+    def test_phase6_plan_is_separate_and_old_q8_profile_is_preserved(self):
+        self.assertEqual(runner.GAME_PLAN.day_seconds, 60)
+        self.assertEqual(runner.PHASE6_GAME_PLAN.day_seconds, 180)
+        expected = asdict(runner.GAME_PLAN)
+        expected.update(day_seconds=180, vote_seconds=60, night_seconds=60)
+        self.assertEqual(asdict(runner.PHASE6_GAME_PLAN), expected)
+        self.assertEqual(runner.PHASE6_GAME_PLAN.max_chat_attempts_per_phase, 2)
+        self.assertEqual([item.row for item in runner.Q8_PLAN], ["Q8-A", "Q8-B", "Q8-C", "Q8-D"])
+        args = runner._parser().parse_args(["--phase6"])
+        self.assertTrue(args.phase6)
+        self.assertFalse(args.q8)
+        self.assertIn("--phase6", runner._sanitized_arguments(args))
+
+    def test_phase6_bootstrap_effective_profile_and_rejects_malformed(self):
+        annotations = get_type_hints(runner.GamePlan)
+        self.assertIs(annotations["day_seconds"], int)
+        self.assertIs(annotations["vote_seconds"], int)
+        self.assertIs(annotations["night_seconds"], int)
+        self.assertEqual(
+            (runner.GAME_PLAN.day_seconds, runner.GAME_PLAN.vote_seconds, runner.GAME_PLAN.night_seconds),
+            (60, 45, 45),
+        )
+        prepared = runner._prepare_run(
+            _args(
+                runner.PROJECT_ROOT / "logs" / "phase6-private-evidence" / "game" /
+                "T296-20260914T120001000000Z",
+                phase6=True,
+                model="Qwen3.5-9B-Q4_K_M.gguf",
+                phase6_read_timeout_seconds=3.5,
+                phase6_request_timeout_seconds=4.0,
+            ),
+            {},
+        )
+        self.assertEqual(prepared.settings.generation.max_output_tokens, 512)
+        for expected in ((180, 60, 60), (240, 90, 90), (600, 60, 60)):
+            plan = replace(
+                runner.PHASE6_GAME_PLAN,
+                day_seconds=expected[0],
+                vote_seconds=expected[1],
+                night_seconds=expected[2],
+            )
+            @dataclass(frozen=True)
+            class Rules:
+                day_seconds: int = 1
+                vote_seconds: int = 1
+                night_seconds: int = 1
+                silence_after_dawn_seconds: int = 1
+
+            @dataclass(frozen=True)
+            class Preset:
+                rules: Rules = Rules()
+
+            effective = runner._apply_game_plan(Preset(), plan)
+            self.assertEqual(
+                (effective.rules.day_seconds, effective.rules.vote_seconds, effective.rules.night_seconds),
+                expected,
+            )
+        settings = runner.LocalLLMSettings(
+            endpoint="http://127.0.0.1:1/v1/chat/completions",
+            model="Qwen3.5-9B-Q4_K_M.gguf",
+            generation=GenerationSettings(max_output_tokens=512),
+            llama_cpp_structured_output=runner.LlamaCppStructuredOutputConfig(),
+        )
+        config = runner.RunConfig(
+            settings, Path("unused"), False, False, None, 1, 1200.0, (), phase6=True
+        )
+        registry = {f"opaque-{index}": f"token-{index}" for index in range(9)}
+        bootstrap = runner._broker_bootstrap(config, registry, "seed")
+        rebuilt = runner._phase5_broker_settings(bootstrap)
+        self.assertEqual(bootstrap["phase6_max_output_tokens"], 512)
+        self.assertEqual(rebuilt.generation.max_output_tokens, 512)
+        self.assertEqual(
+            rebuilt.backend_config().config_fingerprint,
+            settings.backend_config().config_fingerprint,
+        )
+        mismatched = dict(bootstrap)
+        mismatched["parent_config_fingerprint"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+            asyncio.run(runner._broker_child(SimpleNamespace(), mismatched))
+        candidates = [
+            {},
+            {"phase6": True},
+            {"phase6": False, "phase6_max_output_tokens": 512},
+            {"phase6": None, "phase6_max_output_tokens": 512},
+            *(
+                {"phase6": True, "phase6_max_output_tokens": value}
+                for value in ("512", 512.0, True, 511, 513)
+            ),
+        ]
+        for changes in candidates:
+            candidate = dict(bootstrap)
+            candidate.update(changes)
+            if changes == {}:
+                candidate.pop("phase6", None)
+            if changes == {"phase6": True}:
+                candidate.pop("phase6_max_output_tokens", None)
+            with self.assertRaises(ValueError):
+                runner._phase5_broker_settings(candidate)
+        legacy = dict(bootstrap)
+        legacy.pop("phase6")
+        legacy.pop("phase6_max_output_tokens")
+        legacy.pop("parent_config_fingerprint")
+        self.assertEqual(runner._phase5_broker_settings(legacy).generation.max_output_tokens, 96)
+
+    def test_phase6_runner_rejects_invalid_game_output_path(self):
+        valid_parent = runner.PROJECT_ROOT / "logs" / "phase6-private-evidence" / "game"
+        valid = valid_parent / "T296-20260914T120000000000Z"
+        config = runner._prepare_run(
+            _args(valid, phase6=True, model="Qwen3.5-9B-Q4_K_M.gguf",
+                  phase6_read_timeout_seconds=3.5, phase6_request_timeout_seconds=4.0), {}
+        )
+        self.assertEqual(config.settings.generation.max_output_tokens, 512)
+        for invalid in (
+            runner.PROJECT_ROOT / "logs" / "phase6-private-evidence" / "synthetic" / valid.name,
+            valid_parent / "bad",
+            runner.PROJECT_ROOT / valid.name,
+        ):
+            with self.assertRaises(ValueError):
+                runner._prepare_run(
+                    _args(invalid, phase6=True, model="Qwen3.5-9B-Q4_K_M.gguf",
+                          phase6_read_timeout_seconds=3.5, phase6_request_timeout_seconds=4.0), {}
+                )
+
+    def test_phase6_requires_explicit_bounded_timeouts_before_output(self):
+        output = runner.PROJECT_ROOT / "logs" / "phase6-private-evidence" / "game" / "T309-20260915T000000000000Z"
+        pairs = [(None, None), (1, None), (None, 4), (5, 4), (1, 44), (1, 45)]
+        for invalid in (True, "4", 0, -1, float("inf"), float("nan")):
+            pairs.extend(((invalid, 4), (1, invalid)))
+        with patch.object(runner, "_spawn_owned") as spawn:
+            for read, request in pairs:
+                with self.subTest(read=read, request=request), self.assertRaises(ValueError):
+                    runner._prepare_run(_args(
+                        output, phase6=True, model="Qwen3.5-9B-Q4_K_M.gguf",
+                        phase6_read_timeout_seconds=read, phase6_request_timeout_seconds=request,
+                    ), {})
+            for mode in ({}, {"q8": True}, {"q8_provider_timing_diagnostic": True}):
+                with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "require --phase6"):
+                    runner._prepare_run(_args(
+                        output, phase6_read_timeout_seconds=3.5,
+                        phase6_request_timeout_seconds=4, **mode,
+                    ), {})
+            spawn.assert_not_called()
+        self.assertFalse(output.exists())
+
+    def test_phase6_timeout_arguments_bootstrap_and_grace_are_bound(self):
+        output = runner.PROJECT_ROOT / "logs" / "phase6-private-evidence" / "game" / "T309-20260915T000001000000Z"
+        for read, request, drain, shutdown in ((4.0, 4.0, 5.0, 6.0), (12.0, 20.0, 20.0, 20.25), (43.0, 43.5, 43.5, 43.75)):
+            with self.subTest(request=request):
+                args = runner._parser().parse_args([
+                    "--phase6", "--model", "Qwen3.5-9B-Q4_K_M.gguf",
+                    "--output-dir", str(output),
+                    "--phase6-read-timeout-seconds", str(read),
+                    "--phase6-request-timeout-seconds", str(request),
+                ])
+                prepared = runner._prepare_run(args, {})
+                settings = prepared.settings
+                self.assertEqual((settings.read_timeout_seconds, settings.request_timeout_seconds), (read, request))
+                self.assertIn("--phase6-request-timeout-seconds", prepared.sanitized_arguments)
+                wire = runner._broker_bootstrap(prepared, {str(i): "a" * 64 for i in range(9)}, "seed")
+                rebuilt = runner._phase5_broker_settings(wire)
+                self.assertEqual(rebuilt.backend_config().config_fingerprint, settings.backend_config().config_fingerprint)
+                broker = runner._game_broker_config(rebuilt, phase6=True)
+                self.assertEqual((broker.provider_drain_grace_seconds, broker.shutdown_grace_seconds), (drain, shutdown))
+                self.assertEqual(broker.config_fingerprint, runner.GenerationBrokerConfig(
+                    provider_drain_grace_seconds=drain, shutdown_grace_seconds=shutdown,
+                ).config_fingerprint)
+                self.assertEqual(runner._game_broker_config(settings, phase6=False), runner.GenerationBrokerConfig())
+                wire["read_timeout_seconds"] = read / 2
+                with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                    asyncio.run(runner._broker_child(SimpleNamespace(), wire))
+
+    def test_phase6_client_uses_existing_feature_limit_without_network_change(self):
+        from ai_client import Phase5ClientRuntime
+
+        class Captured(Exception):
+            pass
+
+        captured = []
+        async def connect(config, *_args, **_kwargs):
+            captured.append(config)
+            raise Captured
+
+        for phase6 in (False, True):
+            bootstrap = {
+                "phase6": phase6, "uri": "ws://127.0.0.1:1", "game_id": "g",
+                "entry_token": "entry", "player_id": "p", "admission_host": "127.0.0.1",
+                "admission_port": 1, "admission_client_id": "opaque", "admission_token": "a" * 64,
+                "broker_config": asdict(runner.GenerationBrokerConfig()), "discussion_envelope": {},
+            }
+            args = SimpleNamespace(start=Path("unused.start"), audit=Path("unused.audit"), seed=1)
+            with patch.object(Phase5ClientRuntime, "connect", side_effect=connect), \
+                 patch.object(Phase5ClientRuntime, "connect_phase6", side_effect=connect), \
+                 patch("ai_client.discussion.context.validate_discussion_bootstrap", return_value=object()), \
+                 self.assertRaises(Captured):
+                asyncio.run(runner._client_child(args, bootstrap))
+            config = captured[-1]
+            self.assertEqual(config.brain.max_decision_seconds, 44.0 if phase6 else 5.0)
+            self.assertEqual(config.reaction.brain_timeout_seconds, 44.0)
+            self.assertEqual(config.vote_ability.brain_timeout_seconds, 44.0)
+            self.assertEqual(config.network.shutdown_timeout_seconds, 10.0)
+            self.assertEqual(config.reaction.deadline_guard_seconds, 1.0)
+            self.assertEqual(config.brain.cancellation_grace_seconds, 0.25)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_provider_command_line_is_windows_parsed_and_redacted_before_hashing() -> None:
+    argv = ("server.exe", "--api-key", "one", "--password=two", "/token:three", "--port", "8080")
+    with patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
+        observed = runner._provider_observation_from_raw("never persisted")
+    assert observed.command_argv_redacted == ("server.exe", "--api-key", "<redacted>", "--password=<redacted>", "/token:<redacted>", "--port", "8080")
+    assert observed.command_canonical_sha256 == "a8f98c2d2d5b0eb58c140e6740364a6dbb18180fbbcfa3c2259fdf86c858964d"
+
+
+def test_provider_command_line_hash_is_stable_order_sensitive_and_observation_bounded() -> None:
+    def observe(argv):
+        with patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
+            return runner._provider_observation_from_raw("private raw")
+    first = observe(("server", "--token", "one", "--port", "1"))
+    second = observe(("server", "--token", "two", "--port", "1"))
+    changed = observe(("server", "--port", "1", "--token", "two"))
+    assert first.command_canonical_sha256 == second.command_canonical_sha256
+    assert first.command_canonical_sha256 != changed.command_canonical_sha256
+    with unittest.TestCase().assertRaises(ValueError):
+        runner._redact_provider_argv(("server", "--token"))
+
+
+def test_public_preflight_record_contains_only_command_state_and_hash() -> None:
+    observation = runner.ProviderCommandObservation("OBSERVED", ("server", "--token", "<redacted>"), "a" * 64)
+    public = runner._public_provider_command_observation(observation)
+    assert set(public) == {"command_observation", "command_canonical_sha256", "environment_observation"}
+    assert "token" not in json.dumps(public)
+
+
+def test_explicit_provider_preflight_writes_private_record_once_and_returns_public_projection(tmp_path) -> None:
+    root = runner._new_private_subdirectory(tmp_path, "provider-observation")
+    path = root / "provider-observation.json"
+    observed = runner.ProviderCommandObservation(
+        "OBSERVED", ("server.exe", "--token", "<redacted>"), "b" * 64
+    )
+    booleans = {"command_ngl99": True, "command_context8192": True, "command_jinja": True}
+    with patch.object(runner, "_observe_windows_process_command_line", new=AsyncMock(return_value=observed)):
+        public = asyncio.run(runner._record_provider_command_observation(123, path, booleans))
+    private = json.loads(path.read_bytes())
+    assert private == {
+        **booleans, "command_observation": "OBSERVED",
+        "command_argv_redacted": ["server.exe", "--token", "<redacted>"],
+        "command_canonical_sha256": "b" * 64,
+        "environment_observation": "NOT_OBSERVABLE",
+    }
+    assert public == {
+        "command_observation": "OBSERVED", "command_canonical_sha256": "b" * 64,
+        "environment_observation": "NOT_OBSERVABLE",
+    }
+    assert "argv" not in public and "redacted" not in json.dumps(public)
+    with patch.object(runner, "_observe_windows_process_command_line", new=AsyncMock(return_value=observed)), \
+         unittest.TestCase().assertRaises(Exception):
+        asyncio.run(runner._record_provider_command_observation(123, path, booleans))
+
+
+def test_broker_child_metrics_shutdown_preserves_first_error_and_closes_every_resource() -> None:
+    events: list[str] = []
+    primary = RuntimeError("ADMISSION_METRICS_WRITE_FAILED")
+
+    class Broker:
+        async def aclose(self) -> None:
+            events.append("metrics_aclose")
+            raise primary
+
+    class Wrapper:
+        def flush(self) -> None:
+            events.append("wrapper_flush")
+            raise OSError("secondary flush")
+        def fileno(self) -> int:
+            events.append("wrapper_fileno")
+            return -1
+
+    resources = ExitStack()
+    resources.callback(lambda: events.append("locked_context_exit"))
+    resources.callback(lambda: (events.append("wrapper_close"), (_ for _ in ()).throw(OSError("secondary close"))))
+
+    async def exercise() -> None:
+        with unittest.TestCase().assertRaises(RuntimeError) as caught:
+            await runner._close_broker_metrics_resources(Broker(), Wrapper(), resources)  # type: ignore[arg-type]
+        assert caught.exception is primary
+
+    asyncio.run(exercise())
+    assert events == ["metrics_aclose", "wrapper_flush", "wrapper_close", "locked_context_exit"]
+
+
+def test_actual_broker_child_preserves_acquisition_and_ready_errors_during_cleanup(tmp_path) -> None:
+    from ai_client.llm.types import BackendIdentity
+    from scripts import phase6_private_review as private_review
+    settings = runner.LocalLLMSettings(
+        endpoint="http://127.0.0.1:1/v1/chat/completions",
+        model="Qwen3.5-9B-Q4_K_M.gguf",
+        generation=GenerationSettings(max_output_tokens=512),
+        llama_cpp_structured_output=runner.LlamaCppStructuredOutputConfig(),
+    )
+    config = runner.RunConfig(settings, tmp_path, False, False, None, 1, 10.0, (), phase6=True)
+    bootstrap = runner._broker_bootstrap(
+        config, {f"opaque-{index}": f"token-{index}" for index in range(9)}, "seed"
+    )
+    args = SimpleNamespace(metrics=tmp_path / "admission.jsonl", ready=tmp_path / "ready.json")
+    events: list[str] = []
+
+    class Wrapper:
+        def __enter__(self): events.append("wrapper_enter"); return self
+        def __exit__(self, *_args): events.append("wrapper_close")
+        def flush(self): events.append("wrapper_flush"); raise OSError("secondary flush")
+        def fileno(self): return 1
+
+    @contextmanager
+    def locked(*_args, **_kwargs):
+        events.append("locked_enter")
+        try: yield 123
+        finally: events.append("locked_exit")
+
+    primary_ctor = RuntimeError("metrics ctor primary")
+    with patch.object(private_review, "_locked_path", locked), \
+         patch.object(runner.os, "fdopen", return_value=Wrapper()), \
+         patch.object(runner, "AdmissionMetrics", side_effect=primary_ctor), \
+         unittest.TestCase().assertRaises(RuntimeError) as caught:
+        asyncio.run(runner._broker_child(args, bootstrap))
+    assert caught.exception is primary_ctor
+    assert events == ["locked_enter", "wrapper_enter", "wrapper_close", "locked_exit"]
+
+    events.clear()
+    primary_ready = RuntimeError("ready primary")
+    class Metrics:
+        async def aclose(self): events.append("metrics_close")
+    class Backend:
+        identity = BackendIdentity("fake", "http://127.0.0.1:1", "/v1", "model", "0" * 64)
+        async def aclose(self): events.append("backend_close")
+    class Broker:
+        async def start(self):
+            return SimpleNamespace(host="127.0.0.1", port=1, protocol="p", backend_identity=Backend.identity, config_fingerprint="0" * 64)
+        async def aclose(self): events.append("broker_close"); raise OSError("secondary broker close")
+    with patch.object(private_review, "_locked_path", locked), \
+         patch.object(runner.os, "fdopen", return_value=Wrapper()), \
+         patch.object(runner, "AdmissionMetrics", return_value=Metrics()), \
+         patch.object(runner, "OpenAICompatibleBackend", return_value=Backend()), \
+         patch.object(runner, "GenerationAdmissionBroker", return_value=Broker()), \
+         patch.object(runner, "_write_private_json_atomic", side_effect=primary_ready), \
+         unittest.TestCase().assertRaises(RuntimeError) as caught:
+        asyncio.run(runner._broker_child(args, bootstrap))
+    assert caught.exception is primary_ready
+    assert events == ["locked_enter", "wrapper_enter", "broker_close", "wrapper_flush", "wrapper_close", "locked_exit"]
+
+
+def test_http_error_detail_never_reaches_public_and_writer_failure_is_finite(tmp_path) -> None:
+    from ai_client.llm import admission_metrics as metrics_module
+    from ai_client.llm.admission_metrics import AdmissionMetric, AdmissionMetrics, AdmissionMetricsWriteError, serialize_admission_metric
+    from ai_client.llm.types import ProviderQuiescence
+    async def exercise() -> None:
+        detail = "private sentinel"
+        metric = AdmissionMetric(event="PROVIDER_CALL_TERMINAL", backend_code="HTTP_STATUS",
+                                 backend_error_detail=detail, http_status=400, retryable=False,
+                                 provider_quiescence=ProviderQuiescence.PROVEN_TERMINAL)
+        default_serialized = serialize_admission_metric(metric)
+        assert detail.encode() not in default_serialized and b"backend_error_detail" not in default_serialized
+        serialized = {
+            **json.loads(default_serialized),
+            "backend_error_detail": detail,
+        }
+        assert serialized["backend_error_detail"] == detail
+        assert set(serialized) == {
+            "backend_code", "backend_error_detail", "call_ordinal", "client_id", "consumer_state",
+            "event", "generation_latency_microseconds", "http_status", "invocation_id",
+            "monotonic_microseconds", "poison_transition", "priority", "provider_quiescence",
+            "provider_completion_microseconds", "provider_prompt_microseconds",
+            "provider_timing_diagnostic_status", "provider_timing_prompt_n_state",
+            "provider_timing_prompt_ms_state", "provider_timing_predicted_n_state",
+            "provider_timing_predicted_ms_state", "provider_timing_extra_key_count",
+            "prompt_tokens", "completion_tokens", "queue_wait_microseconds", "request_bytes",
+            "response_bytes", "retryable", "sequence", "terminal_status",
+        }
+        raw = runner._raw_records("B01", [serialized])
+        assert raw[0]["backend_error_detail"] == detail
+        public = runner._strip_raw({"success": False, "raw_metrics": raw})
+        assert public == {"success": False} and detail not in json.dumps(public)
+        aggregates = runner._metric_aggregates([serialized])
+        assert detail not in json.dumps(aggregates) and "backend_error_detail" not in aggregates
+        memory = AdmissionMetrics(2)
+        await memory.start(); assert memory.record_nowait(metric); await memory.flush()
+        assert memory.records[0].backend_error_detail is None
+        await memory.aclose()
+        path_only = AdmissionMetrics(2, path=tmp_path / "legacy.jsonl")
+        await path_only.start(); assert path_only.record_nowait(metric); await path_only.aclose()
+        assert detail.encode() not in (tmp_path / "legacy.jsonl").read_bytes()
+        normal_path = tmp_path / "normal.jsonl"
+        with normal_path.open("w+b") as handle:
+            normal = AdmissionMetrics(2, handle=handle)
+            await normal.start()
+            assert normal.record_nowait(metric) and normal.record_nowait(metric)
+            await normal.aclose()
+            assert normal.dropped_records == 0 and len(normal.records) == 2
+        full = AdmissionMetrics(1)
+        await full.start()
+        assert full.record_nowait(metric) and not full.record_nowait(metric)
+        assert full.dropped_records == 1
+        await full.aclose()
+        with (tmp_path / "failed.jsonl").open("w+b") as handle:
+            private = AdmissionMetrics(2, handle=handle)
+            await private.start()
+            with patch.object(private, "_durable_write", side_effect=OSError):
+                assert private.record_nowait(metric)
+                with unittest.TestCase().assertRaises(AdmissionMetricsWriteError):
+                    await asyncio.wait_for(private.flush(), 1.0)
+                with unittest.TestCase().assertRaises(AdmissionMetricsWriteError):
+                    await asyncio.wait_for(private.aclose(), 1.0)
+        for failure_site in ("serialize", "write", "fsync"):
+            path = tmp_path / f"{failure_site}.jsonl"
+            with path.open("w+b") as handle:
+                failed = AdmissionMetrics(2, handle=handle)
+                await failed.start()
+                if failure_site == "serialize":
+                    context = patch.object(metrics_module, "_serialize_admission_metric", side_effect=ValueError)
+                elif failure_site == "write":
+                    context = patch.object(failed, "_durable_write", side_effect=OSError)
+                else:
+                    context = patch.object(metrics_module.os, "fsync", side_effect=OSError)
+                with context:
+                    assert failed.record_nowait(metric)
+                    with unittest.TestCase().assertRaises(AdmissionMetricsWriteError):
+                        await asyncio.wait_for(failed.flush(), 1.0)
+                    with unittest.TestCase().assertRaises(AdmissionMetricsWriteError):
+                        await asyncio.wait_for(failed.aclose(), 1.0)
+                assert not handle.closed
+    asyncio.run(exercise())
+    from scripts import phase6_private_review as private_review
+    locked_root = runner._new_private_subdirectory(tmp_path, "locked-metrics")
+    target = locked_root / "admission.jsonl"
+    with private_review._locked_path(target, create=True) as descriptor:
+        os.write(descriptor, b"{}\n")
+    with unittest.TestCase().assertRaises(private_review.ReviewFailure):
+        with private_review._locked_path(target, create=True):
+            pass
+    rejected = locked_root / "rejected.jsonl"
+    with patch.object(private_review, "_windows_private_path", return_value=False), \
+         unittest.TestCase().assertRaises(private_review.ReviewFailure):
+        with private_review._locked_path(rejected, create=True):
+            pass
+
+
+class _CommandStdout:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+        self._offset = 0
+        self.closed = False
+        self.read_sizes: list[int] = []
+
+    async def read(self, size: int) -> bytes:
+        self.read_sizes.append(size)
+        value = self._payload[self._offset:self._offset + size]
+        self._offset += len(value)
+        return value
+
+class _CommandProcess:
+    def __init__(self, payload: bytes, returncode: int = 0, timeouts: int = 0) -> None:
+        self.stdout = _CommandStdout(payload)
+        self.returncode = returncode
+        self._timeouts = timeouts
+        self.terminate_count = 0
+        self.kill_count = 0
+        self.wait_count = 0
+        self._exit = asyncio.Event()
+
+    async def wait(self) -> int:
+        self.wait_count += 1
+        if self._timeouts:
+            await self._exit.wait()
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminate_count += 1
+        if self._timeouts:
+            self._timeouts -= 1
+        if not self._timeouts:
+            self.returncode = -15
+            self._exit.set()
+
+    def kill(self) -> None:
+        self.kill_count += 1
+        if self._timeouts:
+            self._timeouts -= 1
+        if not self._timeouts:
+            self.returncode = -9
+            self._exit.set()
+
+
+def _cim_payload(raw: str) -> bytes:
+    import base64
+    return json.dumps({
+        "status": "OBSERVED",
+        "command_line_base64": base64.b64encode(raw.encode()).decode("ascii"),
+    }, separators=(",", ":")).encode()
+
+
+def test_provider_command_observer_executes_bounded_cim_mapping_and_redaction() -> None:
+    process = _CommandProcess(_cim_payload("private raw"))
+    argv = ("server.exe", "--api-key", "secret", "--port", "8080")
+    calls = []
+    async def create(*args, **kwargs):
+        calls.append((args, kwargs)); return process
+    with patch.object(runner.shutil, "which", return_value="powershell.exe"), \
+         patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
+        observation = asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create))
+    assert observation.command_observation == "OBSERVED"
+    assert observation.command_argv_redacted == ("server.exe", "--api-key", "<redacted>", "--port", "8080")
+    assert observation.environment_observation == "NOT_OBSERVABLE"
+    _, kwargs = calls[0]
+    assert kwargs["stdin"] is runner.asyncio.subprocess.DEVNULL
+    assert kwargs["stderr"] is runner.asyncio.subprocess.DEVNULL
+    assert kwargs["stdout"] is runner.asyncio.subprocess.PIPE
+    assert kwargs["creationflags"] == getattr(runner.subprocess, "CREATE_NO_WINDOW", 0)
+    assert process.terminate_count == process.kill_count == 0
+    assert set(process.stdout.read_sizes) == {4096}
+    exact_payload = _cim_payload("private raw")
+    exact_process = _CommandProcess(exact_payload + b" " * (131072 - len(exact_payload)))
+    async def create_exact(*_args, **_kwargs): return exact_process
+    with patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
+        exact = asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create_exact))
+    assert exact.command_observation == "OBSERVED"
+    assert set(exact_process.stdout.read_sizes) == {4096}
+
+
+def test_provider_command_observer_maps_exit_parse_oversize_and_timeout_finitely() -> None:
+    with patch.object(runner.shutil, "which", return_value="powershell.exe"):
+        for code, expected in ((10, "PROCESS_NOT_FOUND"), (11, "ACCESS_DENIED"), (12, "EMPTY"), (13, "OS_ERROR")):
+            process = _CommandProcess(b"", code)
+            async def create(*_args, **_kwargs): return process
+            value = asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create))
+            assert value.command_observation == expected
+            assert value.command_argv_redacted is value.command_canonical_sha256 is None
+        invalid_payloads = (
+            b"not-json",
+            b'{"status":"OBSERVED"}',
+            b'{"status":"WRONG","command_line_base64":""}',
+            b'{"status":"OBSERVED","command_line_base64":"***"}',
+            b"[]",
+            b"x" * 131073,
+        )
+        for payload in invalid_payloads:
+            process = _CommandProcess(payload)
+            async def create(*_args, **_kwargs): return process
+            assert asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create)).command_observation == "PARSE_FAILED"
+        process = _CommandProcess(b"", returncode=-9, timeouts=2)
+        process.returncode = None
+        async def create(*_args, **_kwargs): return process
+        value = asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create))
+        assert value.command_observation == "OS_ERROR"
+        assert process.terminate_count == 1
+        stuck = _CommandProcess(b"", returncode=-9, timeouts=3)
+        stuck.returncode = None
+        async def create_stuck(*_args, **_kwargs): return stuck
+        with unittest.TestCase().assertRaises(runner.ProviderObservationCleanupError):
+            asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create_stuck))
+        async def create_error(*_args, **_kwargs): raise OSError
+        assert asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create_error)).command_observation == "OS_ERROR"
+        no_stdout = _CommandProcess(b"", timeouts=1)
+        no_stdout.returncode = None
+        no_stdout.stdout = None
+        async def create_no_stdout(*_args, **_kwargs): return no_stdout
+        assert asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create_no_stdout)).command_observation == "PARSE_FAILED"
+        assert no_stdout.returncode is not None and no_stdout.terminate_count == 1
+        class LookupRaceProcess(_CommandProcess):
+            def terminate(self) -> None:
+                super().terminate()
+                raise ProcessLookupError
+        lookup = LookupRaceProcess(b"", timeouts=1)
+        lookup.returncode = None
+        async def create_lookup(*_args, **_kwargs): return lookup
+        value = asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create_lookup))
+        assert value.command_observation == "OS_ERROR"
+        assert lookup.returncode is not None and lookup.terminate_count == 1
+    with patch.object(runner.shutil, "which", return_value=None):
+        assert asyncio.run(runner._observe_windows_process_command_line(123)).command_observation == "OS_ERROR"
+
+
+def test_provider_command_parser_and_redaction_failure_bounds() -> None:
+    for raw in ("a\0b", "x" * 32768):
+        with unittest.TestCase().assertRaises(ValueError):
+            runner._windows_command_line_to_argv(raw)
+    cases = (
+        (("server", "--token"), "REDACTION_INVALID"),
+        (("server", "--token", "--port"), "REDACTION_INVALID"),
+        (("server", "--token="), "REDACTION_INVALID"),
+        (("server", "Bearer private"), "REDACTION_BLOCKED"),
+        (("server", "http://user:private@host/x"), "REDACTION_BLOCKED"),
+        (("server", '--config={"api_key":"private"}'), "REDACTION_BLOCKED"),
+        (("server", "--config", "password=private"), "REDACTION_BLOCKED"),
+    )
+    for argv, expected in cases:
+        with patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
+            observed = runner._provider_observation_from_raw("never emitted")
+        assert observed.command_observation == expected
+        assert observed.command_argv_redacted is observed.command_canonical_sha256 is None
+    with patch.object(runner, "_windows_command_line_to_argv", side_effect=ValueError("native failure")):
+        assert runner._provider_observation_from_raw("private").command_observation == "PARSE_FAILED"
+
+    class NativeFunction:
+        def __init__(self, callback):
+            self.callback = callback
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    import ctypes
+    storage = (ctypes.c_wchar_p * 1)("server.exe")
+    pointer = ctypes.cast(storage, ctypes.POINTER(ctypes.c_wchar_p))
+    def argv_result(_raw, argc):
+        argc._obj.value = 1
+        return pointer
+    shell = SimpleNamespace(CommandLineToArgvW=NativeFunction(argv_result))
+    kernel = SimpleNamespace(LocalFree=NativeFunction(lambda _pointer: 1))
+    with patch.object(runner.ctypes, "windll", SimpleNamespace(shell32=shell, kernel32=kernel), create=True), \
+         unittest.TestCase().assertRaisesRegex(ValueError, "LocalFree"):
+        runner._windows_command_line_to_argv("server.exe")
+    shell.CommandLineToArgvW = NativeFunction(lambda _raw, _argc: None)
+    with patch.object(runner.ctypes, "windll", SimpleNamespace(shell32=shell, kernel32=kernel), create=True), \
+         unittest.TestCase().assertRaisesRegex(ValueError, "CommandLineToArgvW"):
+        runner._windows_command_line_to_argv("server.exe")
+    def too_many(_raw, argc):
+        argc._obj.value = 257
+        return pointer
+    shell.CommandLineToArgvW = NativeFunction(too_many)
+    kernel.LocalFree = NativeFunction(lambda _pointer: None)
+    with patch.object(runner.ctypes, "windll", SimpleNamespace(shell32=shell, kernel32=kernel), create=True), \
+         unittest.TestCase().assertRaisesRegex(ValueError, "argv count"):
+        runner._windows_command_line_to_argv("server.exe")
+
+
+def _run_recovery_fixture(tmp_path, *, failure_wait=4, primary=TimeoutError,
+                          fault=None, phase6=True):
+    """Real closed-file readers/writer; synthetic child lifecycle, no provider."""
+    root = tmp_path / "run"
+    settings = runner.LocalLLMSettings(
+        endpoint="http://127.0.0.1:1/v1/chat/completions",
+        model="Qwen3.5-9B-Q4_K_M.gguf",
+        generation=GenerationSettings(max_output_tokens=512 if phase6 else 96),
+        llama_cpp_structured_output=runner.LlamaCppStructuredOutputConfig() if phase6 else None,
+    )
+    config = runner.RunConfig(settings, root, False, False, None, 1, 10.0, (), phase6=phase6)
+    broker_config = runner._game_broker_config(settings, phase6=phase6)
+    events, clients = [], []
+    waits = 0
+    closed = False
+    metadata = None
+    def write(path, value):
+        path.write_text(json.dumps(value), encoding="utf-8")
+    async def spawn(owned, *, label, arguments, **kwargs):
+        item = runner.OwnedProcess(label, _FinishedProcess(500 + len(owned)), root / "stdout", root / "stderr")
+        owned.append(item)
+        if label == "server":
+            write(root / "server.ready.json", {"player_ids": [f"player-{i}" for i in range(9)], "game_id": "private-game-sentinel", "uri": "ws://unused"})
+        elif label == "broker":
+            nonlocal metadata
+            metadata = Path(arguments[arguments.index("--metrics") + 1])
+            write(root / "broker.ready.json", {
+                "config": asdict(broker_config), "config_fingerprint": broker_config.config_fingerprint,
+                "host": "unused", "port": 1,
+                "backend_identity": {"config_fingerprint": settings.backend_config().config_fingerprint},
+            })
+        else:
+            clients.append((label, Path(arguments[arguments.index("--audit") + 1])))
+        return item
+    def materialize():
+        if metadata is None:
+            return
+        for player, audit in clients:
+            audit.write_text("", encoding="utf-8")
+            write(root / f"{player}.status.json", {
+                "audit": {"path": str(audit.relative_to(metadata.parent)).replace("\\", "/")},
+                "reaction": {"chat_brain_invocations": 0}, "unused_private": "private-sentinel",
+            })
+        write(root / "server.result.json", {"game_end": False, "accepted_text": [], "accepted_chats": [], "accepted_reservations": []})
+        write(root / "broker.result.json", {"shutdown_clean": True, "metrics_dropped": 0})
+        metadata.write_text("".join(json.dumps({"event": "PROVIDER_CALL_TERMINAL", "invocation_id": f"call-{i}", "call_ordinal": 1, "backend_code": "HTTP_STATUS", "http_status": 400, "prompt_tokens": None, "completion_tokens": None, "unused_private": "private-sentinel"}) + "\n" for i in range(107)), encoding="utf-8")
+        if fault and fault.startswith(("missing:", "malformed:")):
+            kind, source = fault.split(":")
+            target = {"status": root / "player-0.status.json", "server": root / "server.result.json", "broker": root / "broker.result.json", "metrics": metadata}[source]
+            if kind == "missing":
+                target.unlink()
+            else:
+                target.write_text("[invalid-private-sentinel", encoding="utf-8")
+        if fault == "existing_manifest":
+            (metadata.parent / "manifest.json").write_text('{"preserved":true}', encoding="utf-8")
+    async def wait(*args):
+        nonlocal waits
+        waits += 1
+        if waits == failure_wait:
+            events.append("wait_error")
+            raise primary("private-sentinel")
+        if waits == 6 and not failure_wait:
+            materialize()
+    original_stop = runner._touch_stop
+    def touch(paths):
+        events.append("stop")
+        if fault == "stop":
+            raise OSError("private-sentinel")
+        original_stop(paths)
+    async def cleanup(owned, model_pid):
+        nonlocal closed
+        events.append("cleanup")
+        if fault == "cleanup":
+            raise OSError("private-sentinel")
+        materialize()
+        closed = True
+        events.append("closed")
+        rows = []
+        for item in owned:
+            item.touched = "wait"
+            if fault == "alive":
+                item.process.returncode = None
+            rows.append({"label": item.label, "pid": item.process.pid, "returncode": item.process.returncode, "alive": item.process.returncode is None, "action": item.touched})
+        if fault == "cleanup_shape":
+            return None
+        if fault == "cleanup_row":
+            rows[0] = None
+        if fault == "cleanup_count":
+            rows.pop()
+        if fault == "cleanup_type":
+            rows[0]["alive"] = 0
+        if fault == "cleanup_identity":
+            rows[0]["pid"] = 9999
+        return rows
+    original_read = runner._read_json
+    original_lines = runner._read_jsonl
+    def read(path):
+        if path.name.endswith((".status.json", ".result.json")):
+            events.append("read")
+            if failure_wait and phase6:
+                assert closed
+        return original_read(path)
+    def lines(path):
+        events.append("read_lines")
+        if failure_wait and phase6:
+            assert closed
+        return original_lines(path)
+    original_writer = runner._write_phase6_evidence
+    def writer(*args):
+        events.append("write")
+        if fault in {"writer_value", "writer_exists", "writer_population"}:
+            raise {"writer_value": ValueError("private-sentinel"), "writer_exists": FileExistsError("private-sentinel"), "writer_population": runner.Phase6PopulationExceeded(513)}[fault]
+        return original_writer(*args)
+    def validate(**kwargs):
+        events.append("validate")
+        if fault == "validator":
+            raise OSError("private-sentinel")
+        return runner._validate_manifest(kwargs["manifest"], kwargs["ai_dir"])
+    replacements = {
+        "_spawn_owned": spawn, "_wait_for_paths": wait, "_touch_stop": touch,
+        "_cleanup_owned_shielded": cleanup, "_read_json": read, "_read_jsonl": lines,
+        "_write_phase6_evidence": writer, "_validate_game_evidence": validate,
+        "_consume_phase6_relay": lambda *args: {f"player-{i}": {} for i in range(9)},
+        "_random_private_identities": lambda players: (
+            {player: f"opaque-private-sentinel-{i}" for i, player in enumerate(players)},
+            {f"opaque-private-sentinel-{i}": f"token-{i}" for i in range(9)},
+            [f"entry-{i}" for i in range(9)],
+        ),
+    }
+    with ExitStack() as stack:
+        for name, value in replacements.items():
+            stack.enter_context(patch.object(runner, name, value))
+        recovery = stack.enter_context(patch.object(runner, "_recover_phase6_wait_failure_evidence", wraps=runner._recover_phase6_wait_failure_evidence))
+        if fault == "recovery":
+            recovery.side_effect = OSError("private-sentinel")
+        for selected, name in (("metric_aggregate", "_metric_aggregates"),
+                               ("speaking_aggregate", "_speaking_aggregates"),
+                               ("artifact", "_artifact_hashes")):
+            if fault == selected or (fault == "both_aggregates" and selected != "artifact"):
+                stack.enter_context(patch.object(runner, name, side_effect=OSError("private-sentinel")))
+        row = asyncio.run(runner._run_game(config, root, label="synthetic", environ={}))
+    return row, events, metadata.parent if metadata else None, recovery.call_count
+
+
+@pytest.mark.parametrize("failure_wait", [4, 5, 6])
+def test_phase6_recovers_107_calls_only_after_cleanup(tmp_path, failure_wait):
+    row, events, ai_dir, recovered = _run_recovery_fixture(tmp_path, failure_wait=failure_wait)
+    assert row["errors"][0] == "TimeoutError"
+    assert row["success"] is row["machine_semantic_pass"] is False
+    assert len(row["raw_metrics"]) == row["metrics"]["provider_calls"] == 107
+    assert row["metrics"]["backend_failure_count"] == 107
+    assert row["metrics"]["provider_timing_complete"] is False
+    assert events.index("wait_error") < events.index("stop") < events.index("closed") < events.index("read") < events.index("write")
+    assert events.count("write") == events.count("validate") == recovered == 1
+    assert runner._validate_manifest(ai_dir / "manifest.json", ai_dir) == []
+    assert "private-sentinel" not in json.dumps(runner._strip_raw(row))
+    assert "queue_by_opaque_client" not in row["metrics"]
+    inventory = json.dumps(row["artifacts"])
+    assert "opaque-private-sentinel" in inventory and "private-game-sentinel" in inventory
+    public = runner._strip_raw(row)
+    assert "artifacts" not in public and "_phase6_wait_failure" not in public
+    assert "opaque-private-sentinel" not in json.dumps(public)
+    assert "private-game-sentinel" not in json.dumps(public)
+    assert json.dumps(row["artifacts"]) == inventory
+
+
+@pytest.mark.parametrize("kind", ["missing", "malformed"])
+@pytest.mark.parametrize("source,code", [("status", "CLIENT_STATUS_INCOMPLETE"), ("server", "SERVER_RESULT_UNAVAILABLE"), ("broker", "BROKER_RESULT_UNAVAILABLE"), ("metrics", "METRICS_UNAVAILABLE")])
+def test_phase6_recovery_requires_all_original_sources(tmp_path, kind, source, code):
+    row, events, ai_dir, _ = _run_recovery_fixture(tmp_path, fault=f"{kind}:{source}")
+    assert row["errors"][0] == "TimeoutError"
+    assert "PHASE6_RECOVERY_" + code in row["errors"]
+    assert "write" not in events and not (ai_dir / "manifest.json").exists()
+    assert row["success"] is False
+    if source == "metrics":
+        assert row["metrics"] == {} and row["raw_metrics"] == []
+    else:
+        assert row["metrics"]["provider_calls"] == 107
+    assert "private-sentinel" not in json.dumps(runner._strip_raw(row))
+
+
+@pytest.mark.parametrize("fault", ["stop", "cleanup", "cleanup_shape", "cleanup_row", "cleanup_count", "cleanup_type", "cleanup_identity", "alive"])
+def test_phase6_recovery_rejects_unproven_cleanup(tmp_path, fault):
+    row, events, _, recovered = _run_recovery_fixture(tmp_path, fault=fault)
+    assert row["errors"][0] == "TimeoutError"
+    assert row["errors"].count("PHASE6_RECOVERY_CLEANUP_INCOMPLETE") == 1
+    assert recovered == 0 and events.count("cleanup") == 1
+    assert "read" not in events and "read_lines" not in events and "write" not in events
+    if fault not in {"stop", "alive"}:
+        assert row["cleanup"] == []
+    assert "private-sentinel" not in json.dumps(runner._strip_raw(row))
+
+
+@pytest.mark.parametrize("fault,code", [("writer_value", "MANIFEST_REJECTED"), ("writer_exists", "MANIFEST_REJECTED"), ("writer_population", "MANIFEST_REJECTED"), ("validator", "VALIDATION_UNAVAILABLE"), ("metric_aggregate", "METRIC_AGGREGATE_UNAVAILABLE"), ("speaking_aggregate", "SPEAKING_AGGREGATE_UNAVAILABLE"), ("artifact", "ARTIFACT_HASH_UNAVAILABLE")])
+def test_phase6_secondary_failures_preserve_primary(tmp_path, fault, code):
+    row, events, ai_dir, _ = _run_recovery_fixture(tmp_path, fault=fault)
+    assert row["errors"][0] == "TimeoutError"
+    assert "PHASE6_RECOVERY_" + code in row["errors"]
+    if fault.startswith("writer_"):
+        assert not (ai_dir / "manifest.json").exists()
+    if fault == "metric_aggregate":
+        assert row["metrics"] == {}
+    if fault == "speaking_aggregate":
+        assert row["speaking"] == {}
+    if fault == "artifact":
+        assert row["artifacts"] == []
+    assert "private-sentinel" not in json.dumps(runner._strip_raw(row))
+
+
+def test_phase6_recovery_keeps_cancellation_and_existing_manifest(tmp_path):
+    row, events, ai_dir, _ = _run_recovery_fixture(tmp_path, primary=asyncio.CancelledError, fault="existing_manifest")
+    assert row["errors"][:2] == ["CancelledError", "CANCELLED"]
+    assert events.count("validate") == 1 and "write" not in events
+    assert (ai_dir / "manifest.json").read_text() == '{"preserved":true}'
+
+
+@pytest.mark.parametrize("phase6,failure_wait", [(True, 0), (True, 2), (False, 4)])
+def test_phase6_recovery_does_not_change_other_paths(tmp_path, phase6, failure_wait):
+    row, events, _, recovered = _run_recovery_fixture(tmp_path, phase6=phase6, failure_wait=failure_wait)
+    assert recovered == 0
+    assert not any(code.startswith("PHASE6_RECOVERY_") for code in row["errors"])
+    if failure_wait == 0:
+        assert events.count("write") == 1
+
+
+def test_phase6_request_profile_bootstrap_is_explicit_and_strict(tmp_path):
+    prepared = runner._prepare_run(_args(
+        runner.PROJECT_ROOT / "logs/phase6-private-evidence/game/T351-20260915T090000000000Z",
+        phase6=True, model="Qwen3.5-9B-Q4_K_M.gguf", phase6_read_timeout_seconds=20.0,
+        phase6_request_timeout_seconds=20.0,
+    ), {})
+    profile = runner.LlamaCppStructuredOutputConfig()
+    assert prepared.settings.llama_cpp_structured_output == profile
+    wire = runner._broker_bootstrap(prepared, {}, "seed")
+    rebuilt = runner._phase5_broker_settings(wire)
+    assert rebuilt.backend_config().config_fingerprint == prepared.settings.backend_config().config_fingerprint
+    assert wire["llama_cpp_structured_output"] == {"reasoning_format": "deepseek", "enable_thinking": False}
+    invalid = [None, {}, {"reasoning_format": "none", "enable_thinking": False},
+               {"reasoning_format": "deepseek", "enable_thinking": 0},
+               {"reasoning_format": "deepseek", "enable_thinking": "false"},
+               {"reasoning_format": "deepseek", "enable_thinking": False, "extra": 0}]
+    for value in invalid:
+        with pytest.raises((TypeError, ValueError)):
+            runner._phase5_broker_settings({**wire, "llama_cpp_structured_output": value})
+    wire.pop("llama_cpp_structured_output")
+    with pytest.raises(ValueError):
+        runner._phase5_broker_settings(wire)
+    legacy = runner._prepare_run(_args(tmp_path / "legacy"), {})
+    assert legacy.settings.llama_cpp_structured_output is None
+    assert runner._phase5_broker_settings(runner._broker_bootstrap(legacy, {}, "seed")).llama_cpp_structured_output is None
+
+
+@pytest.mark.parametrize("failure_point", ["rglob", "stat", "hash"])
+def test_phase6_recovery_artifact_io_fails_closed(tmp_path, failure_point):
+    (tmp_path / "safe.json").write_text("{}")
+    target = {"rglob": (Path, "rglob"), "stat": (Path, "stat"), "hash": (runner, "_sha256_file")}[failure_point]
+    errors = ["TimeoutError"]
+    with patch.object(*target, side_effect=OSError("private-path-sentinel")):
+        row = runner._phase6_wait_failure_row(root=tmp_path, label="test", errors=errors, cleanup=[], recovered={"metrics_available": True, "metrics": [], "server": {}, "broker": {}})
+    assert row["errors"][0] == "TimeoutError"
+    assert "PHASE6_RECOVERY_ARTIFACT_HASH_UNAVAILABLE" in row["errors"]
+    assert row["artifacts"] == []
+    assert "private-path-sentinel" not in json.dumps(row)
+
+
+def test_phase6_recovery_projection_rejects_private_malformed_values(tmp_path):
+    private = "private-projection-sentinel"
+    recovered = {"metrics_available": True, "metrics": [], "server": {
+        "game_end": private, "accepted_chats": private, "accepted_reservations": private,
+        "total_game_wall_microseconds": private,
+        "phase_wall_durations": [{"phase": private, "day": 0, "wall_microseconds": 1}],
+    }, "broker": {"shutdown_clean": private, "maximum_pending": private, "metrics_dropped": private}}
+    row = runner._phase6_wait_failure_row(root=tmp_path, label="test", errors=["TimeoutError"], cleanup=[], recovered=recovered)
+    assert all(value is None for value in row["server"].values())
+    assert all(value is None for value in row["broker"].values())
+    assert private not in json.dumps(row)
+
+
+@pytest.mark.parametrize("fault,code", [("stop", "CLEANUP_INCOMPLETE"), ("cleanup", "CLEANUP_INCOMPLETE"), ("recovery", "FAILED")])
+def test_phase6_cancellation_survives_secondary_failure(tmp_path, fault, code):
+    row, events, _, _ = _run_recovery_fixture(tmp_path, primary=asyncio.CancelledError, fault=fault)
+    assert row["errors"][:2] == ["CancelledError", "CANCELLED"]
+    assert "PHASE6_RECOVERY_" + code in row["errors"]
+    assert row["success"] is False
+    assert events.count("cleanup") == 1
+    assert "private-sentinel" not in json.dumps(runner._strip_raw(row))
+
+
+def test_phase6_both_aggregate_failures_are_independent(tmp_path):
+    row, _, _, _ = _run_recovery_fixture(tmp_path, fault="both_aggregates")
+    assert row["errors"][0] == "TimeoutError"
+    assert "PHASE6_RECOVERY_METRIC_AGGREGATE_UNAVAILABLE" in row["errors"]
+    assert "PHASE6_RECOVERY_SPEAKING_AGGREGATE_UNAVAILABLE" in row["errors"]
+    assert row["metrics"] == row["speaking"] == {}
+    assert len(row["raw_metrics"]) == 107
+    assert "private-sentinel" not in json.dumps(runner._strip_raw(row))
+
+
+def test_recovery_projection_preserves_legacy_artifact_contract():
+    ordinary = {"artifacts": [{"path": "legacy", "sha256": "a" * 64}], "raw_metrics": []}
+    assert runner._strip_raw(ordinary) == {"artifacts": ordinary["artifacts"]}

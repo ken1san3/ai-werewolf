@@ -28,6 +28,8 @@ Thumbs.db
 
 # local test/session artifacts
 _to_delete/
+# 実LLMのprivate transcriptを含む既存ローカル証拠。削除・移動しない。
+/.phase4-real-*/
 
 # test leftovers (R-20260830-01 の暫定保険)
 tmp*/

@@ -1,0 +1,9 @@
+# 完了済みclaimとstale/cancelの競合による解放漏れ
+
+T313が、実broker/sessionとfake backendの限定probeで再現。claim taskがGRANTED完了した直後にcontext失効を固定すると、`_await_claim`はSTALEを返し、完了済taskへのcancelは効かず、呼出元もlease ownershipを受け取らないためclaimed entryが残った。provider callは0。明示RELEASE後にpending0へ戻った。原本はlogs/t313-investigationと同task handoffに保持する。
+
+T312のsynthetic完走失敗原本候補もclaimed残存と後続期限切れを示したが、その過去原本とrunnerには直接producer/hash結合がなく、時刻・命名・内容相関の範囲に限る。今回再現した欠陥をT312全失敗の唯一原因と断定しない。旧JUnitの1 FAIL、内部TimeoutError、旧原本欠落を含む他履歴は不変。
+
+T309の限定修正は、呼出元がterminalを受け取った際にdone/非cancelled/例外なし/exact GRANTEDだけを回収し、既存ownerとしてRELEASE後に元のSTALE/CANCELLEDを返す9行。watcher例外の優先順、未完了claim補償、provider/broker状態、API、timeoutは変更しない。既存testへstale/cancel/watcher exceptionの3subcaseを追加。修正前はRELEASE0で3失敗、修正後の開発100case PASS。
+
+独立T315は修正後source5で固定696case PASSとsynthetic完走1case PASS（908.408秒、errors0、cleanup11/alive0）。T314は原本hashとCIM parent-child11件からの直接結合を独立確認しAPPROVED。修正後の新しい成功証拠として保持し、旧FAILの成功扱いや実LLM gameの成功証拠へ流用しない。

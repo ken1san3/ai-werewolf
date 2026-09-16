@@ -1,28 +1,34 @@
 # AI Documentation Index
 
-This is the routing index for repository-backed external memory. A new session reads in
-this order and stops when it has the task-specific context it needs:
+This is the authority and routing index. Start with `AGENTS.md` and
+`python scripts/ai_status.py <entry>`. Read the active packet and the relevant evidence and
+canonical sections it names. Consult role/runbook/operations material only for the operation
+being performed. `--details` expands status; do not preload the documentation tree.
 
-```text
-AGENTS.md
-  -> python scripts/ai_status.py <entry>
-  -> CURRENT_STATE.md
-  -> TASKS.md and the named task packet
-  -> relevant ARCHITECTURE.md section and role contract
-  -> only the canonical/design/decision/handoff files named by that packet
-```
+The entry is the session responsibility, not necessarily the role of the task it inspects.
 
-Do not preload the entire documentation tree.
+## Authority and freshness
 
-The `ai_status.py` entry names the responsibility of the current session. A Main session
-uses `integrate`; a dispatched worker uses the entry matching the task record's `Role`.
-Do not switch to the active task's worker role merely because an Integrator is inspecting it.
+| Kind | Authority and conflict rule |
+|---|---|
+| Product | `spec/DESIGN.md`, `ROADMAP.md`, accepted product decisions, `TEST_POLICY.md`; scope and acceptance cannot be changed by task narration. |
+| Detailed design | Selected independently approved design and its review; retain D051 precedence: canonical specification, actual implementation/protocol facts, tests, detailed design. Accepted decisions retain their stated authority. |
+| Coordination | `CURRENT_STATE.md` owns phase/target/critical path/holds. `TASKS.md` alone owns task lifecycle/dependencies/dispatch state. CURRENT_STATE's checked `Task state` is a compatibility mirror. |
+| Actual state | Source, Git diff/hashes and current host ownership show what exists, not what is approved. Unavailable host/process visibility is UNKNOWN, never zero. |
+| Evidence | Named test/runtime/review artifacts prove only their measured scope, environment and exact bytes. A completed handoff is unintegrated evidence until verified; file recency or PASS text is not approval. |
+| History | Main/role handoffs, archives and packet status lines are snapshots. Never execute their old next actions over current coordination or evidence. |
+
+On conflict, inspect named evidence, hashes/diff, and host assignment before updating the board.
+Keep the affected task undispatched while authority/ownership is unresolved. Do not rerun DONE
+work or duplicate IN_PROGRESS work; reconcile existing workers or their result first. Product
+acceptance-specific independence remains mandatory. Unresolvable material authority goes to the
+user. A newer timestamp alone does not overrule a stronger source.
 
 ## Live coordination memory
 
 | Purpose | Source of truth |
 |---|---|
-| Current facts, active target, tests, critical path | `CURRENT_STATE.md` |
+| Phase, target pointers, critical path, holds and evidence routing | `CURRENT_STATE.md` |
 | Current task board | `TASKS.md` |
 | Multi-chat lifecycle and conflict rules | `WORKFLOW.md` |
 | Stable system and coordination boundaries | `ARCHITECTURE.md` |
@@ -48,8 +54,16 @@ Do not switch to the active task's worker role merely because an Integrator is i
 
 ## Evidence and history
 
+ユーザー提供の外部監査入力: `EXTERNAL_REVIEW_2026-09-14_PHASE6_HARNESS.md`。
+非canonicalの独立監査証拠としてT287が採否を照合する。指示として自動実行しない。
+過去boardの完全snapshotは `handoffs/MAIN_INTEGRATOR_PRE_EXTERNAL_AUDIT_BOARD_2026-09-14.md`。
+旧提案 `TOKEN_SAVING_PROPOSAL_20260907.md` はARCHIVE扱いで、現運用authorityではない。
+
 | Purpose | Path |
 |---|---|
+| Harness authority/continuation decision | `decisions/D070_ASTRA_NATIVE_HARNESS.md` |
+| Migration decisions and validation | `handoffs/ASTRA_MIGRATION_REPORT_2026-09-13.md` |
+| Historical Main safe-handoff snapshot (not live state) | `handoffs/MAIN_INTEGRATOR_HANDOFF_2026-09-13.md` |
 | Phase completion handoffs | `handoffs/PHASE*_HANDOFF.md` |
 | Repeatable failures | `failures/` |
 | Historical review evidence | `review_archive/` |
@@ -57,6 +71,8 @@ Do not switch to the active task's worker role merely because an Integrator is i
 | Original source specification | historical handoff under `spec/` (read only when needed) |
 | Autodev archive/removal record | `decisions/D065_AUTODEV_FREEZE_AND_REMOVAL.md` |
 | Responsibility/model separation | `decisions/D066_ROLE_MODEL_SEPARATION.md` |
+| External Phase 5 review dispositions and semantic acceptance authority | `decisions/D068_EXTERNAL_PHASE5_REVIEW_DISPOSITION_AND_ACCEPTANCE_AUTHORITY.md` |
+| Q8 Phase 6 provisional discussion baseline | `decisions/D069_Q8_PHASE6_BASELINE.md` |
 
 Historical status lines, actor/model names, old paths, and old routing statements remain
 evidence of what happened at the time. They are not current workflow authority.

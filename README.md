@@ -76,12 +76,16 @@ Phase 1 の合格条件にしています。
 
 | | |
 |---|---|
-| Phase | 3.4 Reaction Chat（実装着手前） |
-| 完了 | Phase 1、Phase 2、Phase 3.1〜3.3 |
+| Phase | Phase 5（9 AI Agents）完了、Phase 6（議論品質）未着手 |
+| 完了 | Phase 1〜Phase 5 |
 | 実装済み役職 | 13種（すべて YAML 定義） |
-| 通常テスト | 310 passed（2026-09-09 Local Windows） |
+| 検証状況 | 最新の通常・completion・実機証拠は `Docs/ai/CURRENT_STATE.md` を参照 |
 
 詳細は [`Docs/ai/CURRENT_STATE.md`](Docs/ai/CURRENT_STATE.md)。
+
+Phase 5 は `standard_9`（9席・6種類の役職）で、9 AI Client、共有LLM、生成制御、
+ゲーム完走、監査とcleanupを確認した段階です。前の発言を受けた会話の成立や議論品質は
+Phase 6 の対象であり、Phase 5 の完了範囲には含みません。
 
 ---
 
@@ -92,7 +96,8 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Python 3.10 以上。実行時の依存は PyYAML のみです。
+Python 3.10 以上。実行時依存の正本は [`pyproject.toml`](pyproject.toml) です
+（httpx、PyYAML、jsonschema、referencing、websockets）。
 
 content の読み込みだけを試す場合:
 

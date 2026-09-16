@@ -16,6 +16,8 @@ from .model import (
     BrainActionOption,
     BrainDecision,
     BrainInput,
+    BrainOutput,
+    BrainResult,
     BrainRunConfig,
     ChatDecision,
     CoDeclareDecision,
@@ -31,6 +33,7 @@ from .model import (
     NoDecision,
     PhaseKey,
     VoteDecision,
+    brain_decision_identity,
 )
 
 __all__ = [
@@ -41,6 +44,8 @@ __all__ = [
     "BrainController",
     "BrainDecision",
     "BrainInput",
+    "BrainOutput",
+    "BrainResult",
     "BrainDispatchResult",
     "BrainInvocationArbiter",
     "BrainInvocationOwner",
@@ -62,4 +67,5 @@ __all__ = [
     "PhaseBrainCoordinator",
     "PhaseKey",
     "VoteDecision",
+    "brain_decision_identity",
 ]

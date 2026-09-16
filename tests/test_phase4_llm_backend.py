@@ -6,11 +6,13 @@ import json
 import unittest
 
 import httpx
+import pytest
 
 from ai_client.llm.backend import (
     OpenAICompatibleBackend,
     StructuredLLMBackend,
     _provider_timing_observation,
+    _extract_http_error_detail,
 )
 from ai_client.llm.admission_broker import _structured_response_to_wire
 from ai_client.llm.types import (
@@ -19,6 +21,7 @@ from ai_client.llm.types import (
     LLMBackendErrorCode,
     LLMMessage,
     LLMUsage,
+    LlamaCppStructuredOutputConfig,
     OpenAICompatibleBackendConfig,
     ProviderTimingFieldState,
     ProviderTimingShapeStatus,
@@ -475,6 +478,68 @@ class Phase4LLMBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.identity.config_fingerprint, config.config_fingerprint)
         self.assertNotIn("private-sentinel", repr(backend.identity))
 
+    async def test_llama_cpp_profile_adds_exact_schema_safe_fields(self) -> None:
+        captured: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            envelope = json.loads(_success_payload('{"kind":"none"}'))
+            envelope["choices"][0]["message"]["reasoning_content"] = (
+                "private reasoning sentinel"
+            )
+            return httpx.Response(200, json=envelope)
+
+        backend = OpenAICompatibleBackend(
+            _config(
+                llama_cpp_structured_output=LlamaCppStructuredOutputConfig(),
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+        response = await backend.generate(
+            _request(
+                schema={
+                    "type": "object",
+                    "properties": {"kind": {"const": "none"}},
+                    "required": ["kind"],
+                    "additionalProperties": False,
+                }
+            )
+        )
+        await backend.aclose()
+
+        self.assertEqual(len(captured), 1)
+        body = json.loads(captured[0].content)
+        self.assertEqual(body["reasoning_format"], "deepseek")
+        self.assertIs(body["chat_template_kwargs"]["enable_thinking"], False)
+        self.assertEqual(body["response_format"]["type"], "json_schema")
+        self.assertIs(body["response_format"]["json_schema"]["strict"], True)
+        self.assertEqual(
+            body["response_format"]["json_schema"]["schema"],
+            {
+                "type": "object",
+                "properties": {"kind": {"const": "none"}},
+                "required": ["kind"],
+                "additionalProperties": False,
+            },
+        )
+        self.assertEqual(response.text, '{"kind":"none"}')
+        self.assertNotIn("private reasoning sentinel", repr(response))
+
+    async def test_default_payload_remains_provider_neutral(self) -> None:
+        config = _config()
+        backend = OpenAICompatibleBackend(
+            config,
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(500)
+            ),
+        )
+        payload = backend._request_payload(_request())
+        await backend.aclose()
+        self.assertEqual(payload, _expected_provider_payload(_request(), config))
+        body = json.loads(payload)
+        self.assertNotIn("reasoning_format", body)
+        self.assertNotIn("chat_template_kwargs", body)
+
     async def test_api_key_is_omitted_and_json_object_is_explicit(self) -> None:
         captured: list[httpx.Request] = []
 
@@ -811,3 +876,37 @@ class Phase4LLMBackendTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_http_error_detail_extracts_exact_literal_from_llamacpp_body() -> None:
+    encoded = b'{"error":{"type":"invalid_request_error","code":400,"message":"invalid grammar"}}'
+    assert _extract_http_error_detail(encoded) == "type=invalid_request_error code=400 message=invalid grammar"
+    async def exercise() -> None:
+        backend = OpenAICompatibleBackend(
+            _config(),
+            transport=httpx.MockTransport(lambda _request: httpx.Response(400, content=encoded)),
+        )
+        try:
+            with pytest.raises(LLMBackendError) as caught:
+                await backend.generate(_request())
+            error = caught.value
+            assert error.backend_error_detail == "type=invalid_request_error code=400 message=invalid grammar"
+            assert error.http_status == 400 and error.retryable is False
+        finally:
+            await backend.aclose()
+    asyncio.run(exercise())
+
+
+def test_http_error_detail_is_none_for_unexpected_shapes() -> None:
+    for encoded in (b"", b"\xff", b"{}", b"[]", b'{"error":null}', b'{"error":{}}', b'{"x":NaN}', b'{"error":{},"error":{}}'):
+        assert _extract_http_error_detail(encoded) is None
+
+
+def test_http_error_detail_is_truncated_to_exact_bound() -> None:
+    detail = _extract_http_error_detail(json.dumps({"error": {"message": "x" * 1000}}).encode())
+    assert detail is not None and len(detail) == 256
+
+
+def test_http_error_detail_replaces_control_characters() -> None:
+    detail = _extract_http_error_detail(json.dumps({"error": {"message": "a\n\tb\u0000"}}).encode())
+    assert detail == "message=a  b " and all(character.isprintable() for character in detail)

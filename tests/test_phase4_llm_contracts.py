@@ -22,6 +22,7 @@ from ai_client.llm.types import (
     GenerationSettings,
     LLMBackendError,
     LLMBackendErrorCode,
+    LlamaCppStructuredOutputConfig,
     LLMBrainConfig,
     LLMMessage,
     PromptProjection,
@@ -121,13 +122,16 @@ def test_request_deep_copies_and_freezes_json_contract() -> None:
 
 
 def test_prompt_projection_verifies_complete_messages_and_schema_hash() -> None:
-    messages = (LLMMessage("system", "strict"), LLMMessage("user", "{}"))
+    messages = (
+        LLMMessage("system", "strict"),
+        LLMMessage("user", '{"phase":"DAY"}'),
+    )
     schema = {"type": "object"}
     canonical = json.dumps(
         {
             "messages": [
                 {"role": "system", "content": "strict"},
-                {"role": "user", "content": "{}"},
+                {"role": "user", "content": '{"phase":"DAY"}'},
             ],
             "output_schema": schema,
         },
@@ -147,6 +151,30 @@ def test_prompt_projection_verifies_complete_messages_and_schema_hash() -> None:
     assert projection.prompt_bytes == len(canonical)
     with pytest.raises(ValueError, match="prompt hash"):
         replace(projection, prompt_bytes=len(canonical) + 1)
+
+    tampered_messages = (
+        messages[0],
+        LLMMessage("user", '{"phase":"NIGHT"}'),
+    )
+    tampered_contract = json.dumps(
+        {
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in tampered_messages
+            ],
+            "output_schema": schema,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    with pytest.raises(ValueError, match="canonical_input"):
+        replace(
+            projection,
+            messages=tampered_messages,
+            prompt_bytes=len(tampered_contract),
+            prompt_sha256=hashlib.sha256(tampered_contract).hexdigest(),
+        )
 
 
 @pytest.mark.parametrize("role", ["", "tool", 1, None])
@@ -233,6 +261,58 @@ def test_backend_config_secret_is_not_repr_compare_or_fingerprint_input() -> Non
     assert len(first.config_fingerprint) == 64
 
 
+def test_llama_cpp_profile_is_exact_and_rejects_coercion() -> None:
+    profile = LlamaCppStructuredOutputConfig()
+    assert profile.reasoning_format == "deepseek"
+    assert profile.enable_thinking is False
+    for changes in (
+        {"reasoning_format": "none"},
+        {"reasoning_format": 1},
+        {"enable_thinking": True},
+        {"enable_thinking": 0},
+        {"enable_thinking": "false"},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            LlamaCppStructuredOutputConfig(**changes)  # type: ignore[arg-type]
+
+
+def test_llama_cpp_profile_fingerprint_is_opt_in_stable_and_secret_free() -> None:
+    default = OpenAICompatibleBackendConfig(
+        endpoint="http://127.0.0.1:8080/v1/chat/completions",
+        model="local-model",
+        api_key="sentinel-one",
+    )
+    profiled = replace(
+        default,
+        api_key="sentinel-two",
+        llama_cpp_structured_output=LlamaCppStructuredOutputConfig(),
+    )
+    same_profile = replace(profiled, api_key="sentinel-three")
+    assert default.config_fingerprint == (
+        "4cc3c01fbd4a171b420defcd36b3eba9c4df965736662506660bccc7472d5141"
+    )
+    assert profiled.config_fingerprint != default.config_fingerprint
+    assert same_profile.config_fingerprint == profiled.config_fingerprint
+    assert "sentinel" not in repr(profiled)
+
+
+@pytest.mark.parametrize("value", [True, 0, "false", {}, object()])
+def test_backend_and_local_configs_reject_invalid_llama_cpp_profile(
+    value: object,
+) -> None:
+    with pytest.raises(TypeError):
+        OpenAICompatibleBackendConfig(
+            endpoint="http://127.0.0.1:8080/v1/chat/completions",
+            model="m",
+            llama_cpp_structured_output=value,  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError):
+        LocalLLMSettings(
+            model="m",
+            llama_cpp_structured_output=value,  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -271,11 +351,13 @@ def test_backend_byte_lower_bound_is_accepted_for_both_directions() -> None:
 
 def test_local_settings_environment_defaults_and_exact_backend_conversion() -> None:
     generation = GenerationSettings(max_output_tokens=256, temperature=0.5)
+    profile = LlamaCppStructuredOutputConfig()
     settings = LocalLLMSettings(
         model="model-A",
         api_key="secret-A",
         generation=generation,
         structured_mode="json_object",
+        llama_cpp_structured_output=profile,
     )
     backend = settings.backend_config()
     assert backend.generation is generation
@@ -283,8 +365,13 @@ def test_local_settings_environment_defaults_and_exact_backend_conversion() -> N
     assert backend.model == settings.model
     assert backend.api_key == "secret-A"
     assert backend.structured_mode == "json_object"
+    assert backend.llama_cpp_structured_output is profile
     assert "secret-A" not in repr(settings)
-    assert LocalLLMSettings.from_env({"AIWOLF_LLM_MODEL": "env-model"}).model == "env-model"
+    environment_default = LocalLLMSettings.from_env(
+        {"AIWOLF_LLM_MODEL": "env-model"}
+    )
+    assert environment_default.model == "env-model"
+    assert environment_default.llama_cpp_structured_output is None
     configured = LocalLLMSettings.from_env(
         {
             "AIWOLF_LLM_ENDPOINT": "http://localhost:9000/v1/chat/completions",
@@ -486,3 +573,21 @@ def test_serialize_preserves_unicode_and_never_contains_an_api_key_field() -> No
     assert "日本語".encode() in payload
     assert b"api_key" not in payload
     assert b"authorization" not in payload.lower()
+
+
+def test_backend_error_detail_requires_http_status_code() -> None:
+    with pytest.raises(ValueError):
+        LLMBackendError(LLMBackendErrorCode.CONNECT_FAILED, backend_error_detail="private")
+    with pytest.raises(ValueError):
+        LLMBackendError(LLMBackendErrorCode.HTTP_STATUS, backend_error_detail="private")
+    error = LLMBackendError(LLMBackendErrorCode.HTTP_STATUS, http_status=400, backend_error_detail="private")
+    assert "private" not in str(error) and "private" not in repr(error)
+
+
+def test_backend_error_detail_rejects_non_str_empty_and_oversize() -> None:
+    with pytest.raises(TypeError):
+        LLMBackendError(LLMBackendErrorCode.HTTP_STATUS, http_status=400, backend_error_detail=1)  # type: ignore[arg-type]
+    for detail in ("", "x" * 257):
+        with pytest.raises(ValueError):
+            LLMBackendError(LLMBackendErrorCode.HTTP_STATUS, http_status=400, backend_error_detail=detail)
+    assert LLMBackendError(LLMBackendErrorCode.HTTP_STATUS, http_status=400, backend_error_detail="x" * 256).backend_error_detail == "x" * 256

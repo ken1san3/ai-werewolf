@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
@@ -28,6 +28,7 @@ class AdmissionMetric:
     queue_wait_microseconds: int | None = None
     call_ordinal: int | None = None
     backend_code: str | None = None
+    backend_error_detail: str | None = field(default=None, repr=False)
     http_status: int | None = None
     retryable: bool | None = None
     provider_quiescence: ProviderQuiescence | None = None
@@ -126,6 +127,16 @@ class AdmissionMetric:
                 )
         elif self.http_status is not None or self.retryable is not None:
             raise ValueError("successful metrics cannot carry error attributes")
+        if self.backend_error_detail is not None and type(self.backend_error_detail) is not str:
+            raise TypeError("backend_error_detail must be str or None")
+        if self.backend_error_detail is not None and (
+            self.event != "PROVIDER_CALL_TERMINAL"
+            or self.backend_code != "HTTP_STATUS"
+            or not self.backend_error_detail
+            or len(self.backend_error_detail) > 256
+            or not all(character.isprintable() for character in self.backend_error_detail)
+        ):
+            raise ValueError("backend_error_detail requires an HTTP provider terminal")
         for name in (
             "queue_wait_microseconds",
             "call_ordinal",
@@ -148,6 +159,12 @@ class AdmissionMetric:
 
 
 def serialize_admission_metric(metric: AdmissionMetric) -> bytes:
+    return _serialize_admission_metric(metric, include_private_detail=False)
+
+
+def _serialize_admission_metric(
+    metric: AdmissionMetric, *, include_private_detail: bool
+) -> bytes:
     """Serialize only the fixed metadata allowlist; no arbitrary details exist."""
 
     value = {
@@ -204,6 +221,8 @@ def serialize_admission_metric(metric: AdmissionMetric) -> bytes:
         "sequence": metric.sequence,
         "terminal_status": metric.terminal_status,
     }
+    if include_private_detail:
+        value["backend_error_detail"] = metric.backend_error_detail
     return (
         json.dumps(
             value,
@@ -219,6 +238,11 @@ def serialize_admission_metric(metric: AdmissionMetric) -> bytes:
 _STOP: Final = object()
 
 
+class AdmissionMetricsWriteError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("ADMISSION_METRICS_WRITE_FAILED")
+
+
 class AdmissionMetrics:
     """One bounded writer for admission-only metadata.
 
@@ -228,13 +252,15 @@ class AdmissionMetrics:
     or unbounded diagnostic state.
     """
 
-    def __init__(self, capacity: int, *, path: Path | None = None) -> None:
+    def __init__(self, capacity: int, *, path: Path | None = None, handle: BinaryIO | None = None) -> None:
         if type(capacity) is not int or not 1 <= capacity <= 64:
             raise ValueError("capacity must be an int in [1, 64]")
         if path is not None and not isinstance(path, Path):
             raise TypeError("path must be pathlib.Path or None")
         if path is not None and not path.parent.is_dir():
             raise ValueError("metrics parent directory must already exist")
+        if path is not None and handle is not None:
+            raise ValueError("path and handle are mutually exclusive")
         self._capacity = capacity
         self._path = path
         self._queue: asyncio.Queue[AdmissionMetric | object] = asyncio.Queue(
@@ -245,7 +271,11 @@ class AdmissionMetrics:
         self._dropped = 0
         self._writer_task: asyncio.Task[None] | None = None
         self._closed = False
-        self._handle: BinaryIO | None = None
+        self._closing = False
+        self._handle: BinaryIO | None = handle
+        self._owns_handle = False
+        self._private_detail_enabled = handle is not None
+        self._writer_error: AdmissionMetricsWriteError | None = None
 
     @property
     def records(self) -> tuple[AdmissionMetric, ...]:
@@ -260,6 +290,7 @@ class AdmissionMetrics:
             raise RuntimeError("admission metrics already started or closed")
         if self._path is not None:
             self._handle = await asyncio.to_thread(open, self._path, "ab")
+            self._owns_handle = True
         self._writer_task = asyncio.create_task(
             self._writer_loop(), name="aiwolf-admission-metrics-writer"
         )
@@ -267,8 +298,10 @@ class AdmissionMetrics:
     def record_nowait(self, metric: AdmissionMetric, *, critical: bool = False) -> bool:
         if not isinstance(metric, AdmissionMetric):
             raise TypeError("metric must be AdmissionMetric")
-        if self._closed or self._writer_task is None:
+        if self._closed or self._closing or self._writer_task is None or self._writer_task.done() or self._writer_error is not None:
             return False
+        if not self._private_detail_enabled and metric.backend_error_detail is not None:
+            metric = replace(metric, backend_error_detail=None)
         self._sequence += 1
         stamped = replace(metric, sequence=self._sequence)
         try:
@@ -292,34 +325,60 @@ class AdmissionMetrics:
         return True
 
     async def flush(self) -> None:
+        if self._writer_error is not None:
+            raise self._writer_error
+        if self._writer_task is not None and self._writer_task.done():
+            await self._writer_task
         if self._writer_task is not None:
             await self._queue.join()
+        if self._writer_error is not None:
+            raise self._writer_error
 
     async def aclose(self) -> None:
         if self._closed:
             return
-        self._closed = True
+        self._closing = True
         task = self._writer_task
         if task is None:
+            self._closed = True
             return
-        await self._queue.put(_STOP)
+        if self._writer_error is None and not task.done():
+            await self._queue.join()
+            if self._writer_error is None:
+                self._queue.put_nowait(_STOP)
         await task
+        self._closed = True
+        if self._writer_error is not None:
+            raise self._writer_error
 
     async def _writer_loop(self) -> None:
         try:
             while True:
                 queued = await self._queue.get()
-                if queued is _STOP:
-                    self._queue.task_done()
+                try:
+                    if queued is _STOP:
+                        break
+                    assert isinstance(queued, AdmissionMetric)
+                    self._records.append(queued)
+                    if self._handle is not None:
+                        payload = _serialize_admission_metric(
+                            queued, include_private_detail=self._private_detail_enabled
+                        )
+                        await asyncio.to_thread(self._durable_write, payload)
+                except Exception:
+                    self._writer_error = AdmissionMetricsWriteError()
+                    while True:
+                        try:
+                            self._queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        else:
+                            self._queue.task_done()
                     break
-                assert isinstance(queued, AdmissionMetric)
-                self._records.append(queued)
-                if self._handle is not None:
-                    payload = serialize_admission_metric(queued)
-                    await asyncio.to_thread(self._durable_write, payload)
-                self._queue.task_done()
+                finally:
+                    self._queue.task_done()
         finally:
-            if self._handle is not None:
+            if self._handle is not None and self._owns_handle:
                 await asyncio.to_thread(self._handle.close)
                 self._handle = None
 

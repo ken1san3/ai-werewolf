@@ -49,11 +49,8 @@
 | Q38 | CO の市民騙り識別子とチャット送信先 | `decisions/D044`（`claimable` と明示 `channel_id`） |
 | Q39 | Detailed Design が Reviewer を兼ねてよいか | 自己承認は禁止。旧割当は `decisions/D053` の歴史記録、現行原則は `decisions/D066` |
 | Q40 | 役割責務とモデル割当の完全分離 | `decisions/D066`。責務・task・session・modelを分離し、現役割当は `MODEL_ASSIGNMENTS.md` に集約 |
+| Q8 | Phase 6の議論時間・推論量baseline | `decisions/D069`。180秒、既存時短/延長、general server capなし、AI chat最大2回/phase（COは既存の別経路）。Phase 6実測までの暫定baseline |
 
----
+## 未解決
 
-## Q8 [Phase 5 前] 昼の議論時間とLLM推論量の見積り
-
-参照実装の昼は1〜6分、さらに時短・延長で伸縮する。
-8GB VRAM 共有LLMで9エージェントが1回の昼に何発言できるかを実測し、
-議論時間・発言レート上限・サーバ側の発話制限を決める。
+現在なし。

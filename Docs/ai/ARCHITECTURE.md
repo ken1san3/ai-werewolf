@@ -5,6 +5,9 @@ authority order below and open only the section needed by the current task.
 
 ## Authority order
 
+`INDEX.md` distinguishes product authority, coordination, actual state, evidence, and history.
+The ordering below compares product sources, not timestamps or dispatch permission.
+
 1. `spec/DESIGN.md` — canonical game conclusions
 2. implementation plus protocol/schema facts
 3. tests and measured runtime evidence
@@ -52,7 +55,7 @@ Responsibility, executor model, session, and task are independent:
 Role contract -> grants authority and required output
 Task packet   -> grants bounded scope and acceptance criteria
 Model setting -> selects the current executor only
-Session       -> performs one responsibility for one bounded task
+Session       -> executes authorized scope; independent approval needs a separate session
 ```
 
 The Integrator is the only normal writer of `CURRENT_STATE.md` and `TASKS.md`. Workers write
@@ -63,8 +66,8 @@ executor changes because role documents and task packets contain no model assign
 ## External-memory topology
 
 - `INDEX.md`: route to the minimum context
-- `CURRENT_STATE.md`: short current facts and latest verified evidence
-- `TASKS.md` plus `tasks/`: board and bounded work contracts
+- `CURRENT_STATE.md`: phase/target/critical path/hold and evidence pointers
+- `TASKS.md`: sole lifecycle authority; `tasks/`: bounded contracts and assignment snapshots
 - `roles/`, `RUNBOOK.md`, `OPERATIONS.md`: stable responsibility and operating rules
 - `handoffs/tasks/`: concise worker results
 - `REVIEW_INBOX.md`: actionable review findings only

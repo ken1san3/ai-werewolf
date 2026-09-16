@@ -7,6 +7,8 @@ from enum import Enum
 import math
 from typing import Literal
 
+from ai_client.discussion import DiscussionDispatchCorrelation
+
 
 ReservationFamily = Literal["vote", "ability"]
 ReservationAction = Literal["vote.cast", "ability.use"]
@@ -119,6 +121,7 @@ class VoteAbilityOutcome:
     status: VoteAbilityOutcomeStatus
     rejection_reason: str | None
     attempts: int
+    discussion: DiscussionDispatchCorrelation | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.opportunity_key, OpportunityKey):
@@ -170,6 +173,30 @@ class VoteAbilityOutcome:
             raise ValueError("rejection_reason must be a non-empty string when supplied")
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int) or self.attempts < 0:
             raise ValueError("attempts must be a non-negative integer")
+        if self.discussion is not None:
+            if not isinstance(self.discussion, DiscussionDispatchCorrelation):
+                raise TypeError(
+                    "discussion must be DiscussionDispatchCorrelation when supplied"
+                )
+            expected_action = "vote" if self.action == "vote.cast" else "ability"
+            if (
+                self.discussion.action != expected_action
+                or self.discussion.request_event_id != self.request_event_id
+                or self.discussion.send_connection_generation
+                != self.send_connection_generation
+            ):
+                raise ValueError(
+                    "discussion correlation must match the reservation outcome"
+                )
+            if self.status not in {
+                VoteAbilityOutcomeStatus.ACCEPTED,
+                VoteAbilityOutcomeStatus.REJECTED,
+                VoteAbilityOutcomeStatus.UNKNOWN,
+                VoteAbilityOutcomeStatus.CANCELLED,
+            }:
+                raise ValueError(
+                    "discussion correlation requires a finalized local-send outcome"
+                )
 
 
 @dataclass(frozen=True)
@@ -184,6 +211,7 @@ class UnresolvedReservation:
     send_connection_generation: int
     attempt_ordinal: int
     transport_after_order: int
+    discussion: DiscussionDispatchCorrelation | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.opportunity_key, OpportunityKey):
@@ -214,6 +242,21 @@ class UnresolvedReservation:
             minimum = 1 if name == "attempt_ordinal" else 0
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
+        if self.discussion is not None:
+            if not isinstance(self.discussion, DiscussionDispatchCorrelation):
+                raise TypeError(
+                    "discussion must be DiscussionDispatchCorrelation when supplied"
+                )
+            expected_action = "vote" if self.action == "vote.cast" else "ability"
+            if (
+                self.discussion.action != expected_action
+                or self.discussion.request_event_id != self.request_event_id
+                or self.discussion.send_connection_generation
+                != self.send_connection_generation
+            ):
+                raise ValueError(
+                    "discussion correlation must match the unresolved reservation"
+                )
 
 
 @dataclass(frozen=True)

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import hashlib
 import json
 import struct
 import time
+import tempfile
 import unittest
+from unittest import mock
+from typing import Callable
 
 import pytest
 
@@ -18,6 +21,7 @@ from ai_client.llm.admission_client import (
 from ai_client.llm.admission_metrics import (
     AdmissionMetric,
     AdmissionMetrics,
+    AdmissionMetricsWriteError,
     serialize_admission_metric,
 )
 from ai_client.llm.admission_types import (
@@ -155,6 +159,43 @@ class _FakeBackend:
         self.closed = True
 
 
+class _CancellationObservingBackend(_FakeBackend):
+    def __init__(self, outcomes: list[object] | None = None) -> None:
+        super().__init__(outcomes)
+        self.cancelled = 0
+        self.cancelled_at: float | None = None
+
+    async def generate(
+        self, request: StructuredGenerationRequest
+    ) -> StructuredGenerationResponse:
+        try:
+            return await super().generate(request)
+        except asyncio.CancelledError:
+            self.cancelled += 1
+            self.cancelled_at = time.monotonic()
+            raise
+
+
+class _CancellationResistantBackend(_FakeBackend):
+    async def generate(
+        self, request: StructuredGenerationRequest
+    ) -> StructuredGenerationResponse:
+        self.calls.append(request)
+        self.active += 1
+        self.peak_active = max(self.peak_active, self.active)
+        self.started.set()
+        gate = self.outcomes.pop(0)
+        assert isinstance(gate, asyncio.Event)
+        try:
+            try:
+                await gate.wait()
+            except asyncio.CancelledError:
+                await gate.wait()
+            return _response(request.request_id)
+        finally:
+            self.active -= 1
+
+
 class _ObservingMetrics(AdmissionMetrics):
     def __init__(self, capacity: int) -> None:
         super().__init__(capacity)
@@ -287,6 +328,7 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         config: GenerationBrokerConfig | None = None,
         backend_request_timeout_seconds: float = 0.5,
         metrics: AdmissionMetrics | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> GenerationAdmissionBroker:
         self.config = config or self.config
         self.registry = registry or self.registry
@@ -296,6 +338,7 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
             fairness_seed=fairness_seed,
             config=self.config,
             metrics=metrics,
+            clock=clock,
             backend_request_timeout_seconds=backend_request_timeout_seconds,
         )
         await self.broker.start()
@@ -720,7 +763,7 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         config = GenerationBrokerConfig(
             authentication_timeout_seconds=0.5,
             cancellation_grace_seconds=0.05,
-            provider_drain_grace_seconds=0.1,
+            provider_drain_grace_seconds=0.05,
             shutdown_grace_seconds=0.2,
         )
         backend = _FakeBackend()
@@ -757,15 +800,18 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         assert a._control_lanes == {}
         assert broker.snapshot.pending_total == 0
 
-    async def test_http_error_envelope_preserves_every_attribute_and_privacy(self) -> None:
+    async def test_http_error_detail_uses_private_broker_metric_not_error_wire(self) -> None:
+        detail = "type=invalid_request_error code=503 message=private sentinel"
         source = LLMBackendError(
             LLMBackendErrorCode.HTTP_STATUS,
             http_status=503,
             retryable=True,
             provider_quiescence=ProviderQuiescence.PROVEN_TERMINAL,
+            backend_error_detail=detail,
         )
         backend = _FakeBackend([source])
-        broker = await self._start(backend)
+        handle = tempfile.TemporaryFile(mode="w+b")
+        broker = await self._start(backend, metrics=AdmissionMetrics(16, handle=handle))
         a = await self._connect("opaque-a")
         connection = broker._connections["opaque-a"]
         emitted: list[tuple[str, dict[str, object]]] = []
@@ -793,6 +839,7 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         assert error.provider_quiescence is ProviderQuiescence.PROVEN_TERMINAL
         assert str(error) == "HTTP_STATUS"
         assert error.args == ("HTTP_STATUS",)
+        assert error.backend_error_detail is None
         assert broker.snapshot.poisoned is False
         assert emitted == [
             (
@@ -821,6 +868,13 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         assert metric.http_status == 503
         assert metric.retryable is True
         assert metric.provider_quiescence is ProviderQuiescence.PROVEN_TERMINAL
+        assert metric.backend_error_detail == detail
+        assert detail not in wire_evidence
+        handle.flush()
+        handle.seek(0)
+        private_rows = [json.loads(line) for line in handle.readlines()]
+        terminal_row = next(row for row in private_rows if row["event"] == "PROVIDER_CALL_TERMINAL")
+        assert terminal_row["backend_error_detail"] == detail
 
     async def test_http_error_boundaries_and_retryability_round_trip(self) -> None:
         vectors = (
@@ -1139,14 +1193,534 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
             for record in broker.metrics.records
         )
 
+    async def test_consumer_cutoff_naturally_drains_before_successor_offer(self) -> None:
+        now = [0.0]
+        gate = asyncio.Event()
+        backend = _CancellationObservingBackend([gate])
+        config = replace(
+            self.config,
+            provider_drain_grace_seconds=0.6,
+            shutdown_grace_seconds=1.5,
+        )
+        broker = await self._start(
+            backend,
+            config=config,
+            backend_request_timeout_seconds=0.4,
+            clock=lambda: now[0],
+        )
+        a = await self._connect("opaque-a")
+        active = await a.acquire(
+            _request("deadline-drain", deadline=1.0)
+        )
+        assert active.lease is not None
+        assert await active.lease.claim() is AdmissionStatus.GRANTED
+        successor_handle = await a.reserve_successor(
+            "deadline-drain",
+            _request(
+                "deadline-successor",
+                priority=GenerationPriority.RESERVATION,
+            ),
+        )
+        successor = asyncio.create_task(successor_handle.wait_offer())
+        connection = broker._connections["opaque-a"]
+        async with broker._lock:
+            broker._generate_locked(
+                connection, "deadline-drain", 1, _generation("deadline-call")
+        )
+        await asyncio.wait_for(backend.started.wait(), timeout=1.0)
+        now[0] = 1.0
+        await broker._deadline_timeout("opaque-a", "deadline-drain", 1.0)
+        assert broker.snapshot.draining is True
+        assert backend.cancelled == 0
+        assert not successor.done()
+        gate.set()
+        admitted = await asyncio.wait_for(successor, timeout=1.0)
+        assert admitted.status is AdmissionStatus.OFFERED
+        assert admitted.lease is not None
+        assert broker._terminal_status["deadline-drain"] == "ABANDONED_DRAINED"
+        assert broker.snapshot.poisoned is False
+        assert backend.cancelled == 0
+        assert backend.peak_active == 1
+        assert await admitted.lease.claim() is AdmissionStatus.GRANTED
+        await admitted.lease.release()
+
+    async def test_provider_start_rechecks_cutoff_after_task_scheduling(self) -> None:
+        now = [0.0]
+        backend = _FakeBackend()
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        active = await a.acquire(_request("scheduled-expiry", deadline=1.0))
+        assert active.lease is not None
+        assert await active.lease.claim() is AdmissionStatus.GRANTED
+        connection = broker._connections["opaque-a"]
+        async with broker._lock:
+            broker._generate_locked(
+                connection, "scheduled-expiry", 1, _generation("scheduled-call")
+            )
+            now[0] = 1.0
+        for _ in range(10):
+            if broker._terminal_status.get("scheduled-expiry") == AdmissionStatus.EXPIRED.value:
+                break
+            await asyncio.sleep(0)
+        assert backend.calls == []
+        assert broker._terminal_status["scheduled-expiry"] == AdmissionStatus.EXPIRED.value
+        assert broker.snapshot.poisoned is False
+
+    async def test_claimed_and_repair_calls_do_not_start_after_cutoff(self) -> None:
+        now = [0.0]
+        backend = _FakeBackend([_response("first-call")])
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        claimed = await a.acquire(_request("claimed-expiry", deadline=1.0))
+        assert claimed.lease is not None
+        assert await claimed.lease.claim() is AdmissionStatus.GRANTED
+        connection = broker._connections["opaque-a"]
+        now[0] = 1.0
+        await broker._deadline_timeout("opaque-a", "claimed-expiry", 1.0)
+        assert broker.snapshot.pending_total == 0
+        async with broker._lock:
+            broker._generate_locked(
+                connection, "claimed-expiry", 1, _generation("late-first")
+            )
+        assert backend.calls == []
+        assert broker._terminal_status["claimed-expiry"] == AdmissionStatus.EXPIRED.value
+
+        now[0] = 2.0
+        repair = await a.acquire(_request("repair-expiry", deadline=3.0))
+        assert repair.lease is not None
+        assert await repair.lease.claim() is AdmissionStatus.GRANTED
+        async with broker._lock:
+            broker._generate_locked(
+                connection, "repair-expiry", 1, _generation("first-call")
+            )
+        for _ in range(100):
+            slot = broker._slots.get("opaque-a")
+            if slot is not None and slot.provider_task is None:
+                break
+            await asyncio.sleep(0)
+        slot = broker._slots.get("opaque-a")
+        assert slot is not None and slot.provider_task is None
+        assert [call.request_id for call in backend.calls] == ["first-call"]
+        now[0] = 3.0
+        async with broker._lock:
+            broker._generate_locked(
+                connection, "repair-expiry", 2, _generation("late-repair")
+            )
+        assert [call.request_id for call in backend.calls] == ["first-call"]
+        assert broker._terminal_status["repair-expiry"] == AdmissionStatus.EXPIRED.value
+        assert broker.snapshot.poisoned is False
+
+    async def test_claimed_cutoff_cancellation_keeps_session_reusable(self) -> None:
+        now = [0.0]
+        backend = _FakeBackend()
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        active = await a.acquire(_request("claimed-cancel", deadline=1.0))
+        assert active.lease is not None
+        assert await active.lease.claim() is AdmissionStatus.GRANTED
+        now[0] = 1.0
+        await broker._deadline_timeout("opaque-a", "claimed-cancel", 1.0)
+        proxy = BrokeredStructuredLLMBackend(a)
+        with active.lease.activate():
+            call = asyncio.create_task(proxy.generate(_generation("late-call")))
+            await asyncio.sleep(0)
+            call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await call
+        assert backend.calls == []
+        assert a._closed is False
+        now[0] = 2.0
+        after = await a.acquire(_request("after-claimed-cancel", deadline=3.0))
+        assert after.status is AdmissionStatus.OFFERED
+        assert after.lease is not None
+        assert await after.lease.claim() is AdmissionStatus.GRANTED
+        await after.lease.release()
+
+    async def test_cancelled_claim_expiry_before_internal_abandon_waiter_keeps_session(
+        self,
+    ) -> None:
+        now = [0.0]
+        backend = _FakeBackend()
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        invocation_id = "cancelled-claim-expiry"
+        offered = await a.acquire(_request(invocation_id, deadline=1.0))
+        assert offered.lease is not None
+        claim_sent = asyncio.Event()
+        allow_claim_return = asyncio.Event()
+        original_send = a._send
+
+        async def hold_claim_return(message_type: str, **fields: object) -> None:
+            await original_send(message_type, **fields)
+            if message_type == "CLAIM":
+                claim_sent.set()
+                await allow_claim_return.wait()
+
+        a._send = hold_claim_return  # type: ignore[method-assign]
+        original_emit = broker._emit
+
+        def route_expiry_directly(
+            client_id: str, message_type: str, **fields: object
+        ) -> bool:
+            if (
+                message_type == "ACK"
+                and fields.get("invocation_id") == invocation_id
+                and fields.get("status") == AdmissionStatus.EXPIRED.value
+            ):
+                a._route_frame(
+                    {
+                        "protocol": GENERATION_IPC_PROTOCOL,
+                        "type": "ACK",
+                        **fields,
+                    }
+                )
+                return True
+            return original_emit(client_id, message_type, **fields)
+
+        register_count = 0
+        original_register = a._register_ack
+
+        def expire_before_internal_waiter(key: str) -> asyncio.Future[str]:
+            nonlocal register_count
+            register_count += 1
+            if register_count == 2:
+                now[0] = 1.0
+                slot = broker._slots["opaque-a"]
+                broker._terminal_slot_locked(
+                    slot, AdmissionStatus.EXPIRED, notify=True
+                )
+                broker._offer_next_locked()
+            return original_register(key)
+
+        abandon_calls = 0
+        original_abandon = broker._abandon_locked
+
+        def observe_abandon(*args: object) -> None:
+            nonlocal abandon_calls
+            abandon_calls += 1
+            original_abandon(*args)
+
+        with mock.patch.object(broker, "_emit", route_expiry_directly), mock.patch.object(
+            a, "_register_ack", expire_before_internal_waiter
+        ), mock.patch.object(broker, "_abandon_locked", observe_abandon):
+            claim = asyncio.create_task(offered.lease.claim())
+            await asyncio.wait_for(claim_sent.wait(), timeout=1.0)
+            claim.cancel()
+            allow_claim_return.set()
+            with pytest.raises(asyncio.CancelledError):
+                await claim
+        assert register_count == 2
+        assert abandon_calls == 0
+        assert a._acks == {}
+        assert a._claimed_invocation is None
+        assert a._closed is False
+        now[0] = 2.0
+        after = await a.acquire(_request("after-cancelled-claim", deadline=3.0))
+        assert after.lease is not None
+        assert await after.lease.claim() is AdmissionStatus.GRANTED
+        await after.lease.release()
+
+    async def test_cancelled_claim_keeps_expiry_routed_before_granted_apply(self) -> None:
+        now = [0.0]
+        backend = _FakeBackend()
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        invocation_id = "cancelled-claim-pre-apply-expiry"
+        offered = await a.acquire(_request(invocation_id, deadline=1.0))
+        assert offered.lease is not None
+        claim_sent = asyncio.Event()
+        allow_claim_return = asyncio.Event()
+        original_send = a._send
+
+        async def hold_claim_return(message_type: str, **fields: object) -> None:
+            await original_send(message_type, **fields)
+            if message_type == "CLAIM":
+                claim_sent.set()
+                await allow_claim_return.wait()
+
+        a._send = hold_claim_return  # type: ignore[method-assign]
+        original_finish = a._finish_cancelled_control
+
+        async def expire_before_granted_apply(
+            control_task: asyncio.Task[str],
+        ) -> str:
+            result = await original_finish(control_task)
+            assert result == AdmissionStatus.GRANTED.value
+            now[0] = 1.0
+            await broker._deadline_timeout("opaque-a", invocation_id, 1.0)
+            for _ in range(20):
+                lane = a._control_lanes.get(invocation_id)
+                if lane is not None and lane.disposition == AdmissionStatus.EXPIRED.value:
+                    break
+                await asyncio.sleep(0)
+            return result
+
+        abandon_calls = 0
+        original_abandon = broker._abandon_locked
+
+        def observe_abandon(*args: object) -> None:
+            nonlocal abandon_calls
+            abandon_calls += 1
+            original_abandon(*args)
+
+        with mock.patch.object(
+            a, "_finish_cancelled_control", expire_before_granted_apply
+        ), mock.patch.object(broker, "_abandon_locked", observe_abandon):
+            claim = asyncio.create_task(offered.lease.claim())
+            await asyncio.wait_for(claim_sent.wait(), timeout=1.0)
+            claim.cancel()
+            allow_claim_return.set()
+            with pytest.raises(asyncio.CancelledError):
+                await claim
+        assert abandon_calls == 0
+        assert offered.lease._claimed is False
+        assert offered.lease._retired is True
+        assert a._claimed_invocation is None
+        assert a._acks == {}
+        assert a._closed is False
+        now[0] = 2.0
+        after = await a.acquire(_request("after-pre-apply-expiry", deadline=3.0))
+        assert after.lease is not None
+        assert await after.lease.claim() is AdmissionStatus.GRANTED
+        await after.lease.release()
+
+    async def test_claimed_expiry_public_release_is_repeatable_local_noop(self) -> None:
+        now = [0.0]
+        backend = _FakeBackend()
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        active = await a.acquire(_request("expired-release", deadline=1.0))
+        assert active.lease is not None
+        lease = active.lease
+        assert await lease.claim() is AdmissionStatus.GRANTED
+        now[0] = 1.0
+        await broker._deadline_timeout("opaque-a", "expired-release", 1.0)
+        for _ in range(20):
+            if lease._lane.disposition == AdmissionStatus.EXPIRED.value:
+                break
+            await asyncio.sleep(0)
+        release_calls = 0
+        original_release = broker._release_locked
+
+        def observe_release(*args: object) -> None:
+            nonlocal release_calls
+            release_calls += 1
+            original_release(*args)
+
+        with mock.patch.object(broker, "_release_locked", observe_release):
+            await lease.release()
+            await lease.release()
+        assert release_calls == 0
+        assert lease._abandon_disposition == "ABANDON_ACKNOWLEDGED"
+        assert lease._released is True
+        assert lease._retired is True
+        assert a._closed is False
+        now[0] = 2.0
+        after = await a.acquire(_request("after-expired-release", deadline=3.0))
+        assert after.lease is not None
+        assert await after.lease.claim() is AdmissionStatus.GRANTED
+        await after.lease.release()
+
+    async def test_expired_control_races_retire_without_duplicate_frame(self) -> None:
+        for operation in ("ABANDON", "RELEASE"):
+            for boundary in ("before_waiter", "after_waiter"):
+                with self.subTest(operation=operation, boundary=boundary):
+                    backend = _FakeBackend()
+                    broker = await self._start(backend)
+                    a = await self._connect("opaque-a")
+                    invocation_id = f"expired-{operation.lower()}-{boundary}"
+                    active = await a.acquire(_request(invocation_id))
+                    assert active.lease is not None
+                    lease = active.lease
+                    assert await lease.claim() is AdmissionStatus.GRANTED
+                    lane = a._control_lanes[invocation_id]
+                    expired = {
+                        "protocol": GENERATION_IPC_PROTOCOL,
+                        "type": "ACK",
+                        "invocation_id": invocation_id,
+                        "status": AdmissionStatus.EXPIRED.value,
+                    }
+                    writes = 0
+                    original_write = a._writer.write
+
+                    def observe_write(data: bytes) -> None:
+                        nonlocal writes
+                        writes += 1
+                        original_write(data)
+
+                    if boundary == "before_waiter":
+                        original_register = a._register_ack
+
+                        def inject_before_waiter(key: str) -> asyncio.Future[str]:
+                            a._route_frame(expired)
+                            return original_register(key)
+
+                        patches = (
+                            mock.patch.object(a, "_register_ack", inject_before_waiter),
+                            mock.patch.object(a._writer, "write", observe_write),
+                        )
+                    else:
+                        original_control = a._control_with_registered_ack
+
+                        async def inject_after_waiter(*args: object, **kwargs: object) -> str:
+                            a._route_frame(expired)
+                            return await original_control(*args, **kwargs)
+
+                        patches = (
+                            mock.patch.object(
+                                a,
+                                "_control_with_registered_ack",
+                                inject_after_waiter,
+                            ),
+                            mock.patch.object(a._writer, "write", observe_write),
+                        )
+                    with patches[0], patches[1]:
+                        result = await a._ordinary_control(lane, operation)
+                    assert result is AdmissionStatus.EXPIRED or result == "EXPIRED"
+                    assert writes == 0
+                    assert a._acks == {}
+                    assert a._claimed_invocation is None
+                    assert a._activated_invocation is None
+                    assert lease._claimed is False
+                    assert lease._retired is True
+                    assert a._closed is False
+                    await a.aclose()
+                    await broker.aclose()
+                    self.broker = None
+
+    async def test_provider_timeout_is_not_shortened_to_consumer_cutoff(self) -> None:
+        now = [0.0]
+        gate = asyncio.Event()
+        backend = _CancellationObservingBackend([gate])
+        config = replace(
+            self.config,
+            provider_drain_grace_seconds=0.6,
+            shutdown_grace_seconds=1.5,
+        )
+        broker = await self._start(
+            backend,
+            config=config,
+            backend_request_timeout_seconds=0.15,
+            clock=lambda: now[0],
+        )
+        a = await self._connect("opaque-a")
+        active = await a.acquire(
+            _request("provider-timeout", deadline=1.0)
+        )
+        assert active.lease is not None
+        assert await active.lease.claim() is AdmissionStatus.GRANTED
+        connection = broker._connections["opaque-a"]
+        async with broker._lock:
+            broker._generate_locked(
+                connection, "provider-timeout", 1, _generation("timeout-call")
+            )
+        await asyncio.wait_for(backend.started.wait(), timeout=1.0)
+        started_at = time.monotonic()
+        await asyncio.sleep(0.02)
+        now[0] = 1.0
+        await broker._deadline_timeout("opaque-a", "provider-timeout", 1.0)
+        for _ in range(100):
+            if broker.snapshot.poisoned:
+                break
+            await asyncio.sleep(0.005)
+        assert broker.snapshot.poisoned is True
+        assert broker.snapshot.poison_reason == "PROVIDER_QUIESCENCE_UNKNOWN"
+        assert backend.cancelled == 1
+        assert backend.cancelled_at is not None
+        assert backend.cancelled_at - started_at >= 0.1
+        assert broker._terminal_status["provider-timeout"] == AdmissionStatus.POISONED.value
+
+    async def test_terminal_rechecks_exact_cutoff_before_late_delivery(self) -> None:
+        now = [0.0]
+        gate = asyncio.Event()
+        backend = _CancellationObservingBackend([gate])
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        active = await a.acquire(_request("terminal-equality", deadline=1.0))
+        assert active.lease is not None
+        assert await active.lease.claim() is AdmissionStatus.GRANTED
+        connection = broker._connections["opaque-a"]
+        emitted: list[str] = []
+        original_emit = broker._emit
+
+        def observe_emit(client_id: str, message_type: str, **fields: object) -> bool:
+            emitted.append(message_type)
+            return original_emit(client_id, message_type, **fields)
+
+        with mock.patch.object(broker, "_emit", observe_emit):
+            async with broker._lock:
+                broker._generate_locked(
+                    connection,
+                    "terminal-equality",
+                    1,
+                    _generation("terminal-equality-call"),
+                )
+            await asyncio.wait_for(backend.started.wait(), timeout=1.0)
+            now[0] = 1.0
+            gate.set()
+            for _ in range(20):
+                if "terminal-equality" in broker._terminal_status:
+                    break
+                await asyncio.sleep(0)
+        assert broker._terminal_status["terminal-equality"] == "ABANDONED_DRAINED"
+        assert "RESULT" not in emitted
+        assert "ERROR" not in emitted
+        assert backend.cancelled == 0
+        assert broker.snapshot.poisoned is False
+        assert broker.snapshot.pending_total == 0
+
+    async def test_terminal_discards_safe_error_at_exact_cutoff(self) -> None:
+        now = [0.0]
+        gate = asyncio.Event()
+        backend = _FakeBackend([
+            (
+                gate,
+                LLMBackendError(
+                    LLMBackendErrorCode.HTTP_STATUS,
+                    http_status=503,
+                    retryable=True,
+                    provider_quiescence=ProviderQuiescence.PROVEN_TERMINAL,
+                ),
+            )
+        ])
+        broker = await self._start(backend, clock=lambda: now[0])
+        a = await self._connect("opaque-a")
+        active = await a.acquire(_request("error-equality", deadline=1.0))
+        assert active.lease is not None
+        assert await active.lease.claim() is AdmissionStatus.GRANTED
+        connection = broker._connections["opaque-a"]
+        emitted: list[str] = []
+        original_emit = broker._emit
+
+        def observe_emit(client_id: str, message_type: str, **fields: object) -> bool:
+            emitted.append(message_type)
+            return original_emit(client_id, message_type, **fields)
+
+        with mock.patch.object(broker, "_emit", observe_emit):
+            async with broker._lock:
+                broker._generate_locked(
+                    connection, "error-equality", 1, _generation("error-call")
+                )
+            await asyncio.wait_for(backend.started.wait(), timeout=1.0)
+            now[0] = 1.0
+            gate.set()
+            for _ in range(20):
+                if "error-equality" in broker._terminal_status:
+                    break
+                await asyncio.sleep(0)
+        assert broker._terminal_status["error-equality"] == "ABANDONED_DRAINED"
+        assert "RESULT" not in emitted
+        assert "ERROR" not in emitted
+        assert broker.snapshot.poisoned is False
+
     async def test_drain_grace_expiry_permanently_poisoned(self) -> None:
         gate = asyncio.Event()
-        backend = _FakeBackend([gate])
-        config = GenerationBrokerConfig(
-            authentication_timeout_seconds=0.5,
-            cancellation_grace_seconds=0.05,
-            provider_drain_grace_seconds=0.05,
-            shutdown_grace_seconds=0.1,
+        backend = _CancellationResistantBackend([gate])
+        # 通信には共通fixtureの予算を使い、検証対象のdrain期限だけ短縮する。
+        # ACK欠測時の50ms期限は専用test_missing_control_ack...で検証する。
+        config = replace(
+            self.config,
+            provider_drain_grace_seconds=0.1,
         )
         broker = await self._start(
             backend,
@@ -1158,33 +1732,72 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         assert active.lease is not None
         assert await active.lease.claim() is AdmissionStatus.GRANTED
         proxy = BrokeredStructuredLLMBackend(a)
-        with active.lease.activate():
-            call = asyncio.create_task(proxy.generate(_generation()))
-            await backend.started.wait()
-            successor = await a.reserve_successor(
-                "drain-timeout",
-                _request(
-                    "poisoned-after-drain",
-                    priority=GenerationPriority.RESERVATION,
-                ),
-            )
-            call.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await call
-        await active.lease.release()
-        await active.lease.release()
-        await asyncio.sleep(0.08)
-        assert broker.snapshot.poisoned is True
-        assert broker.snapshot.poison_reason == "PROVIDER_QUIESCENCE_UNKNOWN"
-        poisoned_successor = await successor.wait_offer()
-        assert poisoned_successor.status is AdmissionStatus.POISONED
-        assert poisoned_successor.lease is None
-        assert a._closed is False
-        assert a._acks == {}
-        assert a._control_lanes == {}
-        assert a._results == {}
-        rejected = await a.acquire(_request("after-drain-timeout"))
-        assert rejected.status is AdmissionStatus.POISONED
+        drain_started = asyncio.Event()
+        drain_tasks: list[asyncio.Task[object]] = []
+        poison_origins: list[tuple[bool, bool, int, bool, str]] = []
+        original_drain = broker._drain_timeout
+        original_poison = broker._poison_locked
+
+        async def observe_drain(*args: object) -> None:
+            task = asyncio.current_task()
+            assert task is not None
+            drain_tasks.append(task)
+            drain_started.set()
+            await original_drain(*args)
+
+        def observe_poison(reason: str) -> None:
+            poison_origins.append((
+                bool(drain_tasks) and asyncio.current_task() is drain_tasks[0],
+                broker.snapshot.draining,
+                backend.active,
+                gate.is_set(),
+                reason,
+            ))
+            original_poison(reason)
+
+        try:
+            with mock.patch.object(broker, "_drain_timeout", observe_drain), mock.patch.object(
+                broker, "_poison_locked", observe_poison
+            ):
+                with active.lease.activate():
+                    call = asyncio.create_task(proxy.generate(_generation()))
+                    await asyncio.wait_for(backend.started.wait(), timeout=2.0)
+                    successor = await a.reserve_successor(
+                        "drain-timeout",
+                        _request(
+                            "poisoned-after-drain",
+                            priority=GenerationPriority.RESERVATION,
+                        ),
+                    )
+                    call.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await call
+                await active.lease.release()
+                await active.lease.release()
+                # 固定sleepで推測せず、無改変のdrain処理とcleanupの終了を待つ。
+                await asyncio.wait_for(drain_started.wait(), timeout=2.0)
+                assert len(drain_tasks) == 1
+                await asyncio.wait_for(asyncio.shield(drain_tasks[0]), timeout=2.0)
+            assert config.provider_drain_grace_seconds == 0.1
+            assert poison_origins == [
+                (True, True, 1, False, "PROVIDER_QUIESCENCE_UNKNOWN")
+            ]
+            assert backend.active == 0
+            assert not gate.is_set()
+            assert broker.snapshot.poisoned is True
+            assert broker.snapshot.poison_reason == "PROVIDER_QUIESCENCE_UNKNOWN"
+            poisoned_successor = await successor.wait_offer()
+            assert poisoned_successor.status is AdmissionStatus.POISONED
+            assert poisoned_successor.lease is None
+            assert a._closed is False
+            assert a._acks == {}
+            assert a._control_lanes == {}
+            assert a._results == {}
+            rejected = await a.acquire(_request("after-drain-timeout"))
+            assert rejected.status is AdmissionStatus.POISONED
+            assert broker.snapshot.poisoned is True
+        finally:
+            gate.set()
 
     async def test_proxy_rejects_unleased_third_and_reused_requests(self) -> None:
         backend = _FakeBackend()
@@ -1216,6 +1829,23 @@ class AdmissionBrokerTests(unittest.IsolatedAsyncioTestCase):
         assert backend.closed is True
         assert broker.owns_external_provider is False
         assert broker.shutdown_clean is True
+        self.broker = None
+
+    async def test_metrics_writer_failure_keeps_broker_cleanup_finite(self) -> None:
+        backend = _FakeBackend()
+        handle = tempfile.TemporaryFile(mode="w+b")
+        metrics = AdmissionMetrics(4, handle=handle)
+        broker = await self._start(backend, metrics=metrics)
+        session = await self._connect("opaque-a")
+        with mock.patch.object(metrics, "_durable_write", side_effect=OSError):
+            assert metrics.record_nowait(AdmissionMetric(event="ENQUEUED"))
+            with pytest.raises(AdmissionMetricsWriteError):
+                await asyncio.wait_for(broker.aclose(), timeout=1.0)
+        assert backend.closed is True
+        assert session._closed is True
+        assert broker._closed is True
+        assert handle.closed is False
+        handle.close()
         self.broker = None
 
 

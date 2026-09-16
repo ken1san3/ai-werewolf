@@ -7,16 +7,33 @@ from datetime import datetime, timezone
 import time
 from typing import Any, Callable
 import unittest
+from dataclasses import fields
+from ai_client.llm.types import AiDiscussionGenerationRecordV2
+
+
+def test_http_error_detail_does_not_enter_brain_generation_v2() -> None:
+    assert "backend_error_detail" not in {field.name for field in fields(AiDiscussionGenerationRecordV2)}
 
 from ai_client.brain import (
+    BrainDispatchResult,
     BrainController,
     BrainInvocationArbiter,
     BrainInvocationPriority,
     BrainRunConfig,
     ChatDecision,
+    DecisionOutcome,
     DecisionStatus,
     DispatchDeadline,
     VoteDecision,
+)
+from ai_client.discussion.model import (
+    DiscussionDispatchCorrelation,
+    DiscussionObservationStatus,
+    DiscussionTerminalReason,
+    EvidenceRecordKind,
+    EvidenceRef,
+    EvidenceVisibility,
+    ObservationAck,
 )
 from ai_client.llm.admission_types import (
     AdmissionCredentials,
@@ -43,6 +60,7 @@ from ai_client.network import ChatAction, SendReceipt, VoteAction
 from ai_client.network import PhaseTimingMapped
 from ai_client.reaction_chat.frequency import SpeakingProfile
 from ai_client.world import (
+    ActionAcceptedObservation,
     AbilityResultView,
     CoView,
     CurrentActionsView,
@@ -51,6 +69,7 @@ from ai_client.world import (
     HistoryView,
     PhaseView,
     PlayerView,
+    ResumeRecoveryBarrier,
     SelfView,
     TransportObservationView,
     WorldSnapshot,
@@ -277,6 +296,7 @@ class _Admission:
         self.active_successors: dict[str, _Successor] = {}
         self.cancelled: list[str] = []
         self.cancelled_successors: list[str] = []
+        self.close_calls = 0
 
     async def acquire(self, request: AdmissionRequest) -> AdmissionResult:
         self.requests.append(request)
@@ -331,7 +351,7 @@ class _Admission:
         return AdmissionStatus.CANCELLED
 
     async def aclose(self) -> None:
-        return None
+        self.close_calls += 1
 
     def offer(self, invocation_id: str) -> None:
         lease = _Lease(self, invocation_id)
@@ -352,6 +372,88 @@ class _Admission:
         successor.future.set_result(
             AdmissionResult(AdmissionStatus.OFFERED, lease, 1)
         )
+
+
+class _ControlledLease(_Lease):
+    def __init__(self, admission: _ControlledAdmission, invocation_id: str) -> None:
+        super().__init__(admission, invocation_id)
+        self.admission = admission
+
+    async def release(self) -> None:
+        if not self.claimed or self.active or self.released:
+            raise RuntimeError("invalid controlled lease release")
+        self.admission.release_attempts.append(self.invocation_id)
+        self.admission.order.append(f"release-start:{self.invocation_id}")
+        self.admission.release_started.set()
+        await self.admission.release_continue.wait()
+        if self.admission.fail_release:
+            self.admission.order.append(f"release-failed:{self.invocation_id}")
+            raise RuntimeError("opaque parent release failure")
+        self.released = True
+        self.admission.order.append(f"release:{self.invocation_id}")
+        self.admission.release(self.invocation_id)
+
+
+class _ControlledSuccessor(_Successor):
+    def __init__(
+        self, admission: _ControlledAdmission, request: AdmissionRequest
+    ) -> None:
+        super().__init__(admission, request)
+        self.admission = admission
+
+    async def cancel(self) -> AdmissionStatus:
+        self.admission.successor_cancel_attempts.append(self.invocation_id)
+        self.admission.order.append(f"successor-cancel-start:{self.invocation_id}")
+        self.admission.successor_cancel_started.set()
+        await self.admission.successor_cancel_continue.wait()
+        self.admission.cancelled_successors.append(self.invocation_id)
+        if not self.future.done():
+            self.future.set_result(
+                AdmissionResult(self.admission.successor_status, None, 0)
+            )
+        if self.admission.fail_successor_cancel:
+            self.admission.order.append(
+                f"successor-cancel-failed:{self.invocation_id}"
+            )
+            raise RuntimeError("opaque successor cancellation failure")
+        self.admission.order.append(f"successor-cancelled:{self.invocation_id}")
+        return self.admission.successor_status
+
+
+class _ControlledAdmission(_Admission):
+    def __init__(self, order: list[str]) -> None:
+        super().__init__(order)
+        self.release_started = asyncio.Event()
+        self.release_continue = asyncio.Event()
+        self.release_continue.set()
+        self.successor_cancel_started = asyncio.Event()
+        self.successor_cancel_continue = asyncio.Event()
+        self.successor_cancel_continue.set()
+        self.fail_release = False
+        self.fail_successor_cancel = False
+        self.successor_status = AdmissionStatus.CANCELLED
+        self.release_attempts: list[str] = []
+        self.successor_cancel_attempts: list[str] = []
+
+    async def reserve_successor(
+        self, active_invocation_id: str, successor: AdmissionRequest
+    ) -> _Successor:
+        self.requests.append(successor)
+        handle = _ControlledSuccessor(self, successor)
+        self.successors[successor.invocation_id] = handle
+        self.active_successors[active_invocation_id] = handle
+        return handle
+
+    def offer(self, invocation_id: str) -> None:
+        lease = _ControlledLease(self, invocation_id)
+        self.leases[invocation_id] = lease
+        self.results[invocation_id].set_result(
+            AdmissionResult(AdmissionStatus.OFFERED, lease, 1)
+        )
+
+    async def aclose(self) -> None:
+        await super().aclose()
+        self.order.append("admission-close")
 
 
 class _FailingAdmission(_Admission):
@@ -440,6 +542,247 @@ async def _wait_until(predicate: Callable[[], bool]) -> None:
             return
         await asyncio.sleep(0)
     raise AssertionError("condition was not reached")
+
+
+async def _assert_no_live_seam_task() -> None:
+    await asyncio.sleep(0)
+    current = asyncio.current_task()
+    live = sorted(
+        task.get_name()
+        for task in asyncio.all_tasks()
+        if task is not current
+        and not task.done()
+        and (
+            task.get_name().startswith("aiwolf-brain-")
+            or task.get_name().startswith("aiwolf-discussion-")
+        )
+    )
+    assert live == []
+
+
+class _SeamControllerHarness:
+    """Public-surface BrainController double for Arbiter seam ordering tests."""
+
+    def __init__(
+        self,
+        *,
+        actions: tuple[object, ...] = (_chat(), _vote()),
+        block_controller: bool = False,
+        clock: Callable[[], float] = time.monotonic,
+        send_connection_generation: int = 1,
+    ) -> None:
+        self.order: list[str] = []
+        self.world = _World(actions)
+        self.controller_started = asyncio.Event()
+        self.controller_release = asyncio.Event()
+        if not block_controller:
+            self.controller_release.set()
+        self.finalizer_started = asyncio.Event()
+        self.finalizer_release = asyncio.Event()
+        self.finalizer_release.set()
+        self.finalizer_calls: list[
+            tuple[
+                DiscussionDispatchCorrelation,
+                DiscussionObservationStatus,
+                DiscussionTerminalReason,
+                EvidenceRef | None,
+            ]
+        ] = []
+        self.controller_stop_calls = 0
+        self.controller_calls = 0
+        self.fail_finalizer = False
+        self.correlations: list[DiscussionDispatchCorrelation] = []
+        self.after_local_send: Callable[[], None] | None = None
+        self._last_decision: object | None = None
+        controller = BrainController(
+            world=self.world,  # type: ignore[arg-type]
+            sender=_Sender(self.order),  # type: ignore[arg-type]
+            brain=_Brain(self.order),
+            config=BrainRunConfig(max_decision_seconds=1.0),
+            clock=clock,
+        )
+        self.controller = controller
+
+        async def decide_and_send(request: object, **_kwargs: object) -> DecisionOutcome:
+            self.controller_calls += 1
+            self.controller_started.set()
+            while not self.controller_release.is_set():
+                try:
+                    await asyncio.shield(self.controller_release.wait())
+                except asyncio.CancelledError:
+                    # The real BrainController owns a post-send result through
+                    # its cancellation boundary.  This double lets the Arbiter
+                    # exercise that exact already-local-sent race.
+                    continue
+            option = request.action_context.options[0]  # type: ignore[attr-defined]
+            action = "vote" if isinstance(option.handle, VoteAction) else "chat"
+            ordinal = self.controller_calls
+            capture_id = f"{1000 + ordinal:064x}"
+            correlation = DiscussionDispatchCorrelation(
+                capture_id=capture_id,
+                request_id=f"phase6:{capture_id}",
+                context_sha256="a" * 64,
+                before_state_sha256="b" * 64,
+                after_state_sha256="c" * 64,
+                proposal_sha256="d" * 64,
+                generation_audit_sequence=ordinal,
+                base_revision=ordinal - 1,
+                committed_revision=ordinal,
+                action=action,  # type: ignore[arg-type]
+                option_id="action:0",
+                request_event_id=f"opaque-request-{ordinal}",
+                send_connection_generation=send_connection_generation,
+            )
+            self.correlations.append(correlation)
+            receipt = SendReceipt(correlation.request_event_id, 1)
+            self._last_decision = (
+                VoteDecision("action:0", "p2")
+                if action == "vote"
+                else ChatDecision("action:0", "opaque chat")
+            )
+            self.order.append(f"controller-sent:{action}")
+            if self.after_local_send is not None:
+                self.after_local_send()
+            return DecisionOutcome(
+                status=DecisionStatus.SENT,
+                option_id="action:0",
+                receipt=receipt,
+                invocation_started=True,
+                discussion=correlation,
+            )
+
+        def take_dispatched_decision(receipt: SendReceipt | None) -> object:
+            assert receipt is not None
+            decision = self._last_decision
+            self._last_decision = None
+            return decision
+
+        async def finalize_discussion_observation(
+            *,
+            correlation: DiscussionDispatchCorrelation,
+            status: DiscussionObservationStatus,
+            reason: DiscussionTerminalReason,
+            evidence: EvidenceRef | None = None,
+        ) -> ObservationAck:
+            self.finalizer_calls.append((correlation, status, reason, evidence))
+            self.order.append("finalizer-start")
+            self.finalizer_started.set()
+            await self.finalizer_release.wait()
+            if self.fail_finalizer:
+                raise RuntimeError("opaque finalizer failure")
+            self.order.append("finalizer-durable")
+            return ObservationAck(
+                capture_id=correlation.capture_id,
+                request_id=correlation.request_id,
+                base_revision=correlation.base_revision,
+                committed_revision=correlation.committed_revision,
+                context_sha256=correlation.context_sha256,
+                before_state_sha256=correlation.before_state_sha256,
+                after_state_sha256=correlation.after_state_sha256,
+                proposal_sha256=correlation.proposal_sha256,
+                generation_audit_sequence=correlation.generation_audit_sequence,
+                action=correlation.action,
+                option_id=correlation.option_id,
+                request_event_id=correlation.request_event_id,
+                send_connection_generation=correlation.send_connection_generation,
+                status=status,
+                authoritative_evidence=evidence,
+            )
+
+        async def stop() -> None:
+            self.controller_stop_calls += 1
+            self.order.append("controller-stop")
+
+        controller.decide_and_send = decide_and_send  # type: ignore[method-assign]
+        controller.take_dispatched_decision = take_dispatched_decision  # type: ignore[method-assign]
+        controller.finalize_discussion_observation = (  # type: ignore[method-assign]
+            finalize_discussion_observation
+        )
+        controller.stop = stop  # type: ignore[method-assign]
+
+
+def _seam_accepted(action: str, order: int) -> EvidenceRef:
+    kind = {
+        "chat": EvidenceRecordKind.CHAT,
+        "co_declare": EvidenceRecordKind.CO_DECLARATION,
+        "vote": EvidenceRecordKind.ACTION_ACCEPTED,
+        "ability": EvidenceRecordKind.ACTION_ACCEPTED,
+    }[action]
+    return EvidenceRef(
+        kind,
+        order,
+        (
+            EvidenceVisibility.AUTHORIZED_PRIVATE
+            if action in {"vote", "ability"}
+            else EvidenceVisibility.PUBLIC
+        ),
+    )
+
+
+async def _finalize_seam_result(
+    arbiter: BrainInvocationArbiter,
+    result: BrainDispatchResult,
+    *,
+    owner: str,
+    order: int,
+) -> ObservationAck:
+    correlation = result.outcome.discussion
+    assert correlation is not None
+    return await arbiter.finalize_discussion_observation(
+        owner=owner,  # type: ignore[arg-type]
+        correlation=correlation,
+        status=DiscussionObservationStatus.ACCEPTED,
+        reason=DiscussionTerminalReason.AUTHORITATIVE_ACCEPTED,
+        evidence=_seam_accepted(correlation.action, order),
+    )
+
+
+def _seam_stack(
+    *,
+    admission: _Admission | None = None,
+    block_controller: bool = False,
+    now: list[float] | None = None,
+    send_connection_generation: int = 1,
+    ids: tuple[str, ...] = ("i1", "i2", "i3", "i4", "i5", "i6"),
+) -> tuple[_SeamControllerHarness, _Admission, BrainInvocationArbiter]:
+    clock = (lambda: now[0]) if now is not None else time.monotonic
+    harness = _SeamControllerHarness(
+        block_controller=block_controller,
+        clock=clock,
+        send_connection_generation=send_connection_generation,
+    )
+    selected_admission = admission or _Admission(harness.order)
+    if admission is not None:
+        harness.order = selected_admission.order
+    id_values = iter(ids)
+    arbiter = BrainInvocationArbiter(
+        controller=harness.controller,
+        admission=selected_admission,
+        invocation_id_factory=lambda: next(id_values),
+        clock=clock,
+    )
+    return harness, selected_admission, arbiter
+
+
+def _start_seam_invocation(
+    arbiter: BrainInvocationArbiter,
+    *,
+    owner: str,
+    deadline: DispatchDeadline,
+) -> asyncio.Task[BrainDispatchResult]:
+    return asyncio.create_task(
+        arbiter.invoke(
+            owner=owner,  # type: ignore[arg-type]
+            priority=(
+                BrainInvocationPriority.REACTION
+                if owner == "reaction_chat"
+                else BrainInvocationPriority.RESERVATION_ACTION
+            ),
+            allowed_handles=((_chat(),) if owner == "reaction_chat" else (_vote(),)),
+            timeout_seconds=1.0,
+            dispatch_deadline=deadline,
+        )
+    )
 
 
 class Phase5BrainAdmissionTests(unittest.IsolatedAsyncioTestCase):
@@ -1165,6 +1508,74 @@ class Phase5BrainAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(admission.leases["i1"].released)
         await arbiter.stop()
 
+    async def test_completed_claim_terminal_releases_without_starting_brain(self) -> None:
+        for boundary in ("stale", "cancel", "watcher_error"):
+            with self.subTest(boundary=boundary):
+                backend = _FakeBackend()
+                broker = GenerationAdmissionBroker(
+                    {"opaque-a": _token(1)}, backend, fairness_seed="claim-terminal"
+                )
+                await broker.start()
+                session = await BrokerAdmissionSession.connect(
+                    broker.ready.host, broker.ready.port,
+                    AdmissionCredentials("opaque-a", _token(1)),
+                )
+                arbiter, _controller, world, sender, brain, _, _ = self._make(
+                    actions=(_chat(),), admission=session,
+                )
+                frames = []
+                original_send = session._send
+                original_await_claim = arbiter._await_claim
+                original_cancel_watchers = arbiter._cancel_watchers
+
+                async def observed_send(message_type, **fields):
+                    frames.append(message_type)
+                    await original_send(message_type, **fields)
+
+                async def observe_boundary(pending, claim):
+                    if boundary == "watcher_error":
+                        # Watcher fails first; CLAIM completes during watcher cleanup.
+                        async def broken_watcher(_version):
+                            raise RuntimeError("fixed watcher failure")
+
+                        async def settle_claim_before_cleanup(*watchers):
+                            self.assertEqual(await asyncio.shield(claim), AdmissionStatus.GRANTED)
+                            await original_cancel_watchers(*watchers)
+
+                        world.wait_for_update = broken_watcher
+                        arbiter._cancel_watchers = settle_claim_before_cleanup
+                    else:
+                        self.assertEqual(await asyncio.shield(claim), AdmissionStatus.GRANTED)
+                        if boundary == "stale":
+                            world.update(phase="night")
+                        else:
+                            pending.cancel_requested = True
+                    return await original_await_claim(pending, claim)
+
+                session._send = observed_send
+                arbiter._await_claim = observe_boundary
+                try:
+                    result = await asyncio.wait_for(arbiter.invoke(
+                        owner="reaction_chat", priority=BrainInvocationPriority.REACTION,
+                        allowed_handles=(_chat(),), timeout_seconds=1.0,
+                        dispatch_deadline=self._deadline(time.monotonic() + 5.0),
+                    ), timeout=3.0)
+                    self.assertEqual(result.outcome.status,
+                                     DecisionStatus.CANCELLED if boundary == "cancel" else DecisionStatus.STALE)
+                    self.assertEqual(brain.calls, [])
+                    self.assertEqual(sender.calls, [])
+                    self.assertEqual(backend.calls, [])
+                    self.assertEqual(frames.count("RELEASE"), 1)
+                    self.assertNotIn("ABANDON", frames)
+                    self.assertIsNone(broker.snapshot.claimed)
+                    self.assertEqual(broker.snapshot.pending_total, 0)
+                    self.assertIsNone(session._claimed_invocation)
+                finally:
+                    arbiter._cancel_watchers = original_cancel_watchers
+                    await arbiter.stop()
+                    await session.aclose()
+                    await broker.aclose()
+
     async def test_production_loopback_mapping_stale_abandons_before_provider_release(
         self,
     ) -> None:
@@ -1401,3 +1812,776 @@ class Phase5BrainAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commits, 1)
         self.assertEqual(brain.calls, ["chat"])
         await arbiter.stop()
+
+    async def test_p6bc_arbiter_holds_other_owner_without_holding_provider_lease(
+        self,
+    ) -> None:
+        harness, admission, arbiter = _seam_stack()
+        deadline = self._deadline()
+        reaction = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=deadline
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+        reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+        self.assertTrue(admission.leases["i1"].released)
+        self.assertFalse(admission.leases["i1"].active)
+
+        vote = _start_seam_invocation(
+            arbiter, owner="vote_ability", deadline=deadline
+        )
+        await asyncio.sleep(0)
+        self.assertEqual(len(admission.requests), 1)
+        self.assertEqual(harness.controller_calls, 1)
+        self.assertFalse(vote.done())
+        with self.assertRaisesRegex(
+            RuntimeError, "already has a pending invocation"
+        ):
+            await arbiter.invoke(
+                owner="reaction_chat",
+                priority=BrainInvocationPriority.REACTION,
+                allowed_handles=(_chat(),),
+                timeout_seconds=1.0,
+                dispatch_deadline=deadline,
+            )
+        self.assertEqual(len(admission.requests), 1)
+
+        await _finalize_seam_result(
+            arbiter, reaction_result, owner="reaction_chat", order=31
+        )
+        await _wait_until(lambda: len(admission.requests) == 2)
+        self.assertEqual(admission.requests[1].invocation_id, "i2")
+        admission.offer("i2")
+        vote_result = await asyncio.wait_for(vote, timeout=2.0)
+        await _finalize_seam_result(
+            arbiter, vote_result, owner="vote_ability", order=32
+        )
+        self.assertEqual(harness.controller_calls, 2)
+        await arbiter.stop()
+
+        # The context-free direct path still permits its historical one active
+        # plus one same-owner pending slot.  If the active call becomes a
+        # contextful gate, that already-pending same owner is rejected instead
+        # of being stranded behind its own observation.
+        harness = _SeamControllerHarness(block_controller=True)
+        arbiter = BrainInvocationArbiter(controller=harness.controller)
+        active = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=self._deadline()
+        )
+        await asyncio.wait_for(harness.controller_started.wait(), timeout=2.0)
+        same_owner_waiter = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=self._deadline()
+        )
+        await asyncio.sleep(0)
+        self.assertFalse(same_owner_waiter.done())
+        harness.controller_release.set()
+        active_result = await asyncio.wait_for(active, timeout=2.0)
+        with self.assertRaisesRegex(RuntimeError, "cannot wait behind"):
+            await asyncio.wait_for(same_owner_waiter, timeout=2.0)
+        await _finalize_seam_result(
+            arbiter, active_result, owner="reaction_chat", order=35
+        )
+        self.assertEqual(harness.controller_calls, 1)
+        await arbiter.stop()
+
+    async def test_p6bc_arbiter_expired_waiter_resumes_without_brain_start(
+        self,
+    ) -> None:
+        now = [1.0]
+        harness, admission, arbiter = _seam_stack(now=now)
+        reaction_deadline = DispatchDeadline(1, "day", 1, 1, 1, 50.0)
+        reaction = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=reaction_deadline
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+        reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+
+        vote = _start_seam_invocation(
+            arbiter,
+            owner="vote_ability",
+            deadline=DispatchDeadline(1, "day", 1, 1, 1, 5.0),
+        )
+        await asyncio.sleep(0)
+        self.assertFalse(vote.done())
+        now[0] = 5.0
+        await _finalize_seam_result(
+            arbiter, reaction_result, owner="reaction_chat", order=33
+        )
+        vote_result = await asyncio.wait_for(vote, timeout=2.0)
+        self.assertEqual(
+            vote_result.outcome.status, DecisionStatus.DEADLINE_SUPPRESSED
+        )
+        self.assertEqual(len(admission.requests), 1)
+        self.assertEqual(harness.controller_calls, 1)
+        await arbiter.stop()
+
+    async def test_p6bc_contextful_sent_registers_gate_before_cleanup_and_publication(
+        self,
+    ) -> None:
+        order: list[str] = []
+        admission = _ControlledAdmission(order)
+        admission.release_continue.clear()
+        harness, admission, arbiter = _seam_stack(admission=admission)
+        reaction = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=self._deadline()
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+        await asyncio.wait_for(admission.release_started.wait(), timeout=2.0)
+
+        self.assertFalse(reaction.done())
+        self.assertFalse(admission.leases["i1"].active)
+        self.assertFalse(admission.leases["i1"].released)
+
+        vote = _start_seam_invocation(
+            arbiter, owner="vote_ability", deadline=self._deadline()
+        )
+        await asyncio.sleep(0)
+        self.assertEqual(len(admission.requests), 1)
+        self.assertEqual(harness.controller_calls, 1)
+        vote.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await vote
+
+        admission.release_continue.set()
+        reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+        self.assertTrue(admission.leases["i1"].released)
+        await _finalize_seam_result(
+            arbiter, reaction_result, owner="reaction_chat", order=34
+        )
+        self.assertEqual(len(admission.requests), 1)
+        await arbiter.stop()
+
+    async def test_p6bc_parent_release_failure_recovers_once_poisons_and_closes_resources(
+        self,
+    ) -> None:
+        admission = _ControlledAdmission([])
+        admission.fail_release = True
+        harness, admission, arbiter = _seam_stack(admission=admission)
+        reaction = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=self._deadline()
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+
+        with self.assertRaisesRegex(
+            RuntimeError, "BrainInvocationArbiter is poisoned"
+        ):
+            await asyncio.wait_for(reaction, timeout=2.0)
+        with self.assertRaisesRegex(RuntimeError, "opaque parent release failure"):
+            await asyncio.wait_for(arbiter.stop(), timeout=2.0)
+        await _assert_no_live_seam_task()
+
+        self.assertEqual(admission.release_attempts, ["i1"])
+        self.assertEqual(admission.close_calls, 1)
+        self.assertEqual(harness.controller_stop_calls, 1)
+        self.assertEqual(len(harness.finalizer_calls), 1)
+        correlation, status, reason, evidence = harness.finalizer_calls[0]
+        self.assertIs(correlation, harness.correlations[0])
+        self.assertIs(status, DiscussionObservationStatus.RECOVERY_UNKNOWN)
+        self.assertIs(reason, DiscussionTerminalReason.OWNER_STOPPED)
+        self.assertIsNone(evidence)
+        self.assertLess(
+            admission.order.index("release-failed:i1"),
+            admission.order.index("finalizer-start"),
+        )
+        self.assertLess(
+            admission.order.index("finalizer-durable"),
+            admission.order.index("admission-close"),
+        )
+        self.assertLess(
+            admission.order.index("admission-close"),
+            admission.order.index("controller-stop"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "BrainInvocationArbiter is poisoned"
+        ):
+            await arbiter.invoke(
+                owner="vote_ability",
+                priority=BrainInvocationPriority.RESERVATION_ACTION,
+                allowed_handles=(_vote(),),
+                timeout_seconds=1.0,
+                dispatch_deadline=self._deadline(),
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "BrainInvocationArbiter is poisoned"
+        ):
+            await arbiter.finalize_discussion_observation(
+                owner="reaction_chat",
+                correlation=harness.correlations[0],
+                status=DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                reason=DiscussionTerminalReason.OWNER_STOPPED,
+            )
+
+    async def test_p6bc_successor_cancel_failure_recovers_once_poisons_and_closes_resources(
+        self,
+    ) -> None:
+        admission = _ControlledAdmission([])
+        admission.fail_successor_cancel = True
+        harness, admission, arbiter = _seam_stack(
+            admission=admission, block_controller=True
+        )
+        reaction = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=self._deadline()
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+        await asyncio.wait_for(harness.controller_started.wait(), timeout=2.0)
+        vote = _start_seam_invocation(
+            arbiter, owner="vote_ability", deadline=self._deadline()
+        )
+        await _wait_until(lambda: "i2" in admission.successors)
+        successor = admission.successors["i2"]
+
+        harness.controller_release.set()
+        for task in (reaction, vote):
+            with self.assertRaisesRegex(
+                RuntimeError, "BrainInvocationArbiter is poisoned"
+            ):
+                await asyncio.wait_for(task, timeout=2.0)
+        with self.assertRaisesRegex(
+            RuntimeError, "opaque successor cancellation failure"
+        ):
+            await asyncio.wait_for(arbiter.stop(), timeout=2.0)
+        await _assert_no_live_seam_task()
+
+        self.assertEqual(admission.successor_cancel_attempts, ["i2"])
+        self.assertEqual(admission.release_attempts, ["i1"])
+        self.assertLess(
+            admission.order.index("successor-cancel-failed:i2"),
+            admission.order.index("release-start:i1"),
+        )
+        self.assertNotIn("i2", admission.leases)
+        self.assertFalse(successor.waited)
+        self.assertEqual(len(admission.requests), 2)
+        self.assertEqual(harness.controller_calls, 1)
+        self.assertEqual(len(harness.finalizer_calls), 1)
+        self.assertIs(
+            harness.finalizer_calls[0][1],
+            DiscussionObservationStatus.RECOVERY_UNKNOWN,
+        )
+        self.assertIs(
+            harness.finalizer_calls[0][2], DiscussionTerminalReason.OWNER_STOPPED
+        )
+        self.assertIsNone(harness.finalizer_calls[0][3])
+        self.assertEqual(admission.close_calls, 1)
+        self.assertEqual(harness.controller_stop_calls, 1)
+        self.assertLess(
+            admission.order.index("finalizer-durable"),
+            admission.order.index("admission-close"),
+        )
+        self.assertLess(
+            admission.order.index("admission-close"),
+            admission.order.index("controller-stop"),
+        )
+
+    async def test_p6bc_invoke_cancel_before_consumption_direct_and_admitted_recovers_once(
+        self,
+    ) -> None:
+        for path, timing in (
+            ("direct", "before-send-completion"),
+            ("direct", "after-send-completion"),
+            ("admitted", "before-send-completion"),
+            ("admitted", "after-send-during-cleanup"),
+        ):
+            with self.subTest(path=path, timing=timing):
+                if path == "direct":
+                    harness = _SeamControllerHarness(block_controller=True)
+                    admission = None
+                    arbiter = BrainInvocationArbiter(controller=harness.controller)
+                elif timing == "after-send-during-cleanup":
+                    controlled = _ControlledAdmission([])
+                    controlled.release_continue.clear()
+                    harness, admission, arbiter = _seam_stack(
+                        admission=controlled
+                    )
+                else:
+                    harness, admission, arbiter = _seam_stack(
+                        block_controller=True
+                    )
+
+                invocation = _start_seam_invocation(
+                    arbiter, owner="reaction_chat", deadline=self._deadline()
+                )
+                if admission is not None:
+                    await _wait_until(lambda: len(admission.requests) == 1)
+                    admission.offer("i1")
+                await asyncio.wait_for(
+                    harness.controller_started.wait(), timeout=2.0
+                )
+
+                if path == "direct" and timing == "after-send-completion":
+                    def cancel_after_local_send() -> None:
+                        invocation.cancel()
+                        invocation.cancel()
+
+                    harness.after_local_send = cancel_after_local_send
+                    harness.controller_release.set()
+                elif timing == "after-send-during-cleanup":
+                    assert isinstance(admission, _ControlledAdmission)
+                    await asyncio.wait_for(
+                        admission.release_started.wait(), timeout=2.0
+                    )
+                    invocation.cancel()
+                    invocation.cancel()
+                    admission.release_continue.set()
+                else:
+                    invocation.cancel()
+                    await asyncio.sleep(0)
+                    invocation.cancel()
+                    harness.controller_release.set()
+
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(invocation, timeout=2.0)
+                await _wait_until(lambda: len(harness.finalizer_calls) == 1)
+                self.assertEqual(len(harness.finalizer_calls), 1)
+                self.assertIs(
+                    harness.finalizer_calls[0][1],
+                    DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                )
+                self.assertIs(
+                    harness.finalizer_calls[0][2],
+                    DiscussionTerminalReason.OWNER_STOPPED,
+                )
+                self.assertIsNone(harness.finalizer_calls[0][3])
+                await asyncio.wait_for(arbiter.stop(), timeout=2.0)
+                self.assertEqual(harness.controller_stop_calls, 1)
+
+    async def test_p6bc_invoke_cancel_after_consumption_leaves_feature_owner(
+        self,
+    ) -> None:
+        for path in ("direct", "admitted"):
+            with self.subTest(path=path):
+                harness = _SeamControllerHarness()
+                admission: _Admission | None = None
+                if path == "direct":
+                    arbiter = BrainInvocationArbiter(controller=harness.controller)
+                else:
+                    admission = _Admission(harness.order)
+                    ids = iter(("i1",))
+                    arbiter = BrainInvocationArbiter(
+                        controller=harness.controller,
+                        admission=admission,
+                        invocation_id_factory=lambda: next(ids),
+                    )
+                consumed = asyncio.Event()
+                feature_release = asyncio.Event()
+                returned: list[BrainDispatchResult] = []
+
+                async def feature_owner() -> None:
+                    result = await arbiter.invoke(
+                        owner="reaction_chat",
+                        priority=BrainInvocationPriority.REACTION,
+                        allowed_handles=(_chat(),),
+                        timeout_seconds=1.0,
+                        dispatch_deadline=self._deadline(),
+                    )
+                    returned.append(result)
+                    consumed.set()
+                    await feature_release.wait()
+
+                feature = asyncio.create_task(feature_owner())
+                if admission is not None:
+                    await _wait_until(lambda: len(admission.requests) == 1)
+                    admission.offer("i1")
+                await asyncio.wait_for(consumed.wait(), timeout=2.0)
+                self.assertEqual(len(returned), 1)
+                feature.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(feature, timeout=2.0)
+                await asyncio.sleep(0)
+                self.assertEqual(harness.finalizer_calls, [])
+                await _finalize_seam_result(
+                    arbiter, returned[0], owner="reaction_chat", order=40
+                )
+                self.assertEqual(len(harness.finalizer_calls), 1)
+                self.assertIs(
+                    harness.finalizer_calls[0][1],
+                    DiscussionObservationStatus.ACCEPTED,
+                )
+                await arbiter.stop()
+
+    async def test_p6bc_gate_parks_ordinary_attached_and_replacement_with_fresh_identity(
+        self,
+    ) -> None:
+        with self.subTest(topology="ordinary-pending"):
+            harness, admission, arbiter = _seam_stack()
+            reaction = _start_seam_invocation(
+                arbiter, owner="reaction_chat", deadline=self._deadline()
+            )
+            await _wait_until(lambda: len(admission.requests) == 1)
+            admission.offer("i1")
+            reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+            vote = _start_seam_invocation(
+                arbiter, owner="vote_ability", deadline=self._deadline()
+            )
+            await asyncio.sleep(0)
+            self.assertFalse(vote.done())
+            self.assertEqual([item.invocation_id for item in admission.requests], ["i1"])
+            await _finalize_seam_result(
+                arbiter, reaction_result, owner="reaction_chat", order=51
+            )
+            await _wait_until(lambda: len(admission.requests) == 2)
+            self.assertEqual(admission.requests[-1].invocation_id, "i2")
+            self.assertIs(
+                admission.requests[-1].priority, GenerationPriority.RESERVATION
+            )
+            admission.offer("i2")
+            vote_result = await asyncio.wait_for(vote, timeout=2.0)
+            await _finalize_seam_result(
+                arbiter, vote_result, owner="vote_ability", order=52
+            )
+            await arbiter.stop()
+
+        with self.subTest(topology="attached-successor"):
+            harness, admission, arbiter = _seam_stack(block_controller=True)
+            reaction = _start_seam_invocation(
+                arbiter, owner="reaction_chat", deadline=self._deadline()
+            )
+            await _wait_until(lambda: len(admission.requests) == 1)
+            admission.offer("i1")
+            await asyncio.wait_for(harness.controller_started.wait(), timeout=2.0)
+            vote = _start_seam_invocation(
+                arbiter, owner="vote_ability", deadline=self._deadline()
+            )
+            await _wait_until(lambda: "i2" in admission.successors)
+            successor = admission.successors["i2"]
+            harness.controller_release.set()
+            reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+            self.assertEqual(admission.cancelled_successors, ["i2"])
+            self.assertNotIn("i2", admission.leases)
+            self.assertFalse(successor.waited)
+            self.assertFalse(vote.done())
+            self.assertEqual(
+                [item.invocation_id for item in admission.requests], ["i1", "i2"]
+            )
+            await _finalize_seam_result(
+                arbiter, reaction_result, owner="reaction_chat", order=53
+            )
+            await _wait_until(lambda: len(admission.requests) == 3)
+            self.assertEqual(admission.requests[-1].invocation_id, "i3")
+            self.assertNotEqual(
+                admission.requests[-1].invocation_id, successor.invocation_id
+            )
+            admission.offer("i3")
+            vote_result = await asyncio.wait_for(vote, timeout=2.0)
+            await _finalize_seam_result(
+                arbiter, vote_result, owner="vote_ability", order=54
+            )
+            await arbiter.stop()
+
+        with self.subTest(topology="replacement-suspended"):
+            harness, admission, arbiter = _seam_stack()
+            reaction = _start_seam_invocation(
+                arbiter, owner="reaction_chat", deadline=self._deadline()
+            )
+            await _wait_until(lambda: len(admission.requests) == 1)
+            vote = _start_seam_invocation(
+                arbiter, owner="vote_ability", deadline=self._deadline()
+            )
+            await _wait_until(lambda: admission.replacements == [("i1", "i2")])
+            self.assertFalse(reaction.done())
+            admission.offer("i2")
+            vote_result = await asyncio.wait_for(vote, timeout=2.0)
+            self.assertFalse(reaction.done())
+            self.assertEqual(
+                [item.invocation_id for item in admission.requests], ["i1", "i2"]
+            )
+            await _finalize_seam_result(
+                arbiter, vote_result, owner="vote_ability", order=55
+            )
+            await _wait_until(lambda: len(admission.requests) == 3)
+            self.assertEqual(admission.requests[-1].invocation_id, "i3")
+            self.assertNotEqual(admission.requests[-1].invocation_id, "i1")
+            self.assertIs(admission.requests[-1].priority, GenerationPriority.REACTION)
+            admission.offer("i3")
+            reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+            await _finalize_seam_result(
+                arbiter, reaction_result, owner="reaction_chat", order=56
+            )
+            await arbiter.stop()
+
+    async def test_p6bc_gated_parked_cancel_or_expiry_never_acquires_or_starts(
+        self,
+    ) -> None:
+        with self.subTest(terminal="caller-cancelled"):
+            harness, admission, arbiter = _seam_stack()
+            reaction = _start_seam_invocation(
+                arbiter, owner="reaction_chat", deadline=self._deadline()
+            )
+            await _wait_until(lambda: len(admission.requests) == 1)
+            admission.offer("i1")
+            reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+            vote = _start_seam_invocation(
+                arbiter, owner="vote_ability", deadline=self._deadline()
+            )
+            await asyncio.sleep(0)
+            vote.cancel()
+            vote.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(vote, timeout=2.0)
+            await _finalize_seam_result(
+                arbiter, reaction_result, owner="reaction_chat", order=61
+            )
+            await asyncio.sleep(0)
+            self.assertEqual(len(admission.requests), 1)
+            self.assertEqual(harness.controller_calls, 1)
+            await arbiter.stop()
+
+        with self.subTest(terminal="expired"):
+            now = [1.0]
+            harness, admission, arbiter = _seam_stack(now=now)
+            reaction = _start_seam_invocation(
+                arbiter,
+                owner="reaction_chat",
+                deadline=DispatchDeadline(1, "day", 1, 1, 1, 50.0),
+            )
+            await _wait_until(lambda: len(admission.requests) == 1)
+            admission.offer("i1")
+            reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+            vote = _start_seam_invocation(
+                arbiter,
+                owner="vote_ability",
+                deadline=DispatchDeadline(1, "day", 1, 1, 1, 3.0),
+            )
+            await asyncio.sleep(0)
+            self.assertFalse(vote.done())
+            now[0] = 3.0
+            await _finalize_seam_result(
+                arbiter, reaction_result, owner="reaction_chat", order=62
+            )
+            vote_result = await asyncio.wait_for(vote, timeout=2.0)
+            self.assertEqual(
+                vote_result.outcome.status, DecisionStatus.DEADLINE_SUPPRESSED
+            )
+            self.assertEqual(len(admission.requests), 1)
+            self.assertEqual(harness.controller_calls, 1)
+            await arbiter.stop()
+
+    async def test_p6bc_attached_successor_cancel_precedes_release_without_offer_lane_or_lease(
+        self,
+    ) -> None:
+        admission = _ControlledAdmission([])
+        admission.successor_cancel_continue.clear()
+        harness, admission, arbiter = _seam_stack(
+            admission=admission, block_controller=True
+        )
+        reaction = _start_seam_invocation(
+            arbiter, owner="reaction_chat", deadline=self._deadline()
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+        await asyncio.wait_for(harness.controller_started.wait(), timeout=2.0)
+        vote = _start_seam_invocation(
+            arbiter, owner="vote_ability", deadline=self._deadline()
+        )
+        await _wait_until(lambda: "i2" in admission.successors)
+        successor = admission.successors["i2"]
+
+        harness.controller_release.set()
+        await asyncio.wait_for(
+            admission.successor_cancel_started.wait(), timeout=2.0
+        )
+        self.assertEqual(admission.successor_cancel_attempts, ["i2"])
+        self.assertEqual(admission.release_attempts, [])
+        self.assertFalse(reaction.done())
+        self.assertFalse(vote.done())
+        self.assertFalse(successor.future.done())
+        self.assertNotIn("i2", admission.leases)
+
+        admission.successor_cancel_continue.set()
+        reaction_result = await asyncio.wait_for(reaction, timeout=2.0)
+        self.assertEqual(admission.release_attempts, ["i1"])
+        self.assertLess(
+            admission.order.index("successor-cancelled:i2"),
+            admission.order.index("release-start:i1"),
+        )
+        self.assertFalse(successor.waited)
+        self.assertNotIn("i2", admission.leases)
+        self.assertFalse(vote.done())
+
+        vote.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(vote, timeout=2.0)
+        await _finalize_seam_result(
+            arbiter, reaction_result, owner="reaction_chat", order=63
+        )
+        self.assertEqual(len(admission.requests), 2)
+        self.assertEqual(harness.controller_calls, 1)
+        await arbiter.stop()
+
+    async def test_p6bc_vote_ability_n_to_n_plus_one_accepts_and_older_is_not_a_match(
+        self,
+    ) -> None:
+        send_generation = 7
+        cases = (
+            ("same-generation", "vote.cast", "exact", 7, True),
+            ("later-generation", "vote.cast", "exact", 8, True),
+            ("older-generation", "vote.cast", "exact", 6, False),
+            ("wrong-wire-action", "ability.use", "exact", 7, False),
+            ("wrong-request", "vote.cast", "different", 7, False),
+        )
+        for label, action, request_case, observed_generation, expected in cases:
+            with self.subTest(case=label):
+                harness, admission, arbiter = _seam_stack(
+                    send_connection_generation=send_generation
+                )
+                vote = _start_seam_invocation(
+                    arbiter, owner="vote_ability", deadline=self._deadline()
+                )
+                await _wait_until(lambda: len(admission.requests) == 1)
+                admission.offer("i1")
+                result = await asyncio.wait_for(vote, timeout=2.0)
+                correlation = result.outcome.discussion
+                assert correlation is not None
+                request_event_id = (
+                    correlation.request_event_id
+                    if request_case == "exact"
+                    else "opaque-different-request"
+                )
+                observation = ActionAcceptedObservation(
+                    order=70 + observed_generation,
+                    world_version=2,
+                    action=action,
+                    request_event_id=request_event_id,
+                    seq=20,
+                    observation_connection_generation=observed_generation,
+                    observed_at_monotonic=2.0,
+                )
+                # Matching belongs to the future feature owner and occurs
+                # before this seam.  This literal contract oracle decides only
+                # whether that owner is permitted to call the public finalizer.
+                is_exact_candidate = (
+                    observation.action == "vote.cast"
+                    and observation.request_event_id
+                    == correlation.request_event_id
+                    and observation.observation_connection_generation
+                    >= correlation.send_connection_generation
+                )
+                self.assertIs(is_exact_candidate, expected)
+                if expected:
+                    evidence = EvidenceRef(
+                        EvidenceRecordKind.ACTION_ACCEPTED,
+                        observation.order,
+                        EvidenceVisibility.AUTHORIZED_PRIVATE,
+                    )
+                    ack = await arbiter.finalize_discussion_observation(
+                        owner="vote_ability",
+                        correlation=correlation,
+                        status=DiscussionObservationStatus.ACCEPTED,
+                        reason=DiscussionTerminalReason.AUTHORITATIVE_ACCEPTED,
+                        evidence=evidence,
+                    )
+                    self.assertIs(ack.authoritative_evidence, evidence)
+                    self.assertEqual(len(harness.finalizer_calls), 1)
+                else:
+                    await asyncio.sleep(0)
+                    self.assertEqual(harness.finalizer_calls, [])
+                await arbiter.stop()
+                if not expected:
+                    self.assertEqual(len(harness.finalizer_calls), 1)
+                    self.assertIs(
+                        harness.finalizer_calls[0][2],
+                        DiscussionTerminalReason.OWNER_STOPPED,
+                    )
+
+    async def test_p6bc_contiguous_recovery_without_response_is_ambiguous_with_barrier(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "later-contiguous",
+                True,
+                False,
+                8,
+                DiscussionTerminalReason.AUTHORITATIVE_AMBIGUOUS,
+            ),
+            (
+                "later-gap-or-floor",
+                False,
+                True,
+                8,
+                DiscussionTerminalReason.RECOVERY_GAP,
+            ),
+        )
+        for label, contiguous, gap, generation, expected_reason in cases:
+            with self.subTest(case=label):
+                harness, admission, arbiter = _seam_stack(
+                    send_connection_generation=7
+                )
+                vote = _start_seam_invocation(
+                    arbiter, owner="vote_ability", deadline=self._deadline()
+                )
+                await _wait_until(lambda: len(admission.requests) == 1)
+                admission.offer("i1")
+                result = await asyncio.wait_for(vote, timeout=2.0)
+                correlation = result.outcome.discussion
+                assert correlation is not None
+                barrier = ResumeRecoveryBarrier(
+                    order=81,
+                    world_version=3,
+                    connection_generation=generation,
+                    requested_last_seq=20,
+                    replay_first_seq=21,
+                    replay_last_seq=21,
+                    replay_contiguous=contiguous,
+                    replay_gap_or_floor=gap,
+                    resumed_seq=21,
+                    state_sync_seq=21,
+                    complete=True,
+                )
+                self.assertGreater(
+                    barrier.connection_generation,
+                    correlation.send_connection_generation,
+                )
+                evidence = EvidenceRef(
+                    EvidenceRecordKind.RESUME_RECOVERY_BARRIER,
+                    barrier.order,
+                    EvidenceVisibility.AUTHORIZED_PRIVATE,
+                )
+                ack = await arbiter.finalize_discussion_observation(
+                    owner="vote_ability",
+                    correlation=correlation,
+                    status=DiscussionObservationStatus.RECOVERY_UNKNOWN,
+                    reason=expected_reason,
+                    evidence=evidence,
+                )
+                self.assertIs(ack.status, DiscussionObservationStatus.RECOVERY_UNKNOWN)
+                self.assertIs(ack.authoritative_evidence, evidence)
+                self.assertIs(harness.finalizer_calls[0][2], expected_reason)
+                await arbiter.stop()
+
+        harness, admission, arbiter = _seam_stack(
+            send_connection_generation=7
+        )
+        vote = _start_seam_invocation(
+            arbiter, owner="vote_ability", deadline=self._deadline()
+        )
+        await _wait_until(lambda: len(admission.requests) == 1)
+        admission.offer("i1")
+        result = await asyncio.wait_for(vote, timeout=2.0)
+        correlation = result.outcome.discussion
+        assert correlation is not None
+        nonterminal = ResumeRecoveryBarrier(
+            order=82,
+            world_version=3,
+            connection_generation=correlation.send_connection_generation,
+            requested_last_seq=20,
+            replay_first_seq=21,
+            replay_last_seq=21,
+            replay_contiguous=True,
+            replay_gap_or_floor=False,
+            resumed_seq=21,
+            state_sync_seq=21,
+            complete=True,
+        )
+        self.assertFalse(
+            nonterminal.connection_generation
+            > correlation.send_connection_generation
+        )
+        self.assertEqual(harness.finalizer_calls, [])
+        await arbiter.stop()
+        self.assertIs(
+            harness.finalizer_calls[0][2], DiscussionTerminalReason.OWNER_STOPPED
+        )

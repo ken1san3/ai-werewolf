@@ -14,9 +14,16 @@ import json
 import math
 import re
 from types import MappingProxyType
-from typing import Literal, Mapping, TypeAlias
+from typing import ClassVar, Literal, Mapping, TypeAlias
 from urllib.parse import urlsplit
 
+from ai_client.discussion.context import canonical_json_bytes, canonical_sha256
+from ai_client.discussion.model import (
+    AiDiscussionGenerationStatus,
+    DiscussionCapture,
+    DiscussionProposal,
+)
+from ai_client.discussion.transaction import AiDiscussionTerminalRecord
 
 LLMRole: TypeAlias = Literal["system", "user", "assistant"]
 AuditDecisionKind: TypeAlias = Literal[
@@ -363,6 +370,7 @@ class LLMBackendError(RuntimeError):
         http_status: int | None = None,
         retryable: bool = False,
         provider_quiescence: ProviderQuiescence = ProviderQuiescence.UNKNOWN,
+        backend_error_detail: str | None = None,
     ) -> None:
         if not isinstance(code, LLMBackendErrorCode):
             raise TypeError("code must be LLMBackendErrorCode")
@@ -376,10 +384,21 @@ class LLMBackendError(RuntimeError):
             raise ValueError("retryable must be a bool")
         if not isinstance(provider_quiescence, ProviderQuiescence):
             raise TypeError("provider_quiescence must be ProviderQuiescence")
+        if backend_error_detail is not None and type(backend_error_detail) is not str:
+            raise TypeError("backend_error_detail must be str or None")
+        if backend_error_detail is not None and (
+            not backend_error_detail
+            or len(backend_error_detail) > 256
+            or not all(character.isprintable() for character in backend_error_detail)
+        ):
+            raise ValueError("backend_error_detail must be a printable string in [1, 256]")
+        if backend_error_detail is not None and code is not LLMBackendErrorCode.HTTP_STATUS:
+            raise ValueError("backend_error_detail is allowed only for HTTP_STATUS")
         self.code = code
         self.http_status = http_status
         self.retryable = retryable
         self.provider_quiescence = provider_quiescence
+        self.backend_error_detail = backend_error_detail
         RuntimeError.__init__(self, code.value)
 
 
@@ -400,6 +419,26 @@ class GenerationSettings:
 
 
 @dataclass(frozen=True)
+class LlamaCppStructuredOutputConfig:
+    """Exact llama.cpp profile for schema-constrained Qwen reasoning output."""
+
+    reasoning_format: Literal["deepseek"] = "deepseek"
+    enable_thinking: Literal[False] = False
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.reasoning_format) is not str
+            or self.reasoning_format != "deepseek"
+        ):
+            raise ValueError("reasoning_format must be deepseek")
+        if (
+            type(self.enable_thinking) is not bool
+            or self.enable_thinking is not False
+        ):
+            raise ValueError("enable_thinking must be the bool False")
+
+
+@dataclass(frozen=True)
 class OpenAICompatibleBackendConfig:
     endpoint: str
     model: str
@@ -413,6 +452,7 @@ class OpenAICompatibleBackendConfig:
     max_request_bytes: int = 65536
     max_response_bytes: int = 65536
     structured_mode: Literal["json_schema", "json_object"] = "json_schema"
+    llama_cpp_structured_output: LlamaCppStructuredOutputConfig | None = None
 
     def __post_init__(self) -> None:
         _validate_endpoint(self.endpoint)
@@ -434,6 +474,13 @@ class OpenAICompatibleBackendConfig:
                 raise ValueError(f"{name} must be an int >= 1024")
         if self.structured_mode not in {"json_schema", "json_object"}:
             raise ValueError("structured_mode must be json_schema or json_object")
+        if self.llama_cpp_structured_output is not None and not isinstance(
+            self.llama_cpp_structured_output, LlamaCppStructuredOutputConfig
+        ):
+            raise TypeError(
+                "llama_cpp_structured_output must be "
+                "LlamaCppStructuredOutputConfig or None"
+            )
 
     @property
     def config_fingerprint(self) -> str:
@@ -455,6 +502,11 @@ class OpenAICompatibleBackendConfig:
             "structured_mode": self.structured_mode,
             "write_timeout_seconds": self.write_timeout_seconds,
         }
+        if self.llama_cpp_structured_output is not None:
+            value["llama_cpp_structured_output"] = {
+                "enable_thinking": self.llama_cpp_structured_output.enable_thinking,
+                "reasoning_format": self.llama_cpp_structured_output.reasoning_format,
+            }
         encoded = json.dumps(
             value,
             ensure_ascii=False,
@@ -495,6 +547,37 @@ class ShortChatConfig:
 
 
 @dataclass(frozen=True)
+class DiscussionChatConfig:
+    """Adjustable Phase 6 discussion-output profile."""
+
+    target_min_text_tokens: int = 20
+    target_max_text_tokens: int = 120
+    max_text_chars: int = 200
+    max_text_utf8_bytes: int = 600
+
+    def __post_init__(self) -> None:
+        _require_bounded_int(
+            "target_min_text_tokens", self.target_min_text_tokens, 1, 512
+        )
+        _require_bounded_int(
+            "target_max_text_tokens", self.target_max_text_tokens, 1, 512
+        )
+        _require_bounded_int("max_text_chars", self.max_text_chars, 1, 240)
+        _require_bounded_int(
+            "max_text_utf8_bytes", self.max_text_utf8_bytes, 1, 960
+        )
+        if self.target_min_text_tokens > self.target_max_text_tokens:
+            raise ValueError(
+                "target_min_text_tokens must not exceed target_max_text_tokens"
+            )
+        if self.max_text_chars > self.max_text_utf8_bytes:
+            raise ValueError("max_text_chars must not exceed max_text_utf8_bytes")
+
+
+ChatOutputProfile: TypeAlias = ShortChatConfig | DiscussionChatConfig
+
+
+@dataclass(frozen=True)
 class LLMBrainConfig:
     max_prompt_bytes: int = 32768
     max_history_records: int = 32
@@ -502,7 +585,7 @@ class LLMBrainConfig:
     max_generated_text_chars: int = 240
     max_repair_excerpt_chars: int = 1024
     max_schema_repair_attempts: int = 1
-    short_chat: ShortChatConfig | None = None
+    short_chat: ChatOutputProfile | None = None
 
     def __post_init__(self) -> None:
         if type(self.max_prompt_bytes) is not int or self.max_prompt_bytes < 1024:
@@ -523,9 +606,9 @@ class LLMBrainConfig:
             "max_schema_repair_attempts", self.max_schema_repair_attempts, 0, 1
         )
         if self.short_chat is not None and not isinstance(
-            self.short_chat, ShortChatConfig
+            self.short_chat, (ShortChatConfig, DiscussionChatConfig)
         ):
-            raise TypeError("short_chat must be ShortChatConfig or None")
+            raise TypeError("short_chat must be ChatOutputProfile or None")
 
 
 @dataclass(frozen=True)
@@ -537,7 +620,9 @@ class PromptProjection:
     prompt_sha256: str
     included_history_records: int
     omitted_history_records: int
-    short_chat: ShortChatConfig | None = None
+    short_chat: ChatOutputProfile | None = None
+    token_proxy_units: int | None = None
+    discussion_capture: DiscussionCapture | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", _freeze_messages(self.messages))
@@ -560,9 +645,30 @@ class PromptProjection:
             "omitted_history_records", self.omitted_history_records
         )
         if self.short_chat is not None and not isinstance(
-            self.short_chat, ShortChatConfig
+            self.short_chat, (ShortChatConfig, DiscussionChatConfig)
         ):
-            raise TypeError("short_chat must be ShortChatConfig or None")
+            raise TypeError("short_chat must be ChatOutputProfile or None")
+        if self.token_proxy_units is not None:
+            _require_non_negative_int("token_proxy_units", self.token_proxy_units)
+        if self.discussion_capture is not None and not isinstance(
+            self.discussion_capture, DiscussionCapture
+        ):
+            raise TypeError("discussion_capture must be DiscussionCapture or None")
+        canonical_user_json = json.dumps(
+            _plain_json(self.canonical_input),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        if (
+            len(self.messages) < 2
+            or self.messages[1].role != "user"
+            or self.messages[1].content != canonical_user_json
+        ):
+            raise ValueError(
+                "canonical_input must byte-match the emitted canonical user message"
+            )
         canonical_contract = {
             "messages": [
                 {"role": message.role, "content": message.content}
@@ -885,6 +991,235 @@ class AiAuditRecord:
             raise ValueError("provider metadata requires response text")
 
 
+@dataclass(frozen=True)
+class AiDiscussionGenerationRecord:
+    """Durable private Phase 6 generation evidence before any state mutation."""
+
+    _schema: ClassVar[str] = "aiwolf.ai-discussion-generation.v1"
+    schema_version: Literal["aiwolf.ai-discussion-generation.v1"]
+    recorded_at_utc: str
+    game_id: str
+    player_id: str
+    request_id: str
+    capture_id: str
+    phase: str
+    day: int
+    world_version: int
+    backend: BackendIdentity
+    attempt_ordinal: Literal[1, 2]
+    prompt_sha256: str
+    prompt_bytes: int
+    prompt_json: str
+    response_sha256: str | None
+    response_bytes: int | None
+    response_text: str | None
+    latency_microseconds: int
+    provider_model: str | None
+    finish_reason: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    status: AiDiscussionGenerationStatus
+    backend_error_code: LLMBackendErrorCode | None
+    validation_code: DecisionValidationCode | None
+    decision: AiAuditDecision | None
+    context_sha256: str
+    before_state_sha256: str
+    after_state_sha256: Literal[None]
+    base_revision: int
+    proposal: DiscussionProposal | None
+    proposal_sha256: str | None
+
+    def __post_init__(self) -> None:
+        if self.schema_version != self._schema:
+            raise ValueError("invalid discussion generation schema_version")
+        _validate_utc_rfc3339(self.recorded_at_utc)
+        for name in ("game_id", "player_id", "phase"):
+            _require_non_empty_string(name, getattr(self, name))
+        _require_sha256("capture_id", self.capture_id)
+        if self.request_id != f"phase6:{self.capture_id}":
+            raise ValueError("request_id must derive from capture_id")
+        _require_non_negative_int("day", self.day)
+        _require_non_negative_int("world_version", self.world_version)
+        if not isinstance(self.backend, BackendIdentity):
+            raise TypeError("backend must be BackendIdentity")
+        if type(self.attempt_ordinal) is not int or self.attempt_ordinal not in {1, 2}:
+            raise ValueError("attempt_ordinal must be 1 or 2")
+        _require_sha256("prompt_sha256", self.prompt_sha256)
+        _require_non_negative_int("prompt_bytes", self.prompt_bytes)
+        _require_non_empty_string("prompt_json", self.prompt_json)
+        prompt = self.prompt_json.encode("utf-8")
+        if (
+            len(prompt) != self.prompt_bytes
+            or hashlib.sha256(prompt).hexdigest() != self.prompt_sha256
+        ):
+            raise ValueError("prompt hash or byte count does not match prompt_json")
+
+        response_values = (
+            self.response_sha256,
+            self.response_bytes,
+            self.response_text,
+        )
+        response_present = all(value is not None for value in response_values)
+        if response_present:
+            _require_sha256("response_sha256", self.response_sha256)
+            _require_non_negative_int("response_bytes", self.response_bytes)
+            _require_non_empty_string("response_text", self.response_text)
+            assert self.response_text is not None
+            response = self.response_text.encode("utf-8")
+            if (
+                len(response) != self.response_bytes
+                or hashlib.sha256(response).hexdigest() != self.response_sha256
+            ):
+                raise ValueError(
+                    "response hash or byte count does not match response_text"
+                )
+        elif any(value is not None for value in response_values):
+            raise ValueError(
+                "response hash, byte count, and text must be all present or all null"
+            )
+
+        _require_non_negative_int("latency_microseconds", self.latency_microseconds)
+        _require_optional_non_empty_string("provider_model", self.provider_model)
+        _require_optional_non_empty_string("finish_reason", self.finish_reason)
+        _require_optional_non_negative_int("prompt_tokens", self.prompt_tokens)
+        _require_optional_non_negative_int(
+            "completion_tokens", self.completion_tokens
+        )
+        if not isinstance(self.status, AiDiscussionGenerationStatus):
+            raise TypeError("status must be AiDiscussionGenerationStatus")
+        if self.backend_error_code is not None and not isinstance(
+            self.backend_error_code, LLMBackendErrorCode
+        ):
+            raise TypeError("backend_error_code must be LLMBackendErrorCode or None")
+        if self.validation_code is not None and not isinstance(
+            self.validation_code, DecisionValidationCode
+        ):
+            raise TypeError("validation_code must be DecisionValidationCode or None")
+        if self.decision is not None and not isinstance(self.decision, AiAuditDecision):
+            raise TypeError("decision must be AiAuditDecision or None")
+        for name in ("context_sha256", "before_state_sha256"):
+            _require_sha256(name, getattr(self, name))
+        if self.after_state_sha256 is not None:
+            raise ValueError("generation after_state_sha256 must be null")
+        _require_non_negative_int("base_revision", self.base_revision)
+        if self.proposal is not None and not isinstance(
+            self.proposal, DiscussionProposal
+        ):
+            raise TypeError("proposal must be DiscussionProposal or None")
+        if self.proposal is not None and self.proposal.base_revision != self.base_revision:
+            raise ValueError("proposal base_revision does not match generation")
+
+        if (self.backend_error_code is not None) != (
+            self.status is AiDiscussionGenerationStatus.BACKEND_FAILED
+        ):
+            raise ValueError("backend_error_code does not match status")
+        if (self.validation_code is not None) != (
+            self.status
+            in {
+                AiDiscussionGenerationStatus.OUTPUT_INVALID,
+                AiDiscussionGenerationStatus.REPAIR_FAILED,
+            }
+        ):
+            raise ValueError("validation_code does not match status")
+        response_statuses = {
+            AiDiscussionGenerationStatus.OUTPUT_INVALID,
+            AiDiscussionGenerationStatus.DECISION,
+            AiDiscussionGenerationStatus.EXPLICIT_NO_DECISION,
+            AiDiscussionGenerationStatus.REPAIR_SUCCEEDED,
+            AiDiscussionGenerationStatus.REPAIR_FAILED,
+        }
+        if response_present != (self.status in response_statuses):
+            raise ValueError("response fields do not match status")
+        if not response_present and any(
+            value is not None
+            for value in (
+                self.provider_model,
+                self.finish_reason,
+                self.prompt_tokens,
+                self.completion_tokens,
+            )
+        ):
+            raise ValueError("provider metadata requires response text")
+
+        success_statuses = {
+            AiDiscussionGenerationStatus.DECISION,
+            AiDiscussionGenerationStatus.EXPLICIT_NO_DECISION,
+            AiDiscussionGenerationStatus.REPAIR_SUCCEEDED,
+        }
+        trio_present = (
+            self.decision is not None
+            and self.proposal is not None
+            and self.proposal_sha256 is not None
+        )
+        if trio_present != (self.status in success_statuses):
+            raise ValueError("decision/proposal/digest do not match status")
+        if any(
+            value is not None
+            for value in (self.decision, self.proposal, self.proposal_sha256)
+        ) and not trio_present:
+            raise ValueError("decision/proposal/digest are indivisible")
+        if trio_present:
+            assert self.decision is not None
+            assert self.proposal is not None
+            _require_sha256("proposal_sha256", self.proposal_sha256)
+            if self.proposal_sha256 != canonical_sha256(self.proposal):
+                raise ValueError("proposal_sha256 does not bind proposal")
+            if (
+                self.decision.kind != self.proposal.decision_kind
+                or self.decision.option_id != self.proposal.option_id
+                or self.decision.kind == "co_report"
+            ):
+                raise ValueError("audit decision does not match proposal identity")
+            if (
+                self.status is AiDiscussionGenerationStatus.DECISION
+                and self.decision.kind == "none"
+            ):
+                raise ValueError("DECISION requires an action identity")
+            if (
+                self.status is AiDiscussionGenerationStatus.EXPLICIT_NO_DECISION
+                and self.decision.kind != "none"
+            ):
+                raise ValueError("EXPLICIT_NO_DECISION requires none/null")
+
+
+class PromptRejectionCode(str, Enum):
+    PROMPT_INVALID = "PROMPT_INVALID"
+    PROMPT_TOO_LARGE = "PROMPT_TOO_LARGE"
+
+
+@dataclass(frozen=True)
+class AiDiscussionGenerationRecordV2(AiDiscussionGenerationRecord):
+    """New writes carry a bounded rejection reason; v1 bytes stay readable."""
+
+    _schema: ClassVar[str] = "aiwolf.ai-discussion-generation.v2"
+    schema_version: Literal["aiwolf.ai-discussion-generation.v2"]
+    prompt_rejection_code: PromptRejectionCode | None = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.prompt_rejection_code is not None and not isinstance(
+            self.prompt_rejection_code, PromptRejectionCode
+        ):
+            raise TypeError("prompt_rejection_code must be PromptRejectionCode or None")
+        if (self.prompt_rejection_code is not None) != (
+            self.status is AiDiscussionGenerationStatus.PROMPT_REJECTED
+        ):
+            raise ValueError("prompt_rejection_code does not match status")
+
+
+AiAuditEntry: TypeAlias = (
+    AiAuditRecord | AiDiscussionGenerationRecord | AiDiscussionTerminalRecord
+)
+
+
+def discussion_generation_record_sha256(
+    record: AiDiscussionGenerationRecord,
+) -> str:
+    if not isinstance(record, AiDiscussionGenerationRecord):
+        raise TypeError("record must be AiDiscussionGenerationRecord")
+    return canonical_sha256(record)
+
+
 def _validate_utc_rfc3339(value: object) -> None:
     _require_non_empty_string("recorded_at_utc", value)
     assert isinstance(value, str)
@@ -973,15 +1308,33 @@ class AuditWriteAck:
 
 
 def serialize_ai_audit(
-    record: AiAuditRecord,
+    record: AiAuditEntry,
     max_record_bytes: int = AiAuditWriterConfig().max_record_bytes,
 ) -> bytes:
     """Serialize one validated record to its sole deterministic queue representation."""
 
-    if not isinstance(record, AiAuditRecord):
+    if not isinstance(
+        record,
+        (AiAuditRecord, AiDiscussionGenerationRecord, AiDiscussionTerminalRecord),
+    ):
         raise AiAuditError(AiAuditErrorCode.RECORD_INVALID)
     if type(max_record_bytes) is not int or not 1 <= max_record_bytes <= 1_048_576:
         raise AiAuditError(AiAuditErrorCode.RECORD_INVALID)
+
+    if not isinstance(record, AiAuditRecord):
+        try:
+            payload = canonical_json_bytes(record) + b"\n"
+        except (TypeError, ValueError, UnicodeError):
+            raise AiAuditError(AiAuditErrorCode.RECORD_INVALID) from None
+        effective_limit = min(
+            max_record_bytes,
+            16 * 1024
+            if isinstance(record, AiDiscussionTerminalRecord)
+            else max_record_bytes,
+        )
+        if len(payload) > effective_limit:
+            raise AiAuditError(AiAuditErrorCode.RECORD_INVALID)
+        return payload
 
     decision = None
     if record.decision is not None:

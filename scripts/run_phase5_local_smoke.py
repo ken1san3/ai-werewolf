@@ -22,12 +22,16 @@ import platform
 from random import Random
 import re
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
 import threading
 import time
 from typing import Any, Literal
+import base64
+import ctypes
+from contextlib import ExitStack
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -55,6 +59,7 @@ from ai_client.llm import (  # noqa: E402
     ProviderTimingShapeStatus,
     StructuredGenerationRequest,
 )
+from ai_client.llm.types import LlamaCppStructuredOutputConfig  # noqa: E402
 
 
 _SCRIPT = Path(__file__).resolve()
@@ -68,6 +73,7 @@ _Q8_ROW_LIMIT_SECONDS = 120.0
 _GPU_INTERVAL_SECONDS = 0.250
 _EXTERNAL_INVENTORY_TIMEOUT_SECONDS = 0.500
 _MAX_RAW_RECORDS = 20_000
+PHASE6_MAX_OUTPUT_TOKENS = 512
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _PROVIDER_IDENTITY_TOKEN_RE = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
 _PROVIDER_COMMIT_RE = re.compile(r"^[0-9a-f]{7,64}$")
@@ -97,9 +103,9 @@ class GamePlan:
     clients: Literal[9] = 9
     brokers: Literal[1] = 1
     servers: Literal[1] = 1
-    day_seconds: Literal[60] = 60
-    vote_seconds: Literal[45] = 45
-    night_seconds: Literal[45] = 45
+    day_seconds: int = 60
+    vote_seconds: int = 45
+    night_seconds: int = 45
     silence_after_dawn_seconds: Literal[0] = 0
     hard_limit_seconds: Literal[1200] = 1200
     max_chat_attempts_per_phase: Literal[2] = 2
@@ -122,6 +128,398 @@ class Q8RowPlan:
 
 
 GAME_PLAN = GamePlan()
+_FEATURE_BRAIN_TIMEOUT_SECONDS = 44.0
+PHASE6_GAME_PLAN = replace(
+    GAME_PLAN,
+    day_seconds=180,
+    vote_seconds=60,
+    night_seconds=60,
+)
+_COMMAND_SECRET_SEGMENTS = frozenset(
+    {"key", "token", "secret", "password", "passwd", "authorization", "credential"}
+)
+
+
+@dataclass(frozen=True)
+class ProviderCommandObservation:
+    command_observation: Literal[
+        "OBSERVED", "ACCESS_DENIED", "PROCESS_NOT_FOUND", "EMPTY", "PARSE_FAILED",
+        "REDACTION_INVALID", "REDACTION_BLOCKED", "OS_ERROR"
+    ]
+    command_argv_redacted: tuple[str, ...] | None = None
+    command_canonical_sha256: str | None = None
+    environment_observation: Literal["NOT_OBSERVABLE"] = "NOT_OBSERVABLE"
+
+
+class ProviderObservationCleanupError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("PROVIDER_OBSERVATION_CLEANUP_FAILED")
+
+
+def _windows_command_line_to_argv(raw: str) -> tuple[str, ...]:
+    if not isinstance(raw, str) or "\0" in raw or len(raw.encode("utf-16-le")) // 2 > 32767:
+        raise ValueError("invalid Windows command line")
+    argc = ctypes.c_int()
+    shell32 = ctypes.windll.shell32
+    kernel32 = ctypes.windll.kernel32
+    shell32.CommandLineToArgvW.argtypes = (ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int))
+    shell32.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    kernel32.LocalFree.argtypes = (ctypes.c_void_p,)
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    pointer = shell32.CommandLineToArgvW(raw, ctypes.byref(argc))
+    if not pointer:
+        raise ValueError("CommandLineToArgvW failed")
+    try:
+        if not 1 <= argc.value <= 256:
+            raise ValueError("argv count exceeded")
+        values = tuple(pointer[index] for index in range(argc.value))
+        encoded = [value.encode("utf-8") for value in values]
+        if any(len(value) > 8192 for value in encoded) or sum(len(value) for value in encoded) > 65536:
+            raise ValueError("argv size exceeded")
+        return values
+    finally:
+        if kernel32.LocalFree(pointer):
+            raise ValueError("LocalFree failed")
+
+
+def _redact_provider_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    redact_next = False
+    for argument in argv:
+        if redact_next:
+            if argument.startswith(("-", "/")):
+                raise ValueError("REDACTION_INVALID")
+            result.append("<redacted>")
+            redact_next = False
+            continue
+        lowered = argument.casefold()
+        name = lowered.lstrip("-/").split("=", 1)[0].split(":", 1)[0]
+        secret_flag = argument.startswith(("--", "/")) and any(
+            segment in name for segment in _COMMAND_SECRET_SEGMENTS
+        )
+        if secret_flag and "=" in argument:
+            if not argument.split("=", 1)[1]:
+                raise ValueError("REDACTION_INVALID")
+            result.append(argument.split("=", 1)[0] + "=<redacted>")
+        elif secret_flag and argument.startswith("/") and ":" in argument:
+            if not argument.split(":", 1)[1]:
+                raise ValueError("REDACTION_INVALID")
+            result.append(argument.split(":", 1)[0] + ":<redacted>")
+        elif secret_flag:
+            result.append(argument)
+            redact_next = True
+        else:
+            if re.search(
+                r"(?i)\bbearer\s+\S+|[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@|"
+                r"(?:key|token|secret|password|passwd|authorization|credential)[\"']?\s*[:=]\s*[\"']?[^\s,}\"]+",
+                argument,
+            ):
+                raise PermissionError("REDACTION_BLOCKED")
+            result.append(argument)
+    if redact_next:
+        raise ValueError("REDACTION_INVALID")
+    return tuple(result)
+
+
+def _provider_observation_from_raw(raw: str) -> ProviderCommandObservation:
+    try:
+        redacted = _redact_provider_argv(_windows_command_line_to_argv(raw))
+    except PermissionError:
+        return ProviderCommandObservation("REDACTION_BLOCKED")
+    except ValueError as error:
+        if str(error) == "REDACTION_INVALID":
+            return ProviderCommandObservation("REDACTION_INVALID")
+        return ProviderCommandObservation("PARSE_FAILED")
+    canonical = json.dumps(
+        redacted, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")
+    return ProviderCommandObservation(
+        "OBSERVED", redacted, hashlib.sha256(canonical).hexdigest()
+    )
+
+
+def _public_provider_command_observation(
+    observation: ProviderCommandObservation,
+) -> dict[str, str | None]:
+    return {
+        "command_observation": observation.command_observation,
+        "command_canonical_sha256": observation.command_canonical_sha256,
+        "environment_observation": observation.environment_observation,
+    }
+
+
+async def _record_provider_command_observation(
+    pid: int,
+    path: Path,
+    existing_observation: Mapping[str, bool],
+) -> dict[str, str | None]:
+    """Explicit preflight entrypoint; callers decide when observation is authorized."""
+    if set(existing_observation) != {"command_ngl99", "command_context8192", "command_jinja"}:
+        raise ValueError("existing provider observation is incomplete")
+    if any(type(value) is not bool for value in existing_observation.values()):
+        raise TypeError("existing provider observations must be bool")
+    observation = await _observe_windows_process_command_line(pid)
+    private_value: dict[str, object] = {
+        **existing_observation,
+        "command_observation": observation.command_observation,
+        "command_argv_redacted": (
+            list(observation.command_argv_redacted)
+            if observation.command_argv_redacted is not None else None
+        ),
+        "command_canonical_sha256": observation.command_canonical_sha256,
+        "environment_observation": observation.environment_observation,
+    }
+    payload = json.dumps(
+        private_value, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8") + b"\n"
+    from scripts.phase6_private_review import _locked_path
+    with _locked_path(path, create=True) as descriptor:
+        with os.fdopen(descriptor, "wb", closefd=False) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    return _public_provider_command_observation(observation)
+
+
+async def _close_broker_metrics_resources(
+    broker: GenerationAdmissionBroker,
+    metrics_wrapper: object | None,
+    metrics_resources: ExitStack,
+) -> None:
+    first_error: BaseException | None = None
+    try:
+        await broker.aclose()
+    except BaseException as error:
+        first_error = error
+    if metrics_wrapper is not None:
+        try:
+            metrics_wrapper.flush()  # type: ignore[attr-defined]
+            os.fsync(metrics_wrapper.fileno())  # type: ignore[attr-defined]
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+    try:
+        metrics_resources.close()
+    except BaseException as error:
+        if first_error is None:
+            first_error = error
+    if first_error is not None:
+        raise first_error
+
+
+async def _cleanup_broker_child_after_error(
+    original: BaseException,
+    *,
+    broker: GenerationAdmissionBroker | None,
+    metrics: AdmissionMetrics | None,
+    backend: object | None,
+    metrics_wrapper: object | None,
+    metrics_resources: ExitStack,
+) -> None:
+    try:
+        if broker is not None:
+            await _close_broker_metrics_resources(
+                broker, metrics_wrapper, metrics_resources
+            )
+        else:
+            if metrics is not None:
+                try:
+                    await metrics.aclose()
+                except BaseException:
+                    pass
+            if backend is not None:
+                try:
+                    await backend.aclose()  # type: ignore[attr-defined]
+                except BaseException:
+                    pass
+            try:
+                metrics_resources.close()
+            except BaseException:
+                pass
+    except BaseException:
+        pass
+    raise original
+
+
+async def _observe_windows_process_command_line(
+    pid: int,
+    *,
+    create_subprocess_exec: Callable[..., Awaitable[asyncio.subprocess.Process]] = asyncio.create_subprocess_exec,
+) -> ProviderCommandObservation:
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("pid must be a positive int")
+    executable = shutil.which("powershell.exe")
+    if executable is None:
+        return ProviderCommandObservation("OS_ERROR")
+    script = (
+        f"try{{$p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' -ErrorAction Stop}}"
+        "catch [Microsoft.Management.Infrastructure.CimException]{if($_.Exception.NativeErrorCode -eq [Microsoft.Management.Infrastructure.NativeErrorCode]::AccessDenied){exit 11}else{exit 13}}"
+        "catch [System.UnauthorizedAccessException]{exit 11}catch{exit 13};"
+        "if($null -eq $p){exit 10};if([string]::IsNullOrEmpty($p.CommandLine)){exit 12};"
+        "$b=[Text.UTF8Encoding]::new($false,$true).GetBytes($p.CommandLine);"
+        "@{status='OBSERVED';command_line_base64=[Convert]::ToBase64String($b)}|ConvertTo-Json -Compress"
+    )
+    process: asyncio.subprocess.Process | None = None
+    reader_task: asyncio.Task[tuple[bytes, bool, bool]] | None = None
+    process_wait: asyncio.Task[int] | None = None
+    oversize_event = asyncio.Event()
+    oversize_wait: asyncio.Task[bool] | None = None
+
+    async def read_stdout() -> tuple[bytes, bool, bool]:
+        assert process is not None and process.stdout is not None
+        bounded = bytearray()
+        oversize = False
+        try:
+            while True:
+                chunk = await process.stdout.read(4096)
+                if not chunk:
+                    return bytes(bounded), oversize, False
+                if not oversize and len(bounded) + len(chunk) <= 131072:
+                    bounded.extend(chunk)
+                else:
+                    oversize = True
+                    oversize_event.set()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return b"", False, True
+
+    try:
+        process = await create_subprocess_exec(
+            executable, "-NoProfile", "-NonInteractive", "-Command", script,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        process_wait = asyncio.create_task(process.wait())
+        if process.stdout is None:
+            raise OSError("stdout unavailable")
+        reader_task = asyncio.create_task(read_stdout())
+        oversize_wait = asyncio.create_task(oversize_event.wait())
+        timed_out = False
+        try:
+            async with asyncio.timeout(2.0):
+                while not (process_wait.done() and reader_task.done()):
+                    pending = {
+                        task for task in (process_wait, reader_task, oversize_wait)
+                        if not task.done()
+                    }
+                    done, _ = await asyncio.wait(
+                        pending,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if oversize_wait in done and oversize_event.is_set():
+                        break
+                    if reader_task in done and reader_task.result()[2]:
+                        break
+        except TimeoutError:
+            timed_out = True
+        if timed_out:
+            return ProviderCommandObservation("OS_ERROR")
+        if not process_wait.done() or not reader_task.done():
+            return ProviderCommandObservation("PARSE_FAILED")
+        encoded, oversize, read_error = reader_task.result()
+        if read_error or oversize:
+            return ProviderCommandObservation("PARSE_FAILED")
+        exit_states = {10: "PROCESS_NOT_FOUND", 11: "ACCESS_DENIED", 12: "EMPTY", 13: "OS_ERROR"}
+        if process.returncode in exit_states:
+            return ProviderCommandObservation(exit_states[process.returncode])  # type: ignore[arg-type]
+        if process.returncode != 0:
+            return ProviderCommandObservation("PARSE_FAILED")
+        value = json.loads(encoded)
+        if not isinstance(value, dict) or set(value) != {"status", "command_line_base64"} or value["status"] != "OBSERVED" or not isinstance(value["command_line_base64"], str):
+            return ProviderCommandObservation("PARSE_FAILED")
+        raw = base64.b64decode(value["command_line_base64"], validate=True).decode("utf-8", errors="strict")
+        if len(raw.encode("utf-8")) > 131072:
+            return ProviderCommandObservation("PARSE_FAILED")
+        return _provider_observation_from_raw(raw)
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+        return ProviderCommandObservation("PARSE_FAILED" if process is not None else "OS_ERROR")
+    finally:
+        if oversize_wait is not None:
+            oversize_wait.cancel()
+            await asyncio.gather(oversize_wait, return_exceptions=True)
+        if process is not None and process_wait is not None:
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(asyncio.shield(process_wait), 1.0)
+                except TimeoutError:
+                    pass
+            kill_deadline: float | None = None
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                kill_deadline = asyncio.get_running_loop().time() + 1.0
+                remaining = max(0.0, kill_deadline - asyncio.get_running_loop().time())
+                try:
+                    await asyncio.wait_for(asyncio.shield(process_wait), remaining)
+                except TimeoutError:
+                    pass
+            if kill_deadline is not None and reader_task is not None and not reader_task.done():
+                remaining = max(0.0, kill_deadline - asyncio.get_running_loop().time())
+                if remaining > 0:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(reader_task), remaining)
+                    except TimeoutError:
+                        pass
+            if reader_task is not None and not reader_task.done():
+                reader_task.cancel()
+                remaining = (
+                    max(0.0, kill_deadline - asyncio.get_running_loop().time())
+                    if kill_deadline is not None else 0.0
+                )
+                if remaining > 0:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(reader_task, return_exceptions=True), remaining
+                        )
+                    except TimeoutError:
+                        pass
+                else:
+                    await asyncio.sleep(0)
+            if not process_wait.done():
+                process_wait.cancel()
+                remaining = (
+                    max(0.0, kill_deadline - asyncio.get_running_loop().time())
+                    if kill_deadline is not None else 0.0
+                )
+                if remaining > 0:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(process_wait, return_exceptions=True), remaining
+                        )
+                    except TimeoutError:
+                        pass
+                else:
+                    await asyncio.sleep(0)
+            if process.returncode is None or (
+                not process_wait.done()
+                or (reader_task is not None and not reader_task.done())
+            ):
+                raise ProviderObservationCleanupError()
+
+
+def _apply_game_plan(preset: Any, plan: GamePlan) -> Any:
+    """Apply the selected runner plan to the exact preset passed to the server."""
+    return replace(
+        preset,
+        rules=replace(
+            preset.rules,
+            day_seconds=plan.day_seconds,
+            vote_seconds=plan.vote_seconds,
+            night_seconds=plan.night_seconds,
+            silence_after_dawn_seconds=plan.silence_after_dawn_seconds,
+        ),
+    )
 Q8_PLAN = (
     Q8RowPlan(
         "Q8-A",
@@ -161,6 +559,7 @@ class RunConfig:
     max_seconds: float
     sanitized_arguments: tuple[str, ...]
     diagnostic_environment: ProviderDiagnosticEnvironment | None = None
+    phase6: bool = False
 
 
 @dataclass(frozen=True)
@@ -311,6 +710,10 @@ def _sanitized_arguments(args: argparse.Namespace) -> tuple[str, ...]:
     ]
     if args.q8:
         values.append("--q8")
+    if bool(getattr(args, "phase6", False)):
+        values.append("--phase6")
+        for name in ("phase6_read_timeout_seconds", "phase6_request_timeout_seconds"):
+            values.extend(("--" + name.replace("_", "-"), str(getattr(args, name, None))))
     if bool(getattr(args, "q8_provider_timing_diagnostic", False)):
         values.extend(
             (
@@ -715,6 +1118,37 @@ def _prepare_diagnostic_environment(
     )
 
 
+def _validate_phase6_timeouts(read: object, request: object) -> tuple[float, float]:
+    for value in (read, request):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError("Phase 6 requires explicit finite positive read/request timeouts")
+    if read > request or request >= _FEATURE_BRAIN_TIMEOUT_SECONDS:
+        raise ValueError("Phase 6 requires read <= request < 44 seconds")
+    return float(read), float(request)
+
+
+def _game_broker_config(settings: LocalLLMSettings, *, phase6: bool) -> GenerationBrokerConfig:
+    config = GenerationBrokerConfig()
+    if not phase6:
+        return config
+    _, request = _validate_phase6_timeouts(
+        settings.read_timeout_seconds, settings.request_timeout_seconds
+    )
+    drain = max(config.provider_drain_grace_seconds, request)
+    return replace(
+        config,
+        provider_drain_grace_seconds=drain,
+        shutdown_grace_seconds=max(
+            config.shutdown_grace_seconds, drain + config.cancellation_grace_seconds
+        ),
+    )
+
+
 def _prepare_run(
     args: argparse.Namespace,
     environ: Mapping[str, str] | None = None,
@@ -724,10 +1158,23 @@ def _prepare_run(
         effective["AIWOLF_LLM_ENDPOINT"] = args.endpoint
     if args.model is not None:
         effective["AIWOLF_LLM_MODEL"] = args.model
+    phase6 = bool(getattr(args, "phase6", False))
     settings = replace(
         LocalLLMSettings.from_env(effective),
-        generation=GenerationSettings(max_output_tokens=96),
+        generation=GenerationSettings(
+            max_output_tokens=PHASE6_MAX_OUTPUT_TOKENS if phase6 else 96
+        ),
     )
+    read = getattr(args, "phase6_read_timeout_seconds", None)
+    request = getattr(args, "phase6_request_timeout_seconds", None)
+    if phase6:
+        read, request = _validate_phase6_timeouts(read, request)
+        settings = replace(
+            settings, read_timeout_seconds=read, request_timeout_seconds=request,
+            llama_cpp_structured_output=LlamaCppStructuredOutputConfig(),
+        )
+    elif read is not None or request is not None:
+        raise ValueError("Phase 6 timeouts require --phase6")
     if isinstance(args.seed, bool) or not isinstance(args.seed, int):
         raise ValueError("--seed must be an integer")
     if (
@@ -737,6 +1184,8 @@ def _prepare_run(
         or not 0 < args.max_seconds <= _SMOKE_HARD_LIMIT_SECONDS
     ):
         raise ValueError("--max-seconds must be in (0, 1200]")
+    if bool(getattr(args, "phase6", False)) and settings.model != "Qwen3.5-9B-Q4_K_M.gguf":
+        raise ValueError("Phase 6 requires the exact canonical 9B identity")
     gpu_model_pid = args.gpu_model_pid
     if gpu_model_pid is not None and (
         type(gpu_model_pid) is not int
@@ -749,6 +1198,17 @@ def _prepare_run(
         raise FileExistsError(f"--output-dir must not exist: {output_dir}")
     if output_dir == PROJECT_ROOT or PROJECT_ROOT in output_dir.parents and output_dir.name in {"", "."}:
         raise ValueError("--output-dir must identify a new evidence directory")
+    if phase6:
+        expected_parent = (
+            PROJECT_ROOT / "logs" / "phase6-private-evidence" / "game"
+        ).resolve(strict=False)
+        leaf_pattern = re.compile(
+            r"^[A-Z][A-Z0-9_-]{1,31}-\d{8}T\d{12}Z$"
+        )
+        if output_dir.parent != expected_parent or leaf_pattern.fullmatch(output_dir.name) is None:
+            raise ValueError(
+                "Phase 6 --output-dir must be logs/phase6-private-evidence/game/<task>-<utc>"
+            )
     diagnostic_mode = bool(getattr(args, "q8_provider_timing_diagnostic", False))
     if bool(args.q8) and diagnostic_mode:
         raise ValueError("--q8 and --q8-provider-timing-diagnostic are mutually exclusive")
@@ -765,7 +1225,95 @@ def _prepare_run(
         max_seconds=float(args.max_seconds),
         sanitized_arguments=_sanitized_arguments(args),
         diagnostic_environment=diagnostic_environment,
+        phase6=bool(getattr(args, "phase6", False)),
     )
+
+
+def _phase6_envelopes(content: Any, preset: Any, game: Any) -> dict[str, object]:
+    """Project only the exact validated objects owned by the server composition."""
+    from ai_client.discussion.context import canonical_json_bytes, canonical_sha256, validate_discussion_bootstrap
+    from server.aiwolf_core.models import PlayerRoleState, resolve_effective_win_conditions
+    from server.aiwolf_core.targets import effective_attributes, chat_channels_for, passives_for
+
+    if game.content is not content or game.rules is not preset.rules:
+        raise ValueError("discussion source objects do not belong to this game")
+    material = json.loads(canonical_json_bytes({
+        "schema_version": "aiwolf.content-manifest.v1",
+        "content_pack": content, "effective_preset": preset,
+    }))
+    manifest_hash = canonical_sha256(material)
+    envelopes = {}
+    for player_id, player in game.players.items():
+        wins = resolve_effective_win_conditions(
+            PlayerRoleState(player_id, player.role, player.modifiers), content.teams
+        )
+        context = {
+            "schema_version": "aiwolf.discussion-context.v1",
+            "game_id": game.game_id, "player_id": player_id, "role_id": player.role.id,
+            "modifier_ids": sorted(item.definition.id for item in player.modifiers),
+            "content_manifest_sha256": manifest_hash,
+            **asdict(effective_attributes(player)),
+            "win_conditions": sorted((dict(item.data) for item in wins), key=canonical_json_bytes),
+            "abilities": [{
+                "ability_id": item.id, "timing": item.timing,
+                "available_from_night": item.available_from_night, "priority": item.priority,
+                "resolution": item.resolution, "target_selector": item.target.selector,
+                "target_count": item.target.count, "uses_per_night": item.uses.per_night,
+                "uses_per_game": item.uses.per_game, "no_selection": item.no_selection,
+                "effect_ids": sorted(effect.id for effect in item.effects),
+            } for item in sorted(player.role.abilities, key=lambda item: item.id)],
+            "passives": sorted(({
+                "type": item.type, "priority": item.priority,
+                "effect_ids": sorted(effect.id for effect in item.effects),
+            } for item in passives_for(player)), key=canonical_json_bytes),
+            "chat_channels": [{"channel_id": channel, "is_public": content.chat_channels[channel].is_public}
+                              for channel in sorted(chat_channels_for(player))],
+            "knows_teammates": player.role.knowledge.knows_teammates or any(
+                item.definition.knowledge.knows_teammates for item in player.modifiers),
+            "authorized_known_player_ids": [], "known_players_complete": False,
+        }
+        envelope = {"schema_version": "aiwolf.discussion-bootstrap.v1",
+                    "manifest_material": material, "manifest_sha256": manifest_hash,
+                    "context_payload": context, "context_sha256": canonical_sha256(context)}
+        pending = validate_discussion_bootstrap(envelope, network_game_id=game.game_id, player_id=player_id)
+        pending.discard_manifest()
+        envelopes[player_id] = envelope
+    return envelopes
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate private JSON key")
+        value[key] = item
+    return value
+
+
+def _consume_phase6_relay(path: Path, game_id: str, player_ids: Sequence[str]) -> dict[str, object]:
+    """Validate the complete private relay, then remove it before any client launch."""
+    from ai_client.discussion.context import validate_discussion_bootstrap
+    if len(player_ids) != 9 or len(set(player_ids)) != 9:
+        raise ValueError("discussion relay needs exactly nine unique seats")
+    with path.open("rb") as source:
+        payload = source.read(9 * 80 * 1024 + 8193)
+    if len(payload) > 9 * 80 * 1024 + 8192:
+        raise ValueError("discussion relay exceeds bound")
+    value = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_json_object)
+    if not isinstance(value, dict) or set(value) != set(player_ids):
+        raise ValueError("discussion relay seat set mismatch")
+    identity = None
+    for player_id in player_ids:
+        pending = validate_discussion_bootstrap(value[player_id], network_game_id=game_id, player_id=player_id)
+        try:
+            current = (pending.manifest_sha256, pending.canonical_manifest_bytes())
+            if identity is not None and current != identity:
+                raise ValueError("discussion relay manifests differ")
+            identity = current
+        finally:
+            pending.discard_manifest()
+    path.unlink()
+    return value
 
 
 def nearest_rank(values: Sequence[int], percentile: float) -> int | None:
@@ -1368,6 +1916,18 @@ def _write_manifest(
     metrics_path: Path,
     player_to_client: Mapping[str, str],
 ) -> Path:
+    manifest = _manifest_value(ai_dir, statuses, metrics_path, player_to_client)
+    target = ai_dir / "manifest.json"
+    _write_private_json_atomic(target, manifest)
+    return target
+
+
+def _manifest_value(
+    ai_dir: Path,
+    statuses: Mapping[str, Mapping[str, object]],
+    metrics_path: Path,
+    player_to_client: Mapping[str, str],
+) -> dict[str, object]:
     shards: dict[str, object] = {}
     for player_id, status in sorted(statuses.items()):
         audit = status.get("audit")
@@ -1375,16 +1935,13 @@ def _write_manifest(
             raise ValueError("client audit evidence missing")
         path = ai_dir / str(audit["path"])
         shards[player_id] = _manifest_entry(path, ai_dir)
-    manifest = {
+    return {
         "schema": "aiwolf.phase5-private-manifest.v1",
         "player_to_opaque_client_id": dict(sorted(player_to_client.items())),
         "shards": shards,
         "metadata": _manifest_entry(metrics_path, ai_dir),
         "terminal": True,
     }
-    target = ai_dir / "manifest.json"
-    _write_private_json_atomic(target, manifest)
-    return target
 
 
 def _validate_manifest(path: Path, ai_dir: Path) -> list[str]:
@@ -1402,6 +1959,8 @@ def _validate_manifest(path: Path, ai_dir: Path) -> list[str]:
     else:
         errors.append("manifest shards missing")
     entries.append(value.get("metadata"))
+    if value.get("schema") == "aiwolf.phase6-private-manifest.v1":
+        entries.append(value.get("accepted_text"))
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
             errors.append("manifest entry malformed")
@@ -1723,6 +2282,442 @@ def _validate_game_evidence(
     return errors
 
 
+def _validate_phase6_captured_identity(
+    record: Mapping[str, Any], projected: Mapping[str, Any],
+) -> None:
+    """Bind duplicated audited identities to the actual bounded prompt input.
+
+    The projection omits some original state, so this does not reconstruct a
+    capture hash or state hash. It verifies every identity counterpart retained
+    by the existing projection before the collector trusts its audit buckets.
+    """
+    from ai_client.discussion.context import canonical_sha256
+    from ai_client.discussion.model import (
+        DiscussionTrigger, EvidenceRef, EvidenceRecordKind, EvidenceVisibility,
+    )
+
+    def require_equal(actual: object, expected: object) -> None:
+        # Ordinary equality would accept True as day/world/revision 1.
+        if type(actual) is not type(expected) or actual != expected:
+            raise ValueError("captured input identity mismatch")
+
+    try:
+        require_equal(projected["schema_version"], "aiwolf.discussion-prompt.v1")
+        context, capture = projected["context"], projected["capture"]
+        state, actions = projected["state"]["identity"], projected["action_context"]
+        trigger = capture["trigger"]
+        require_equal(context["game_id"], record["game_id"])
+        require_equal(context["player_id"], record["player_id"])
+        for capture_name, audit_name in (
+            ("capture_id", "capture_id"), ("context_sha256", "context_sha256"),
+            ("state_sha256", "before_state_sha256"), ("base_revision", "base_revision"),
+            ("world_version", "world_version"),
+        ):
+            require_equal(capture[capture_name], record[audit_name])
+        require_equal(canonical_sha256(context), capture["context_sha256"])
+        for name in ("day", "phase"):
+            require_equal(trigger[name], record[name])
+            require_equal(state[name], trigger[name])
+        for name in ("epoch", "fact_revision", "world_version", "last_applied_seq"):
+            if type(capture[name]) is not int or capture[name] < 0:
+                raise ValueError("captured input identity invalid")
+            require_equal(state[name], capture[name])
+        require_equal(state["revision"], capture["base_revision"])
+        require_equal(actions["world_version"], capture["world_version"])
+        require_equal(actions["world_last_applied_seq"], capture["last_applied_seq"])
+        require_equal(actions["network_last_seq"], capture["last_applied_seq"])
+        players = capture["current_player_ids"]
+        if (not isinstance(players, list) or not players
+                or any(type(player) is not str for player in players)
+                or players != sorted(set(players)) or context["player_id"] not in players):
+            raise ValueError("captured player identity invalid")
+        if type(capture["capture_ordinal"]) is not int or capture["capture_ordinal"] < 1:
+            raise ValueError("captured ordinal invalid")
+        typed_trigger = dict(trigger)
+        if trigger["source"] is not None:
+            source = trigger["source"]
+            if set(source) != {"record_kind", "order", "visibility"}:
+                raise ValueError("captured trigger source invalid")
+            typed_trigger["source"] = EvidenceRef(
+                EvidenceRecordKind(source["record_kind"]), source["order"],
+                EvidenceVisibility(source["visibility"]),
+            )
+        DiscussionTrigger(**typed_trigger)
+        for option in actions["options"]:
+            for name in ("day", "phase", "connection_generation", "action_generation"):
+                require_equal(option[name], trigger[name])
+    except (KeyError, TypeError, AttributeError, UnicodeError):
+        # Corrupt/missing fields must not become optional, nor echo private data.
+        raise ValueError("captured input identity invalid") from None
+
+
+class Phase6PopulationExceeded(ValueError):
+    reason: Literal["ACCEPTED_TEXT_POPULATION_EXCEEDED"]
+
+    def __init__(self, accepted_text_count: int) -> None:
+        self.accepted_text_count = accepted_text_count
+        self.reason = "ACCEPTED_TEXT_POPULATION_EXCEEDED"
+        super().__init__(self.reason)
+
+
+def _enforce_phase6_population_limit(accepted_text_count: int) -> None:
+    """Fail closed before a 513th accepted text can be published."""
+    if type(accepted_text_count) is not int or accepted_text_count < 0:
+        raise ValueError("accepted text count invalid")
+    if accepted_text_count > 512:
+        raise Phase6PopulationExceeded(accepted_text_count)
+
+
+def _expected_chat_terminal_visibility(
+    generation: Mapping[str, Any], terminal: Mapping[str, Any]
+) -> str:
+    prompt_json = generation.get("prompt_json")
+    if not isinstance(prompt_json, str):
+        raise ValueError("chat visibility prompt invalid")
+    prompt = json.loads(prompt_json, object_pairs_hook=_unique_json_object)
+    projected = json.loads(
+        prompt["messages"][1]["content"], object_pairs_hook=_unique_json_object
+    )
+    options = [
+        option
+        for option in projected["action_context"]["options"]
+        if option.get("option_id") == terminal.get("option_id")
+        and option.get("action_kind") == "chat"
+    ]
+    if len(options) != 1 or type(options[0].get("channel")) is not str:
+        raise ValueError("chat visibility option invalid")
+    descriptors = [
+        descriptor
+        for descriptor in projected["context"]["chat_channels"]
+        if descriptor.get("channel_id") == options[0]["channel"]
+    ]
+    if len(descriptors) != 1 or type(descriptors[0].get("is_public")) is not bool:
+        raise ValueError("chat visibility descriptor invalid")
+    return "PUBLIC" if descriptors[0]["is_public"] else "AUTHORIZED_PRIVATE"
+
+
+def _validate_phase6_generation(record: Mapping[str, Any]) -> None:
+    """Restore the versioned audit types without rewriting the hashed raw row."""
+    from dataclasses import fields
+    from ai_client.discussion.model import AiDiscussionGenerationStatus
+    from ai_client.llm.decision import DecisionValidationError, _parse_proposal
+    from ai_client.llm.types import (
+        AiAuditDecision, AiDiscussionGenerationRecord, AiDiscussionGenerationRecordV2,
+        BackendIdentity, DecisionValidationCode, LLMBackendErrorCode, PromptRejectionCode,
+    )
+
+    record_type = {
+        "aiwolf.ai-discussion-generation.v1": AiDiscussionGenerationRecord,
+        "aiwolf.ai-discussion-generation.v2": AiDiscussionGenerationRecordV2,
+    }.get(record.get("schema_version"))
+    if record_type is None or set(record) != {field.name for field in fields(record_type)}:
+        raise ValueError("generation fields invalid")
+    typed = dict(record)
+    try:
+        backend = typed["backend"]
+        if not isinstance(backend, dict) or set(backend) != {f.name for f in fields(BackendIdentity)}:
+            raise ValueError("generation backend fields invalid")
+        typed["backend"] = BackendIdentity(**backend)
+        typed["status"] = AiDiscussionGenerationStatus(typed["status"])
+        for name, enum in (
+            ("backend_error_code", LLMBackendErrorCode),
+            ("validation_code", DecisionValidationCode),
+            ("prompt_rejection_code", PromptRejectionCode),
+        ):
+            if typed.get(name) is not None:
+                typed[name] = enum(typed[name])
+        if typed["decision"] is not None:
+            decision = typed["decision"]
+            if not isinstance(decision, dict) or set(decision) != {f.name for f in fields(AiAuditDecision)}:
+                raise ValueError("generation decision fields invalid")
+            if not isinstance(decision["ability_target_player_ids"], list):
+                raise ValueError("generation decision targets invalid")
+            typed["decision"] = AiAuditDecision(**decision)
+        if typed["proposal"] is not None:
+            typed["proposal"] = _parse_proposal(typed["proposal"])
+        record_type(**typed)
+    except (DecisionValidationError, TypeError, ValueError, KeyError, AttributeError):
+        raise ValueError("generation typed contract invalid") from None
+
+
+def _phase6_semantic_population(
+    shards: Mapping[str, Sequence[Mapping[str, Any]]],
+    accepted_text: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    """One machine semantic authority; private linkage contains no duplicate text.
+
+    Shard line numbers are the existing durable audit writer's sequences. The
+    future private Reviewer reads text only from that hash-verified generation.
+    """
+    from ai_client.discussion.context import canonical_sha256
+    from ai_client.discussion.projection import token_proxy_units
+    from jsonschema import Draft202012Validator
+    from dataclasses import fields
+    from ai_client.discussion.transaction import AiDiscussionTerminalRecord, _PRE_RESULT_GENERATION_STATUSES
+    from ai_client.discussion.model import DiscussionTerminalStatus, DiscussionTerminalReason, EvidenceRef, EvidenceRecordKind, EvidenceVisibility
+    generations = {}
+    accepted = {}
+    counts = Counter()
+    status_counts, rejection_counts = Counter(), Counter()
+    legacy_rejection_missing = 0
+    marker_count = 0
+    extended_accounting = False
+    generation_schemas = {"aiwolf.ai-discussion-generation.v1", "aiwolf.ai-discussion-generation.v2"}
+    success_statuses = {"DECISION", "EXPLICIT_NO_DECISION", "REPAIR_SUCCEEDED"}
+    latencies, prompt_bytes, proxies, provider_tokens = [], [], [], []
+    pre_votes = 0
+    for player, records in shards.items():
+        seen_terminals = set()
+        for sequence, record in enumerate(records, 1):
+            schema = record.get("schema_version")
+            if schema in generation_schemas:
+                _validate_phase6_generation(record)
+                if record.get("player_id") != player:
+                    raise ValueError("semantic generation status or identity invalid")
+                if type(record["attempt_ordinal"]) is not int or record["attempt_ordinal"] not in {1, 2}:
+                    raise ValueError("generation attempt ordinal invalid")
+                for name in ("day", "world_version", "prompt_bytes", "latency_microseconds", "base_revision"):
+                    if type(record[name]) is not int or record[name] < 0:
+                        raise ValueError("generation numeric field invalid")
+                successful = record["status"] in success_statuses
+                status_counts[record["status"]] += 1
+                extended_accounting |= schema.endswith(".v2") or record["status"] not in success_statuses | {"CANCELLED"}
+                if record["status"] == "PROMPT_REJECTED":
+                    if schema.endswith(".v1"):
+                        legacy_rejection_missing += 1
+                    else:
+                        rejection_counts[record["prompt_rejection_code"]] += 1
+                key = (player, record.get("request_id"), record.get("attempt_ordinal"))
+                if key in generations or record["capture_id"] in seen_terminals:
+                    raise ValueError("duplicate semantic generation")
+                if record["status"] in {"REPAIR_FAILED", "REPAIR_SUCCEEDED"} and record["attempt_ordinal"] != 2:
+                    raise ValueError("repair generation ordinal invalid")
+                if record["attempt_ordinal"] == 2:
+                    first = generations.get((player, record["request_id"], 1))
+                    if first is None or first[1]["status"] != "OUTPUT_INVALID":
+                        raise ValueError("repair initial generation missing")
+                    if any(record[name] != first[1][name] for name in (
+                        "capture_id", "context_sha256", "before_state_sha256", "base_revision", "day", "phase", "game_id"
+                    )):
+                        raise ValueError("repair generation identity mismatch")
+                prompt = record.get("prompt_json")
+                if not isinstance(prompt, str) or hashlib.sha256(prompt.encode()).hexdigest() != record.get("prompt_sha256") or len(prompt.encode()) != record.get("prompt_bytes"):
+                    raise ValueError("semantic prompt digest invalid")
+                prompt_value = json.loads(prompt, object_pairs_hook=_unique_json_object)
+                projected = json.loads(prompt_value["messages"][1]["content"], object_pairs_hook=_unique_json_object)
+                marker = isinstance(projected, dict) and "projection_rejected" in projected
+                if marker:
+                    if (
+                        record["status"] != "PROMPT_REJECTED"
+                        or set(projected) != {"projection_rejected", "schema_version"}
+                        or projected["schema_version"] != "aiwolf.discussion-prompt-rejected.v1"
+                        or projected["projection_rejected"] not in {"PROMPT_INVALID", "PROMPT_TOO_LARGE"}
+                        or (schema.endswith(".v2") and projected["projection_rejected"] != record["prompt_rejection_code"])
+                        or set(prompt_value) != {"messages", "output_schema"}
+                        or len(prompt_value["messages"]) != 2
+                        or any(set(message) != {"role", "content"} for message in prompt_value["messages"])
+                        or [message["role"] for message in prompt_value["messages"]] != ["system", "user"]
+                        or prompt_value["output_schema"] != {"additionalProperties": False, "properties": {}, "required": [], "type": "object"}
+                    ):
+                        raise ValueError("prompt rejection marker invalid")
+                    marker_count += 1
+                    capture = None
+                else:
+                    _validate_phase6_captured_identity(record, projected)
+                    capture = projected["capture"]
+                    if capture["capture_id"] != record["capture_id"] or record["request_id"] != "phase6:" + record["capture_id"] or canonical_sha256(projected["context"]) != record["context_sha256"]:
+                        raise ValueError("semantic capture context identity invalid")
+                proposal = record.get("proposal")
+                if proposal is not None and canonical_sha256(proposal) != record.get("proposal_sha256"):
+                    raise ValueError("semantic proposal digest invalid")
+                if successful:
+                    response = record["response_text"].encode()
+                    if hashlib.sha256(response).hexdigest() != record.get("response_sha256") or len(response) != record.get("response_bytes"):
+                        raise ValueError("semantic response digest invalid")
+                    response_value = json.loads(record["response_text"], object_pairs_hook=_unique_json_object)
+                    if not Draft202012Validator(prompt_value["output_schema"]).is_valid(response_value) or response_value.get("discussion") != proposal:
+                        raise ValueError("semantic response schema or audited proposal mismatch")
+                    decision = record["decision"]
+                    if decision is None or response_value["decision"]["kind"] != decision["kind"] or response_value["decision"].get("option_id") != decision.get("option_id"):
+                        raise ValueError("semantic audited decision mismatch")
+                    if decision["kind"] in {"chat", "co_declare"} and response_value["decision"].get("message" if decision["kind"] == "chat" else "comment") != decision["text"]:
+                        raise ValueError("semantic audited text mismatch")
+                    pairs = {"vote": ("target_player_id", "vote_target_player_id"),
+                             "ability": ("target_player_ids", "ability_target_player_ids"),
+                             "co_declare": ("claimed_role_id", "claimed_role_id")}
+                    if decision["kind"] in pairs:
+                        response_key, audit_key = pairs[decision["kind"]]
+                        if response_value["decision"].get(response_key) != decision.get(audit_key):
+                            raise ValueError("semantic audited action mismatch")
+                    if proposal["decision_kind"] != decision["kind"] or proposal["option_id"] != decision.get("option_id") or proposal["base_revision"] != record["base_revision"]:
+                        raise ValueError("semantic proposal decision identity mismatch")
+                generations[key] = (sequence, record, projected)
+                if record.get("attempt_ordinal") == 1 and capture is not None and capture["trigger"]["kind"] in {"INITIAL_CHAT", "PEER_CHAT"}:
+                    counts[(player, record["day"], record["phase"])] += 1
+                latencies.append(record["latency_microseconds"])
+                prompt_bytes.append(record["prompt_bytes"])
+                proxies.append(token_proxy_units(prompt))
+                if record.get("prompt_tokens") is not None:
+                    provider_tokens.append(record["prompt_tokens"])
+            elif schema == "aiwolf.ai-discussion-terminal.v1":
+                if set(record) != {field.name for field in fields(AiDiscussionTerminalRecord)}:
+                    raise ValueError("terminal fields invalid")
+                typed_terminal = dict(record)
+                typed_terminal["status"] = DiscussionTerminalStatus(record["status"])
+                typed_terminal["reason"] = DiscussionTerminalReason(record["reason"])
+                ref = record["authoritative_evidence"]
+                if ref is not None:
+                    if not isinstance(ref, dict) or set(ref) != {"record_kind", "order", "visibility"}:
+                        raise ValueError("terminal reference fields invalid")
+                    typed_terminal["authoritative_evidence"] = EvidenceRef(
+                        EvidenceRecordKind(ref["record_kind"]), ref["order"], EvidenceVisibility(ref["visibility"]))
+                AiDiscussionTerminalRecord(**typed_terminal)
+                capture_id = record.get("capture_id")
+                if capture_id in seen_terminals or record.get("player_id") != player:
+                    raise ValueError("duplicate or cross-seat terminal")
+                seen_terminals.add(capture_id)
+                key = (player, record.get("request_id"), record.get("final_attempt_ordinal"))
+                if key not in generations:
+                    raise ValueError("terminal generation missing")
+                generation_sequence, generation, projected = generations[key]
+                if record["final_attempt_ordinal"] == 1 and (player, record["request_id"], 2) in generations:
+                    raise ValueError("terminal omits final generation attempt")
+                if generation_sequence != record.get("generation_audit_sequence") or canonical_sha256(generation) != record.get("generation_record_sha256"):
+                    raise ValueError("terminal generation digest or sequence mismatch")
+                for name in ("capture_id", "context_sha256", "before_state_sha256", "proposal_sha256", "base_revision", "day", "phase", "game_id"):
+                    if record.get(name) != generation.get(name):
+                        raise ValueError("terminal generation linkage mismatch")
+                expected_statuses = _PRE_RESULT_GENERATION_STATUSES.get(typed_terminal["reason"])
+                if expected_statuses is not None:
+                    if generation["status"] not in expected_statuses:
+                        raise ValueError("terminal generation status mismatch")
+                elif generation["status"] not in success_statuses:
+                    raise ValueError("terminal references failed generation")
+                if record.get("status") == "ACCEPTED":
+                    if generation["status"] not in success_statuses or generation["decision"] is None:
+                        raise ValueError("accepted terminal references failed generation")
+                    proposal = generation["proposal"]
+                    decision = generation["decision"]
+                    if record.get("reason") != "AUTHORITATIVE_ACCEPTED" or record.get("decision_kind") != decision["kind"] or record.get("option_id") != decision["option_id"]:
+                        raise ValueError("accepted terminal decision mismatch")
+                    evidence = projected["memory"]["records"]
+                    options = projected["action_context"]["options"]
+                    offered = [o for o in options if o["option_id"] == decision["option_id"] and o["action_kind"] == decision["kind"]]
+                    if len(offered) != 1:
+                        raise ValueError("accepted decision not offered")
+                    if decision["kind"] == "vote":
+                        reassessment = proposal["pre_vote_reassessment"]
+                        if reassessment is None or reassessment["option_id"] != decision["option_id"] or reassessment["preferred_target_player_id"] != decision["vote_target_player_id"] or any(t not in offered[0]["valid_targets"] for t in reassessment["ranked_target_player_ids"]):
+                            raise ValueError("pre-vote reassessment invalid")
+                        if any(not any(e["source"] == ref for e in evidence) for ref in reassessment["evidence"]):
+                            raise ValueError("pre-vote reference invalid")
+                        if decision["vote_target_player_id"] not in offered[0]["valid_targets"] or decision["vote_target_player_id"] not in reassessment["ranked_target_player_ids"]:
+                            raise ValueError("pre-vote selected target invalid")
+                        pre_votes += 1
+                    if decision["kind"] == "co_declare" and decision["claimed_role_id"] not in offered[0]["claimed_role_ids"]:
+                        raise ValueError("CO claim not offered")
+                    if decision["kind"] in {"chat", "co_declare"}:
+                        if decision["kind"] == "chat":
+                            observed_visibility = record.get("authoritative_evidence")
+                            if (
+                                not isinstance(observed_visibility, Mapping)
+                                or observed_visibility.get("record_kind") != "chat"
+                                or observed_visibility.get("visibility")
+                                != _expected_chat_terminal_visibility(generation, record)
+                            ):
+                                raise ValueError("chat terminal visibility mismatch")
+                        event_key = (player, record["request_event_id"])
+                        if event_key in accepted:
+                            raise ValueError("ambiguous accepted terminal")
+                        responsive = False
+                        act = proposal["speech_act"]
+                        if decision["kind"] == "chat" and act["kind"] in {"ANSWER", "REBUTTAL"}:
+                            source = [e for e in evidence if e["source"] == act["in_reply_to"]]
+                            if len(source) != 1 or source[0]["source"]["record_kind"] not in {"chat", "co_declaration"} or source[0]["actor_player_ids"] != [act["addressee_player_id"]] or player == act["addressee_player_id"] or source[0]["source"]["visibility"] not in {"PUBLIC", "AUTHORIZED_PRIVATE"}:
+                                raise ValueError("responsive peer reference invalid")
+                            if source[0]["source"]["record_kind"] == "chat" and source[0]["channel_id"] != offered[0]["channel"]:
+                                raise ValueError("responsive channel authorization mismatch")
+                            observed = record.get("authoritative_evidence")
+                            if not isinstance(observed, dict) or type(observed.get("order")) is not int or source[0]["source"]["order"] >= observed["order"]:
+                                raise ValueError("responsive source is not prior to accepted speech")
+                            responsive = True
+                        accepted[event_key] = {"capture_id": capture_id,
+                            "generation_sequence": generation_sequence, "terminal_sequence": sequence,
+                            "generation_sha256": canonical_sha256(generation),
+                            "terminal_sha256": canonical_sha256(record),
+                            "decision_kind": decision["kind"], "responsive": responsive,
+                            "day": generation["day"], "phase": generation["phase"],
+                            "source_relevant_applicable": responsive or projected["capture"]["trigger"]["kind"] == "PEER_CHAT",
+                            "text_sha256": hashlib.sha256(decision["text"].encode("utf-8")).hexdigest()}
+            else:
+                raise ValueError("unknown private semantic audit record")
+        request_captures = {record["capture_id"] for record in records if record.get("schema_version") in generation_schemas}
+        if request_captures != seen_terminals:
+            raise ValueError("semantic terminal missing")
+    population = []
+    seen = set()
+    for order, item in enumerate(accepted_text, 1):
+        if not isinstance(item, Mapping) or set(item) != {"server_record_order", "player_id", "request_event_id", "decision_kind", "day", "phase", "text_sha256"}:
+            raise ValueError("accepted server text fields invalid")
+        if type(item["server_record_order"]) is not int or type(item["day"]) is not int:
+            raise ValueError("accepted server order or day invalid")
+        key = (item["player_id"], item["request_event_id"])
+        if item["server_record_order"] != order or key in seen or key not in accepted:
+            raise ValueError("accepted server population missing or ambiguous")
+        seen.add(key)
+        row = accepted[key]
+        if any(row[name] != item[name] for name in ("text_sha256", "decision_kind", "day", "phase")):
+            raise ValueError("accepted server text mismatch")
+        population.append({**dict(item), **row})
+        _enforce_phase6_population_limit(len(population))
+    if seen != set(accepted):
+        raise ValueError("accepted text population incomplete")
+    responsive_count = sum(row["responsive"] for row in population)
+    cap_ok = bool(counts) and max(counts.values()) <= 2 and marker_count == 0
+    aggregate = {"responsive_accepted_count": responsive_count,
+        "pre_vote_reassessment_count": pre_votes, "accepted_text_count": len(population),
+        "chat_caps_respected": cap_ok, "maximum_chat_starts_per_player_phase": max(counts.values(), default=0),
+        "chat_start_count": sum(counts.values()), "generation_count": len(generations),
+        "latency_microseconds": _distribution(latencies), "prompt_bytes": _distribution(prompt_bytes),
+        "prompt_token_proxy": _distribution(proxies), "provider_prompt_tokens": _distribution(provider_tokens),
+        "semantic_requirements_met": responsive_count > 0 and cap_ok}
+    # Preserve exact aggregates of previously publishable v1-only manifests.
+    if extended_accounting:
+        aggregate.update(
+            generation_status_counts=dict(sorted(status_counts.items())),
+            prompt_rejection_counts=dict(sorted(rejection_counts.items())),
+            legacy_prompt_rejection_reason_missing=legacy_rejection_missing,
+            prompt_rejection_marker_count=marker_count,
+        )
+    return population, aggregate
+
+
+def _write_phase6_evidence(
+    ai_dir: Path,
+    statuses: Mapping[str, Mapping[str, object]],
+    metrics_path: Path,
+    player_to_client: Mapping[str, str],
+    server_result: Mapping[str, object],
+) -> tuple[Path, dict[str, object]]:
+    manifest = ai_dir / "manifest.json"
+    if manifest.exists():
+        raise FileExistsError(f"output already exists: {manifest}")
+    value = _manifest_value(ai_dir, statuses, metrics_path, player_to_client)
+    shards = {player: _read_jsonl(ai_dir / entry["path"]) for player, entry in value["shards"].items()}
+    game_id = ai_dir.parent.name
+    if any(record.get("game_id") != game_id for records in shards.values() for record in records):
+        raise ValueError("semantic evidence game identity mismatch")
+    population, aggregate = _phase6_semantic_population(shards, server_result["accepted_text"])
+    target = ai_dir / "accepted-text.jsonl"
+    _write_private_jsonl_atomic(target, population)
+    value["schema"] = "aiwolf.phase6-private-manifest.v1"
+    value["game_id"] = game_id
+    value["accepted_text"] = _manifest_entry(target, ai_dir)
+    value["semantic_counts"] = aggregate
+    _write_private_json_atomic(manifest, value)
+    return manifest, aggregate
+
+
 def _plain_snapshot(value: object) -> object:
     if hasattr(value, "value"):
         return value.value
@@ -1819,21 +2814,14 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     from server.aiwolf_core import GameState, InMemoryEventSink, PlayerConfig, load_content, load_preset
     from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGameServer
 
+    phase6 = bootstrap.get("phase6") is True
+    plan = PHASE6_GAME_PLAN if phase6 else GAME_PLAN
     entry_tokens = bootstrap.get("entry_tokens")
     if not isinstance(entry_tokens, list) or len(entry_tokens) != 9 or any(not isinstance(item, str) or not item for item in entry_tokens):
         raise ValueError("private entry-token bootstrap is invalid")
     content = load_content(PROJECT_ROOT / "content")
     preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
-    preset = replace(
-        preset,
-        rules=replace(
-            preset.rules,
-            day_seconds=GAME_PLAN.day_seconds,
-            vote_seconds=GAME_PLAN.vote_seconds,
-            night_seconds=GAME_PLAN.night_seconds,
-            silence_after_dawn_seconds=GAME_PLAN.silence_after_dawn_seconds,
-        ),
-    )
+    preset = _apply_game_plan(preset, plan)
     players = tuple(
         PlayerConfig(f"player-{index}", f"Player {index}")
         for index in range(sum(preset.role_counts.values()))
@@ -1851,6 +2839,11 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
         rng=Random(args.seed),
         started_at=clock(),
     )
+    if phase6:
+        relay = bootstrap.get("discussion_relay")
+        if not isinstance(relay, str) or not relay:
+            raise ValueError("private discussion relay is required")
+        _write_private_json_atomic(Path(relay), _phase6_envelopes(content, preset, game))
     token_source = iter(entry_tokens)
     registry = GameRegistry({game_id: game}, entry_token_factory=token_source.__next__)
     sessions = SessionManager(registry, clock=clock)
@@ -1859,6 +2852,7 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     expected: dict[tuple[str, int, str, str], dict[str, object]] = {}
     accepted: list[dict[str, object]] = []
     chats: list[dict[str, object]] = []
+    accepted_text: list[dict[str, object]] = []
     active_request_id: str | None = None
     original_handle = sessions.handle_message
     original_vote = game.submit_vote
@@ -1881,7 +2875,18 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             active_request_id = request_id
         try:
             result = original_handle(message, context)
+            if phase6 and message_type == "co.declare" and result.reply is None:
+                accepted_text.append({"server_record_order": len(accepted_text) + 1,
+                    "player_id": context.player_id, "request_event_id": request_id,
+                    "decision_kind": "co_declare", "day": game.day, "phase": game.phase.value,
+                    "text_sha256": hashlib.sha256(message["payload"]["comment"].encode("utf-8")).hexdigest()})
             for submission in result.channel_messages:
+                if phase6:
+                    accepted_text.append({"server_record_order": len(accepted_text) + 1,
+                        "player_id": submission.acceptance.player_id, "request_event_id": request_id,
+                        "decision_kind": "chat", "day": submission.acceptance.day,
+                        "phase": submission.acceptance.phase,
+                        "text_sha256": hashlib.sha256(submission.message["message"].encode("utf-8")).hexdigest()})
                 acceptance = submission.acceptance
                 text = submission.message["message"]
                 chats.append(
@@ -1948,7 +2953,7 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             "game_id": game_id,
             "player_ids": list(game.players),
             "server_pid": os.getpid(),
-            "profile": asdict(GAME_PLAN),
+            "profile": asdict(plan),
         },
     )
     failure: str | None = None
@@ -2014,6 +3019,7 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     _write_private_json_atomic(
         args.result,
         {
+            **({"accepted_text": accepted_text} if phase6 else {}),
             "server_pid": os.getpid(),
             "success": failure is None and game.game_result is not None,
             "failure": failure,
@@ -2030,6 +3036,30 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
 
 
 def _phase5_broker_settings(bootstrap: Mapping[str, object]) -> LocalLLMSettings:
+    profile = None
+    if "llama_cpp_structured_output" in bootstrap:
+        value = bootstrap["llama_cpp_structured_output"]
+        if not isinstance(value, Mapping) or set(value) != {"reasoning_format", "enable_thinking"}:
+            raise ValueError("invalid llama.cpp structured output profile")
+        profile = LlamaCppStructuredOutputConfig(**value)
+    elif bootstrap.get("phase6") is True:
+        raise ValueError("Phase 6 requires llama.cpp structured output profile")
+    phase6_marker = bootstrap.get("phase6", None)
+    has_cap = "phase6_max_output_tokens" in bootstrap
+    if phase6_marker is None:
+        if has_cap:
+            raise ValueError("Phase 6 output cap requires Phase 6 marker")
+        max_output_tokens = 96
+    else:
+        cap = bootstrap.get("phase6_max_output_tokens")
+        if (
+            phase6_marker is not True
+            or bootstrap.get("model") != "Qwen3.5-9B-Q4_K_M.gguf"
+            or type(cap) is not int
+            or cap != PHASE6_MAX_OUTPUT_TOKENS
+        ):
+            raise ValueError("invalid Phase 6 broker output profile")
+        max_output_tokens = PHASE6_MAX_OUTPUT_TOKENS
     return LocalLLMSettings(
         endpoint=str(bootstrap.get("endpoint", "")),
         model=str(bootstrap.get("model", "")),
@@ -2037,7 +3067,7 @@ def _phase5_broker_settings(bootstrap: Mapping[str, object]) -> LocalLLMSettings
         if isinstance(bootstrap.get("api_key"), str)
         else None,
         generation=GenerationSettings(
-            max_output_tokens=96,
+            max_output_tokens=max_output_tokens,
             temperature=float(bootstrap.get("temperature", 0.2)),
         ),
         connect_timeout_seconds=float(bootstrap.get("connect_timeout_seconds", 1.0)),
@@ -2048,6 +3078,7 @@ def _phase5_broker_settings(bootstrap: Mapping[str, object]) -> LocalLLMSettings
         max_request_bytes=int(bootstrap.get("max_request_bytes", 65536)),
         max_response_bytes=int(bootstrap.get("max_response_bytes", 65536)),
         structured_mode=str(bootstrap.get("structured_mode", "json_schema")),  # type: ignore[arg-type]
+        llama_cpp_structured_output=profile,
     )
 
 
@@ -2057,27 +3088,58 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
         raise ValueError("private admission registry is invalid")
     registry = {str(key): str(value) for key, value in registry_value.items()}
     settings = _phase5_broker_settings(bootstrap)
-    config = GenerationBrokerConfig()
-    metrics = AdmissionMetrics(config.metrics_queue_capacity, path=args.metrics)
-    backend = OpenAICompatibleBackend(settings.backend_config())
-    broker = GenerationAdmissionBroker(
-        registry,
-        backend,
-        fairness_seed=str(bootstrap.get("fairness_seed", "")),
-        config=config,
-        metrics=metrics,
-        backend_request_timeout_seconds=settings.request_timeout_seconds,
-    )
+    if bootstrap.get("phase6") is True and settings.backend_config().config_fingerprint != bootstrap.get(
+        "parent_config_fingerprint"
+    ):
+        raise ValueError("broker configuration fingerprint mismatch")
+    config = _game_broker_config(settings, phase6=bootstrap.get("phase6") is True)
+    metrics_resources = ExitStack()
+    metrics_wrapper = None
+    metrics: AdmissionMetrics | None = None
+    backend: object | None = None
+    broker: GenerationAdmissionBroker | None = None
+    try:
+        if bootstrap.get("phase6") is True:
+            from scripts.phase6_private_review import _locked_path
+            metrics_fd = metrics_resources.enter_context(_locked_path(args.metrics, create=True))
+            metrics_wrapper = metrics_resources.enter_context(os.fdopen(metrics_fd, "ab", closefd=False))
+            metrics = AdmissionMetrics(config.metrics_queue_capacity, handle=metrics_wrapper)
+        else:
+            metrics = AdmissionMetrics(config.metrics_queue_capacity, path=args.metrics)
+        if bootstrap.get("phase6_fixture") is True:
+            from tests.fixtures.phase6_semantic_backend import Phase6SemanticBackend
+            backend = Phase6SemanticBackend()
+        else:
+            backend = OpenAICompatibleBackend(settings.backend_config())
+        broker = GenerationAdmissionBroker(
+            registry,
+            backend,  # type: ignore[arg-type]
+            fairness_seed=str(bootstrap.get("fairness_seed", "")),
+            config=config,
+            metrics=metrics,
+            backend_request_timeout_seconds=settings.request_timeout_seconds,
+        )
+    except BaseException as error:
+        await _cleanup_broker_child_after_error(
+            error, broker=broker, metrics=metrics, backend=backend,
+            metrics_wrapper=metrics_wrapper, metrics_resources=metrics_resources,
+        )
+        raise AssertionError("unreachable")
+    assert broker is not None and metrics is not None and backend is not None
     maximum_pending = 0
     peak_backend = 0
     try:
         ready = await broker.start()
-    except BaseException:
-        await asyncio.shield(broker.aclose())
-        raise
-    _write_private_json_atomic(
-        args.ready,
-        {
+    except BaseException as error:
+        await _cleanup_broker_child_after_error(
+            error, broker=broker, metrics=metrics, backend=backend,
+            metrics_wrapper=metrics_wrapper, metrics_resources=metrics_resources,
+        )
+        raise AssertionError("unreachable")
+    try:
+        _write_private_json_atomic(
+            args.ready,
+            {
             "pid": os.getpid(),
             "host": ready.host,
             "port": ready.port,
@@ -2086,8 +3148,14 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             "config_fingerprint": ready.config_fingerprint,
             "config": asdict(config),
             "external_model_ownership": "UNOWNED",
-        },
-    )
+            },
+        )
+    except BaseException as error:
+        await _cleanup_broker_child_after_error(
+            error, broker=broker, metrics=metrics, backend=backend,
+            metrics_wrapper=metrics_wrapper, metrics_resources=metrics_resources,
+        )
+        raise AssertionError("unreachable")
     failure: str | None = None
     active_written = False
     try:
@@ -2109,7 +3177,9 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
         before_close = broker.snapshot
         maximum_pending = max(maximum_pending, before_close.pending_total)
         peak_backend = max(peak_backend, int(before_close.provider_call_active))
-        await broker.aclose()
+        await _close_broker_metrics_resources(
+            broker, metrics_wrapper, metrics_resources
+        )
     metric_values = _read_jsonl(args.metrics)
     terminal = {
         str(item["invocation_id"]): item.get("terminal_status")
@@ -2157,6 +3227,7 @@ class _DisposableCredentialStore:
 def _audit_summary(path: Path) -> dict[str, object]:
     payload = path.read_bytes()
     records = [json.loads(line) for line in payload.decode("utf-8").splitlines() if line]
+    records = [record for record in records if record.get("schema_version") != "aiwolf.ai-discussion-terminal.v1"]
     membership_valid = True
     request_ids: list[object] = []
     for record in records:
@@ -2236,14 +3307,16 @@ def _reservation_evidence(snapshot: Any) -> dict[str, object]:
     }
 
 
-async def _client_child(args: argparse.Namespace, bootstrap: Mapping[str, object]) -> int:
-    from ai_client import LLMBrainConfig, Phase5ClientRuntime, Phase5ClientRuntimeConfig, ShortChatConfig, SpeakingProfile
+async def _client_child(args: argparse.Namespace, bootstrap: dict[str, object]) -> int:
+    from ai_client import DiscussionChatConfig, LLMBrainConfig, Phase5ClientRuntime, Phase5ClientRuntimeConfig, ShortChatConfig, SpeakingProfile
     from ai_client.brain import BrainRunConfig
     from ai_client.network import NetworkClientConfig, ReconnectPolicy
     from ai_client.reaction_chat import ReactionChatConfig, ReactionChatLifecycle
     from ai_client.vote_ability import VoteAbilityConfig, VoteAbilityLifecycle
     from ai_client.world import Freshness
 
+    phase6 = bootstrap.get("phase6") is True
+    plan = PHASE6_GAME_PLAN if phase6 else GAME_PLAN
     clock = _StartGateClock(args.start)
     player_id = str(bootstrap.get("player_id", ""))
     config = Phase5ClientRuntimeConfig(
@@ -2264,36 +3337,50 @@ async def _client_child(args: argparse.Namespace, bootstrap: Mapping[str, object
         master_seed=args.seed,
         reconnect=ReconnectPolicy(max_disconnected_seconds=10.0),
         broker=GenerationBrokerConfig(**dict(bootstrap.get("broker_config", {}))),
-        llm=LLMBrainConfig(short_chat=ShortChatConfig()),
-        brain=BrainRunConfig(max_decision_seconds=5.0, cancellation_grace_seconds=0.25),
+        llm=LLMBrainConfig(
+            short_chat=DiscussionChatConfig() if phase6 else ShortChatConfig()
+        ),
+        brain=BrainRunConfig(
+            max_decision_seconds=_FEATURE_BRAIN_TIMEOUT_SECONDS if phase6 else 5.0,
+            cancellation_grace_seconds=0.25,
+        ),
         reaction=ReactionChatConfig(
-            max_chat_attempts_per_phase=GAME_PLAN.max_chat_attempts_per_phase,
-            brain_timeout_seconds=44.0,
+            max_chat_attempts_per_phase=plan.max_chat_attempts_per_phase,
+            brain_timeout_seconds=_FEATURE_BRAIN_TIMEOUT_SECONDS,
             deadline_guard_seconds=1.0,
             minimum_start_budget_seconds=0.10,
         ),
         vote_ability=VoteAbilityConfig(
-            brain_timeout_seconds=44.0,
+            brain_timeout_seconds=_FEATURE_BRAIN_TIMEOUT_SECONDS,
             deadline_guard_seconds=1.0,
             minimum_start_budget_seconds=0.10,
         ),
         speaking=SpeakingProfile(
-            talkativeness=GAME_PLAN.talkativeness,
-            ordinary_event_importance=GAME_PLAN.ordinary_event_importance,
-            direct_mention_importance=GAME_PLAN.direct_mention_importance,
-            initial_event_importance=GAME_PLAN.initial_event_importance,
-            cooldown_seconds=GAME_PLAN.cooldown_seconds,
-            max_trigger_evaluations_per_phase=GAME_PLAN.max_trigger_evaluations_per_phase,
-            repetition_window=GAME_PLAN.repetition_window,
+            talkativeness=plan.talkativeness,
+            ordinary_event_importance=plan.ordinary_event_importance,
+            direct_mention_importance=plan.direct_mention_importance,
+            initial_event_importance=plan.initial_event_importance,
+            cooldown_seconds=plan.cooldown_seconds,
+            max_trigger_evaluations_per_phase=plan.max_trigger_evaluations_per_phase,
+            repetition_window=plan.repetition_window,
         ),
     )
     store = _DisposableCredentialStore()
-    runtime = await Phase5ClientRuntime.connect(
+    connect = Phase5ClientRuntime.connect
+    discussion_kwargs = {}
+    if phase6:
+        from ai_client.discussion.context import validate_discussion_bootstrap
+        pending = validate_discussion_bootstrap(bootstrap.pop("discussion_envelope", None),
+            network_game_id=config.network.game_id, player_id=player_id)
+        connect = Phase5ClientRuntime.connect_phase6
+        discussion_kwargs["pending_discussion_context"] = pending
+    runtime = await connect(
         config,
         store,
         clock=clock,
         sleep=clock.sleep,
         request_id_factory=lambda: str(uuid4()),
+        **discussion_kwargs,
     )
     await runtime.start()
     while True:
@@ -2451,7 +3538,10 @@ async def _q8_worker_child(args: argparse.Namespace, bootstrap: Mapping[str, obj
 
 
 def _broker_bootstrap(config: RunConfig, registry: Mapping[str, str], fairness_seed: str) -> dict[str, object]:
-    return {
+    if config.phase6 and config.settings.generation.max_output_tokens != PHASE6_MAX_OUTPUT_TOKENS:
+        raise ValueError("Phase 6 parent output profile is invalid")
+    _game_broker_config(config.settings, phase6=config.phase6)
+    value = {
         "registry": dict(registry),
         "endpoint": config.settings.endpoint,
         "model": config.settings.model,
@@ -2467,6 +3557,15 @@ def _broker_bootstrap(config: RunConfig, registry: Mapping[str, str], fairness_s
         "structured_mode": config.settings.structured_mode,
         "fairness_seed": fairness_seed,
     }
+    if config.phase6:
+        value.update(
+            phase6=True,
+            phase6_max_output_tokens=PHASE6_MAX_OUTPUT_TOKENS,
+            parent_config_fingerprint=config.settings.backend_config().config_fingerprint,
+        )
+    if config.settings.llama_cpp_structured_output is not None:
+        value["llama_cpp_structured_output"] = asdict(config.settings.llama_cpp_structured_output)
+    return value
 
 
 def _random_private_identities(player_ids: Sequence[str]) -> tuple[dict[str, str], dict[str, str], list[str]]:
@@ -2479,13 +3578,184 @@ def _random_private_identities(player_ids: Sequence[str]) -> tuple[dict[str, str
     return player_to_client, registry, entry_tokens
 
 
+async def _cleanup_phase6_wait_failure(
+    owned: Sequence[OwnedProcess], stop_paths: Sequence[Path], model_pid: int | None,
+    errors: list[str],
+) -> tuple[list[dict[str, object]], bool]:
+    """Retain the primary wait error while attempting the existing cleanup once."""
+    stop_ok = True
+    try:
+        _touch_stop(stop_paths)
+    except BaseException:
+        stop_ok = False
+    cleanup: list[dict[str, object]] = []
+    try:
+        result = await _cleanup_owned_shielded(owned, model_pid)
+        if not isinstance(result, (list, tuple)) or len(result) != len(owned):
+            raise ValueError("cleanup shape")
+        for item, row in zip(owned, result, strict=True):
+            expected = {
+                "label": item.label, "pid": item.process.pid,
+                "returncode": item.process.returncode,
+                "alive": item.process.returncode is None,
+                "action": "REFUSED_EXTERNAL_MODEL_PID"
+                if item.process.pid == model_pid else item.touched,
+            }
+            if (
+                not isinstance(row, Mapping) or set(row) != set(expected)
+                or any(type(row[key]) is not type(value) or row[key] != value
+                       for key, value in expected.items())
+            ):
+                raise ValueError("cleanup identity")
+            cleanup.append(dict(expected))
+    except BaseException:
+        cleanup = []
+        stop_ok = False
+    complete = stop_ok and len(cleanup) == len(owned) and all(row["alive"] is False for row in cleanup)
+    if not complete:
+        errors.append("PHASE6_RECOVERY_CLEANUP_INCOMPLETE")
+    return cleanup, complete
+
+
+def _recover_phase6_wait_failure_evidence(
+    *, ai_dir: Path, metrics_path: Path, status_paths: Mapping[str, Path],
+    server_result_path: Path, broker_result_path: Path,
+    player_to_client: Mapping[str, str], errors: list[str],
+) -> dict[str, object]:
+    """Read closed originals independently; never synthesize missing raw evidence."""
+    recovered: dict[str, object] = {
+        "statuses": {}, "server": {}, "broker": {}, "metrics": [],
+        "manifest": None, "semantic": {}, "metrics_available": False,
+    }
+    def read(path: Path, code: str, *, lines: bool = False) -> object | None:
+        try:
+            return _read_jsonl(path) if lines else _read_json(path)
+        except BaseException:
+            if code not in errors:
+                errors.append(code)
+            return None
+
+    statuses = {}
+    for player, path in status_paths.items():
+        value = read(path, "PHASE6_RECOVERY_CLIENT_STATUS_INCOMPLETE")
+        if value is not None:
+            statuses[player] = value
+    recovered["statuses"] = statuses
+    if set(statuses) != set(player_to_client) and "PHASE6_RECOVERY_CLIENT_STATUS_INCOMPLETE" not in errors:
+        errors.append("PHASE6_RECOVERY_CLIENT_STATUS_INCOMPLETE")
+    server = read(server_result_path, "PHASE6_RECOVERY_SERVER_RESULT_UNAVAILABLE")
+    broker = read(broker_result_path, "PHASE6_RECOVERY_BROKER_RESULT_UNAVAILABLE")
+    metrics = read(metrics_path, "PHASE6_RECOVERY_METRICS_UNAVAILABLE", lines=True)
+    recovered.update(server=server or {}, broker=broker or {}, metrics=metrics or [], metrics_available=metrics is not None)
+    try:
+        manifest = ai_dir / "manifest.json"
+        if manifest.exists():
+            recovered["manifest"] = manifest
+        elif (
+            set(statuses) == set(player_to_client) and len(statuses) == 9
+            and metrics is not None and broker is not None
+            and isinstance(server, Mapping) and "accepted_text" in server
+        ):
+            try:
+                manifest, semantic = _write_phase6_evidence(
+                    ai_dir, statuses, metrics_path, player_to_client, server,
+                )
+                recovered.update(manifest=manifest, semantic=semantic)
+            except BaseException:
+                errors.append("PHASE6_RECOVERY_MANIFEST_REJECTED")
+    except BaseException:
+        errors.append("PHASE6_RECOVERY_FAILED")
+    return recovered
+
+
+def _phase6_wait_failure_row(
+    *, root: Path, label: str, errors: list[str], cleanup: list[dict[str, object]],
+    recovered: Mapping[str, object],
+) -> dict[str, object]:
+    """Build a failed row even when secondary diagnostics cannot be calculated."""
+    from server.aiwolf_core.models import GamePhase
+
+    server = recovered.get("server", {})
+    broker = recovered.get("broker", {})
+    server = server if isinstance(server, Mapping) else {}
+    broker = broker if isinstance(broker, Mapping) else {}
+    metrics = recovered.get("metrics", [])
+    statuses = recovered.get("statuses", {})
+    def calculate(callback: Callable[[], object], code: str, fallback: object) -> object:
+        try:
+            return callback()
+        except BaseException:
+            errors.append(code)
+            return fallback
+
+    aggregates = calculate(
+        lambda: {key: value for key, value in _metric_aggregates(metrics).items()
+                 if key != "queue_by_opaque_client"},
+        "PHASE6_RECOVERY_METRIC_AGGREGATE_UNAVAILABLE", {},
+    ) if recovered.get("metrics_available") is True else {}
+    speaking = calculate(
+        lambda: {key: value for key, value in _speaking_aggregates(statuses, server).items()
+                 if key != "accepted_by_day_and_seat"},
+        "PHASE6_RECOVERY_SPEAKING_AGGREGATE_UNAVAILABLE", {},
+    )
+    if recovered:
+        artifacts = calculate(lambda: _artifact_hashes(root), "PHASE6_RECOVERY_ARTIFACT_HASH_UNAVAILABLE", [])
+    else:
+        artifacts = []
+        errors.append("PHASE6_RECOVERY_ARTIFACT_HASH_UNAVAILABLE")
+    def number(value: object) -> int | None:
+        return value if type(value) is int and value >= 0 else None
+    def boolean(value: object) -> bool | None:
+        return value if type(value) is bool else None
+    def count(value: object) -> int | None:
+        return len(value) if isinstance(value, list) else None
+    phase_wall = server.get("phase_wall_durations")
+    phases = {phase.value for phase in GamePhase}
+    if not isinstance(phase_wall, list) or any(
+        not isinstance(item, dict) or set(item) != {"phase", "day", "wall_microseconds"}
+        or not isinstance(item["phase"], str) or item["phase"] not in phases
+        or number(item["day"]) is None or number(item["wall_microseconds"]) is None
+        for item in phase_wall
+    ):
+        phase_wall = None
+    total_wall = number(server.get("total_game_wall_microseconds"))
+    broker_projection = {
+        "maximum_pending": number(broker.get("maximum_pending")),
+        "peak_backend_concurrency": number(broker.get("peak_backend_concurrency")),
+        "shutdown_clean": boolean(broker.get("shutdown_clean")),
+        "metrics_dropped": number(broker.get("metrics_dropped")),
+    }
+    return {
+        "_phase6_wait_failure": True,
+        "semantic": recovered.get("semantic", {}), "machine_semantic_pass": False,
+        "row": label, "success": False, "errors": list(dict.fromkeys(errors))[:32],
+        "process_topology": {"server": 1, "broker": 1, "clients": 9},
+        "server": {
+            "game_end": boolean(server.get("game_end")),
+            "accepted_chat_count": count(server.get("accepted_chats")),
+            "accepted_reservation_count": count(server.get("accepted_reservations")),
+            "phase_wall_durations": phase_wall, "total_game_wall_microseconds": total_wall,
+        },
+        "total_game_wall_microseconds": total_wall, "broker": broker_projection,
+        "maximum_pending": broker_projection["maximum_pending"],
+        "peak_backend_concurrency": broker_projection["peak_backend_concurrency"],
+        "metrics_dropped": broker_projection["metrics_dropped"],
+        "metrics": aggregates, "speaking": speaking, "artifacts": artifacts,
+        "cleanup": cleanup, "raw_metrics": metrics,
+    }
+
+
 async def _run_game(
     config: RunConfig,
     root: Path,
     *,
     label: str,
     environ: Mapping[str, str],
+    phase6_fixture: bool = False,
 ) -> dict[str, object]:
+    if phase6_fixture and not config.phase6:
+        raise ValueError("semantic fixture requires Phase 6")
+    broker_config = _game_broker_config(config.settings, phase6=config.phase6)
     _private_directory(root)
     process_dir = _new_private_subdirectory(root, "process")
     start = root / "clock.start"
@@ -2496,6 +3766,8 @@ async def _run_game(
     player_ids = [f"player-{index}" for index in range(9)]
     player_to_client, registry, entry_tokens = _random_private_identities(player_ids)
     sentinels = tuple(entry_tokens) + tuple(registry.values()) + ((config.settings.api_key,) if config.settings.api_key else ())
+    relay = root / "discussion.relay.json"
+    envelopes: dict[str, object] = {}
     owned: list[OwnedProcess] = []
     stop_paths = (clients_stop, server_stop, broker_stop)
     cleanup: list[dict[str, object]] = []
@@ -2504,15 +3776,19 @@ async def _run_game(
     server_result: dict[str, object] = {}
     broker_result: dict[str, object] = {}
     metrics: list[dict[str, object]] = []
+    semantic: dict[str, object] = {}
     manifest: Path | None = None
     ai_dir: Path | None = None
+    completion_wait_pending = False
+    recover_wait_failure = False
+    cleanup_complete = False
     try:
         server = await _spawn_owned(
             owned,
             label="server",
             arguments=("--_child-mode", "server", "--ready", str(server_ready), "--result", str(server_result_path), "--start", str(start), "--stop", str(server_stop), "--seed", str(config.seed), "--max-seconds", str(config.max_seconds)),
             output_dir=process_dir,
-            bootstrap={"entry_tokens": entry_tokens},
+            bootstrap={"entry_tokens": entry_tokens, **({"phase6": True, "discussion_relay": str(relay)} if config.phase6 else {})},
             environ=environ,
         )
         await _wait_for_paths((server_ready,), (server,), _READY_SECONDS)
@@ -2520,6 +3796,8 @@ async def _run_game(
         if ready_server.get("player_ids") != player_ids or "entry_tokens" in ready_server:
             raise RuntimeError("server readiness evidence invalid")
         game_id = str(ready_server["game_id"])
+        if config.phase6:
+            envelopes = _consume_phase6_relay(relay, game_id, player_ids)
         game_dir = _new_private_subdirectory(root, game_id)
         ai_dir = _new_private_subdirectory(game_dir, "ai")
         metrics_path = ai_dir / "admission.jsonl"
@@ -2528,13 +3806,31 @@ async def _run_game(
             label="broker",
             arguments=("--_child-mode", "broker", "--ready", str(broker_ready), "--result", str(broker_result_path), "--active", str(broker_active), "--metrics", str(metrics_path), "--stop", str(broker_stop), "--max-seconds", str(config.max_seconds)),
             output_dir=process_dir,
-            bootstrap=_broker_bootstrap(config, registry, f"{config.seed}:{label}"),
+            bootstrap={**_broker_bootstrap(config, registry, f"{config.seed}:{label}"), **({"phase6_fixture": True} if phase6_fixture else {})},
             environ=environ,
         )
         await _wait_for_paths((broker_ready,), (broker,), _READY_SECONDS)
         ready_broker = _read_json(broker_ready)
         if "registry" in ready_broker:
             raise RuntimeError("broker readiness exposed private registry")
+        if config.phase6:
+            try:
+                actual_broker_config = GenerationBrokerConfig(**ready_broker["config"])
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError("broker ready configuration mismatch") from None
+            if (
+                actual_broker_config.config_fingerprint != broker_config.config_fingerprint
+                or ready_broker.get("config_fingerprint") != broker_config.config_fingerprint
+            ):
+                raise RuntimeError("broker ready configuration mismatch")
+        if config.phase6 and not phase6_fixture:
+            backend_identity = ready_broker.get("backend_identity")
+            if (
+                not isinstance(backend_identity, Mapping)
+                or backend_identity.get("config_fingerprint")
+                != config.settings.backend_config().config_fingerprint
+            ):
+                raise RuntimeError("broker ready fingerprint mismatch")
         client_ready: list[Path] = []
         status_paths: dict[str, Path] = {}
         for index, player_id in enumerate(player_ids):
@@ -2548,6 +3844,7 @@ async def _run_game(
                 arguments=("--_child-mode", "client", "--ready", str(ready_path), "--status", str(status_path), "--audit", str(shard / "ai.jsonl"), "--start", str(start), "--stop", str(clients_stop), "--seed", str(config.seed)),
                 output_dir=process_dir,
                 bootstrap={
+                    **({"phase6": True, "discussion_envelope": envelopes.pop(player_id)} if config.phase6 else {}),
                     "uri": ready_server["uri"],
                     "game_id": game_id,
                     "player_id": player_id,
@@ -2565,23 +3862,81 @@ async def _run_game(
         await _wait_for_paths(tuple(client_ready), tuple(owned[2:]), _READY_SECONDS)
         start.write_text("start\n", encoding="utf-8")
         os.chmod(start, _PRIVATE_FILE_MODE)
+        completion_wait_pending = True
         await _wait_for_paths((server_result_path,), tuple(owned), config.max_seconds)
+        completion_wait_pending = False
+        completion_wait_pending = True
         await _wait_for_paths(tuple(status_paths.values()), tuple(owned[2:]), 60.0)
+        completion_wait_pending = False
         broker_stop.write_text("stop\n", encoding="utf-8")
         os.chmod(broker_stop, _PRIVATE_FILE_MODE)
-        await _wait_for_paths((broker_result_path,), (broker,), 15.0)
+        completion_wait_pending = True
+        await _wait_for_paths(
+            (broker_result_path,), (broker,),
+            broker_config.shutdown_grace_seconds + _READY_SECONDS if config.phase6 else 15.0,
+        )
+        completion_wait_pending = False
         statuses = {player: _read_json(path) for player, path in status_paths.items()}
         server_result = _read_json(server_result_path)
         broker_result = _read_json(broker_result_path)
         metrics = _read_jsonl(metrics_path)
-        manifest = _write_manifest(ai_dir, statuses, metrics_path, player_to_client)
+        if config.phase6:
+            manifest, semantic = _write_phase6_evidence(
+                ai_dir, statuses, metrics_path, player_to_client, server_result
+            )
+            if semantic["chat_start_count"] != sum(int(status["reaction"]["chat_brain_invocations"]) for status in statuses.values()):
+                raise ValueError("semantic CHAT start accounting mismatch")
+            if not semantic["semantic_requirements_met"]:
+                errors.append("semantic requirements not met")
+        else:
+            manifest = _write_manifest(ai_dir, statuses, metrics_path, player_to_client)
+    except Phase6PopulationExceeded as error:
+        semantic = {
+            "accepted_text_count": error.accepted_text_count,
+            "failure_reason": error.reason,
+        }
+        errors.append(error.reason)
     except BaseException as error:
+        recover_wait_failure = config.phase6 and completion_wait_pending
         errors.append(type(error).__name__)
         if isinstance(error, asyncio.CancelledError):
             errors.append("CANCELLED")
     finally:
-        _touch_stop(stop_paths)
-        cleanup = await _cleanup_owned_shielded(owned, config.gpu_model_pid)
+        if recover_wait_failure:
+            cleanup, cleanup_complete = await _cleanup_phase6_wait_failure(
+                owned, stop_paths, config.gpu_model_pid, errors,
+            )
+        else:
+            _touch_stop(stop_paths)
+            cleanup = await _cleanup_owned_shielded(owned, config.gpu_model_pid)
+    if recover_wait_failure:
+        recovered: dict[str, object] = {}
+        if cleanup_complete:
+            try:
+                recovered = _recover_phase6_wait_failure_evidence(
+                    ai_dir=ai_dir, metrics_path=metrics_path, status_paths=status_paths,
+                    server_result_path=server_result_path, broker_result_path=broker_result_path,
+                    player_to_client=player_to_client, errors=errors,
+                )
+            except BaseException:
+                errors.append("PHASE6_RECOVERY_FAILED")
+            if recovered.get("manifest") is not None:
+                try:
+                    findings = _validate_game_evidence(
+                        statuses=recovered["statuses"], server_result=recovered["server"],
+                        broker_result=recovered["broker"], metrics=recovered["metrics"],
+                        manifest=recovered["manifest"], ai_dir=ai_dir, owned=owned,
+                        sentinels=sentinels, evidence_root=root,
+                        expected_player_to_client=player_to_client,
+                    )
+                    if not isinstance(findings, list) or any(not isinstance(value, str) for value in findings):
+                        raise ValueError("validation result shape")
+                    errors.extend(findings)
+                except BaseException:
+                    errors.append("PHASE6_RECOVERY_VALIDATION_UNAVAILABLE")
+        return _phase6_wait_failure_row(
+            root=root, label=label, errors=errors, cleanup=cleanup, recovered=recovered,
+        )
     if ai_dir is not None and manifest is not None and not errors:
         errors.extend(
             _validate_game_evidence(
@@ -2600,6 +3955,7 @@ async def _run_game(
     if any(item.get("alive") for item in cleanup):
         errors.append("owned process remains alive")
     return {
+        **({"semantic": semantic, "machine_semantic_pass": not errors and semantic.get("semantic_requirements_met") is True} if config.phase6 else {}),
         "row": label,
         "success": not errors,
         "errors": errors[:32],
@@ -2624,8 +3980,10 @@ async def _run_game(
         },
         "maximum_pending": broker_result.get("maximum_pending"),
         "peak_backend_concurrency": broker_result.get("peak_backend_concurrency"),
-        "metrics": _metric_aggregates(metrics),
-        "speaking": _speaking_aggregates(statuses, server_result),
+        "metrics": {key: value for key, value in _metric_aggregates(metrics).items()
+                    if not config.phase6 or key != "queue_by_opaque_client"},
+        "speaking": {key: value for key, value in _speaking_aggregates(statuses, server_result).items()
+                     if not config.phase6 or key != "accepted_by_day_and_seat"},
         "artifacts": _artifact_hashes(root),
         "cleanup": cleanup,
         "raw_metrics": metrics,
@@ -2873,7 +4231,11 @@ async def _run_q8_broker_row(
 
 
 def _strip_raw(result: Mapping[str, object]) -> dict[str, object]:
-    return {key: value for key, value in result.items() if key != "raw_metrics"}
+    excluded = {"raw_metrics", "_phase6_wait_failure"}
+    if result.get("_phase6_wait_failure") is True:
+        # Keep the original inventory in the private result, never in its summary.
+        excluded.add("artifacts")
+    return {key: value for key, value in result.items() if key not in excluded}
 
 
 def _raw_records(row: str, metrics: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
@@ -2883,9 +4245,9 @@ def _raw_records(row: str, metrics: Sequence[Mapping[str, object]]) -> list[dict
 def _run_metadata(config: RunConfig) -> dict[str, object]:
     backend = config.settings.backend_config()
     return {
-        "schema": "aiwolf.phase5-run-summary.v1",
+        "schema": "aiwolf.phase6-run-summary.v1" if config.phase6 else "aiwolf.phase5-run-summary.v1",
         "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "mode": "q8" if config.q8 else "smoke",
+        "mode": "phase6" if config.phase6 else ("q8" if config.q8 else "smoke"),
         "model_identity": {
             "endpoint": config.settings.endpoint,
             "model": config.settings.model,
@@ -2896,7 +4258,7 @@ def _run_metadata(config: RunConfig) -> dict[str, object]:
         "os": platform.platform(),
         "seed": config.seed,
         "arguments": list(config.sanitized_arguments),
-        "game_plan": asdict(GAME_PLAN),
+        "game_plan": asdict(PHASE6_GAME_PLAN if config.phase6 else GAME_PLAN),
         "frequency_profile": {
             "talkativeness": GAME_PLAN.talkativeness,
             "initial_event_importance": GAME_PLAN.initial_event_importance,
@@ -3276,8 +4638,13 @@ async def _execute(config: RunConfig, environ: Mapping[str, str]) -> int:
     if len(raw) > _MAX_RAW_RECORDS:
         failure = failure or "RAW_EVIDENCE_BOUND_EXCEEDED"
         raw = raw[:_MAX_RAW_RECORDS]
+    if config.phase6 and failure is not None:
+        for row in rows:
+            row["machine_semantic_pass"] = False
     _write_private_jsonl_atomic(config.output_dir / "raw.jsonl", raw)
     overall_metrics = _metric_aggregates(raw)
+    if config.phase6:
+        overall_metrics.pop("queue_by_opaque_client", None)
     summary = {
         **_run_metadata(config),
         "success": failure is None and all(row.get("success") is True for row in rows),
@@ -3338,6 +4705,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--q8", action="store_true")
+    mode.add_argument("--phase6", action="store_true")
+    parser.add_argument("--phase6-read-timeout-seconds", type=float)
+    parser.add_argument("--phase6-request-timeout-seconds", type=float)
     mode.add_argument("--q8-provider-timing-diagnostic", action="store_true")
     parser.add_argument("--gpu-model-pid", type=int)
     parser.add_argument("--provider-serving-executable-sha256")
@@ -3377,7 +4747,8 @@ async def _run_child(args: argparse.Namespace) -> int:
     raw = sys.stdin.buffer.readline()
     if not raw:
         raise ValueError("private bootstrap pipe is required")
-    bootstrap = json.loads(raw)
+    bootstrap = json.loads(raw, object_pairs_hook=_unique_json_object)
+    del raw
     if not isinstance(bootstrap, dict):
         raise ValueError("private bootstrap must be a JSON object")
     required: dict[str, tuple[str, ...]] = {
@@ -3413,6 +4784,9 @@ def main() -> None:
         if bool(getattr(args, "q8_provider_timing_diagnostic", False)):
             print(_DIAGNOSTIC_INCOMPLETE, file=sys.stderr)
             code = 1
+        elif args._child_mode is not None:
+            print(f"Runner child configuration invalid: {type(error).__name__}", file=sys.stderr)
+            code = 2
         else:
             print(f"Phase 5 runner configuration error: {type(error).__name__}: {error}", file=sys.stderr)
             code = 2

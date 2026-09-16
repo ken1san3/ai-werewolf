@@ -14,7 +14,7 @@ from typing import BinaryIO, Final
 from .types import (
     AiAuditError,
     AiAuditErrorCode,
-    AiAuditRecord,
+    AiAuditEntry,
     AiAuditWriterConfig,
     AuditWriteAck,
     serialize_ai_audit,
@@ -163,7 +163,7 @@ class JsonlAiAuditSink:
         if self._terminal_code is not None:
             raise self._terminal_error()
 
-    async def write(self, record: AiAuditRecord) -> AuditWriteAck:
+    async def write(self, record: AiAuditEntry) -> AuditWriteAck:
         """Admit one bounded serialized record and await its durable acknowledgement."""
 
         self._raise_if_not_writable()

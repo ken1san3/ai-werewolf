@@ -758,12 +758,38 @@ class BrokerAdmissionSession:
             self._results.pop(invocation_id, None)
 
     async def _control(self, operation: str, key: str, **fields: object) -> str:
+        acknowledgement = self._register_ack(key)
+        return await self._control_with_registered_ack(
+            operation, key, acknowledgement, fields
+        )
+
+    def _register_ack(self, key: str) -> asyncio.Future[str]:
         if key in self._acks and not self._acks[key].done():
             raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
         acknowledgement: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         self._acks[key] = acknowledgement
+        return acknowledgement
+
+    async def _control_with_registered_ack(
+        self,
+        operation: str,
+        key: str,
+        acknowledgement: asyncio.Future[str],
+        fields: Mapping[str, object],
+        lane: _ControlLane | None = None,
+    ) -> str:
         try:
-            await self._send(operation, **fields)
+            await self._send(
+                operation,
+                _ordinary_lane=lane,
+                _ordinary_ack=acknowledgement,
+                **fields,
+            )
+            if (
+                lane is not None
+                and lane.disposition == AdmissionStatus.EXPIRED.value
+            ):
+                return AdmissionStatus.EXPIRED.value
             async with asyncio.timeout(self._config.cancellation_grace_seconds):
                 return await asyncio.shield(acknowledgement)
         except TimeoutError:
@@ -772,7 +798,8 @@ class BrokerAdmissionSession:
                 LLMBackendErrorCode.ADMISSION_UNAVAILABLE
             ) from None
         finally:
-            self._acks.pop(key, None)
+            if self._acks.get(key) is acknowledgement:
+                self._acks.pop(key, None)
 
     async def _ordinary_control(
         self, lane: _ControlLane, operation: str
@@ -793,11 +820,14 @@ class BrokerAdmissionSession:
                             else cached
                         ),
                     )
+                acknowledgement = self._register_ack(lane.invocation_id)
                 control_task = asyncio.create_task(
-                    self._control(
+                    self._control_with_registered_ack(
                         operation,
                         lane.invocation_id,
-                        invocation_id=lane.invocation_id,
+                        acknowledgement,
+                        {"invocation_id": lane.invocation_id},
+                        lane,
                     ),
                     name=(
                         f"aiwolf-admission-{operation.lower()}-"
@@ -815,11 +845,14 @@ class BrokerAdmissionSession:
                             lane, operation, status_text
                         )
                         if operation == "CLAIM" and result is AdmissionStatus.GRANTED:
+                            abandonment = self._register_ack(lane.invocation_id)
                             abandon_task = asyncio.create_task(
-                                self._control(
+                                self._control_with_registered_ack(
                                     "ABANDON",
                                     lane.invocation_id,
-                                    invocation_id=lane.invocation_id,
+                                    abandonment,
+                                    {"invocation_id": lane.invocation_id},
+                                    lane,
                                 ),
                                 name=(
                                     "aiwolf-admission-abandon-cancelled-claim-"
@@ -868,6 +901,7 @@ class BrokerAdmissionSession:
         if operation == "RELEASE" and lane.abandon_disposition is not None:
             return "RETIRED"
         if operation in {"ABANDON", "RELEASE"} and disposition in {
+            AdmissionStatus.EXPIRED.value,
             AdmissionStatus.POISONED.value,
             AdmissionStatus.UNAVAILABLE.value,
         }:
@@ -882,6 +916,12 @@ class BrokerAdmissionSession:
     ) -> AdmissionStatus | str:
         lease = lane.lease
         if operation in {"CLAIM", "CANCEL"}:
+            if (
+                operation == "CLAIM"
+                and status_text == AdmissionStatus.GRANTED.value
+                and lane.disposition == AdmissionStatus.EXPIRED.value
+            ):
+                status_text = AdmissionStatus.EXPIRED.value
             try:
                 status = AdmissionStatus(status_text)
             except ValueError:
@@ -919,6 +959,7 @@ class BrokerAdmissionSession:
                 ) from None
             if status not in {
                 AdmissionStatus.CANCELLED,
+                AdmissionStatus.EXPIRED,
                 AdmissionStatus.POISONED,
                 AdmissionStatus.UNAVAILABLE,
             }:
@@ -934,6 +975,7 @@ class BrokerAdmissionSession:
             )
             if lease is not None:
                 lease._claimed = False
+                lease._retired = True
                 lease._abandon_disposition = lane.abandon_disposition
                 lane.lease = None
             self._clear_claim(lane.invocation_id)
@@ -941,6 +983,7 @@ class BrokerAdmissionSession:
         if operation == "RELEASE":
             if status_text not in {
                 "RELEASED",
+                AdmissionStatus.EXPIRED.value,
                 AdmissionStatus.POISONED.value,
                 AdmissionStatus.UNAVAILABLE.value,
             }:
@@ -952,6 +995,10 @@ class BrokerAdmissionSession:
             if lease is not None:
                 lease._claimed = False
                 lease._released = True
+                if status_text == AdmissionStatus.EXPIRED.value:
+                    lease._retired = True
+                    lane.abandon_disposition = "ABANDON_ACKNOWLEDGED"
+                    lease._abandon_disposition = lane.abandon_disposition
                 lane.lease = None
             self._clear_claim(lane.invocation_id)
             return status_text
@@ -993,9 +1040,22 @@ class BrokerAdmissionSession:
 
     async def _send(self, message_type: str, **fields: object) -> None:
         self._require_open()
+        ordinary_lane = fields.pop("_ordinary_lane", None)
+        ordinary_ack = fields.pop("_ordinary_ack", None)
+        if ordinary_lane is not None and not isinstance(ordinary_lane, _ControlLane):
+            raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
+        if ordinary_ack is not None and not isinstance(ordinary_ack, asyncio.Future):
+            raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
         try:
             encoded = _encode_frame(self._config.max_frame_bytes, message_type, **fields)
             async with self._write_lock:
+                if (
+                    ordinary_lane is not None
+                    and ordinary_lane.disposition == AdmissionStatus.EXPIRED.value
+                ):
+                    return
+                if ordinary_ack is not None and ordinary_ack.done():
+                    return
                 self._writer.write(encoded)
                 await self._writer.drain()
         except (ConnectionError, OSError, _ProtocolViolation):
