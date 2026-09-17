@@ -302,6 +302,8 @@ class GenerationAdmissionBroker:
         self._fairness_seed = fairness_seed
         self._config = config
         self._clock = clock
+        from ai_client.game_time import GameTime
+        self._game_time = GameTime.from_env()
         self._backend_request_timeout_seconds = float(
             backend_request_timeout_seconds
         )
@@ -1000,7 +1002,7 @@ class GenerationAdmissionBroker:
                 invocation_id,
                 ordinal,
                 request,
-                self._backend_request_timeout_seconds,
+                self._game_time.real_budget(self._backend_request_timeout_seconds),
             ),
             name=f"aiwolf-admission-provider-{invocation_id}-{ordinal}",
         )

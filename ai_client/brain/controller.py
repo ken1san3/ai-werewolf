@@ -143,7 +143,34 @@ def _invalid_or_repeated_self_text(
     if not normalized:
         return True
     previous = _last_self_accepted_text(request)
-    return previous is not None and _repeat_text(previous) == normalized
+    if previous is not None and _repeat_text(previous) == normalized:
+        return True
+    return _cross_player_public_copy(request, normalized)
+
+
+def _cross_player_public_copy(request: BrainInput, candidate: str) -> bool:
+    """Reject only long full copies in this receiver's public retained history."""
+    normalized = _repeat_text(candidate).casefold()
+    if len(normalized) < 50 or len(normalized.split()) < 8:
+        return False
+    capture = request.discussion
+    if capture is None:
+        return False
+    public_channels = {
+        channel.channel_id for channel in capture.context.chat_channels if channel.is_public
+    }
+    for record in (*request.history.records, *request.co.declarations):
+        if isinstance(record, ChatRecord) and record.channel in public_channels:
+            text = record.message
+        elif isinstance(record, CoDeclarationRecord):
+            text = record.comment
+        else:
+            continue
+        if record.player_id is None or record.player_id == capture.player_id:
+            continue
+        if _repeat_text(text).casefold() == normalized:
+            return True
+    return False
 
 
 class _Invocation:

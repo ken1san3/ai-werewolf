@@ -19,6 +19,8 @@ from typing import Any, Awaitable, Callable, Mapping
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
+from ai_client.game_time import GameTime
+
 from .protocol import (
     ProtocolMessageValidator,
     ProtocolValidationError,
@@ -130,6 +132,7 @@ class NetworkClient:
         self.validator = validator or ProtocolMessageValidator()
         self._connector = connector
         self._clock = clock
+        self._game_time = GameTime.from_env()
         self._sleep = sleep
         self._random = random_source or random.Random()
         self._timestamp = timestamp_factory or (lambda: int(time.time()))
@@ -1074,7 +1077,7 @@ class NetworkClient:
         local_deadline = (
             None
             if deadline is None
-            else mapped_at_monotonic + max(0, deadline - server_timestamp)
+            else mapped_at_monotonic + self._game_time.real_budget(max(0, deadline - server_timestamp))
         )
         mapping = PhaseTimingMapped(
             phase=phase,

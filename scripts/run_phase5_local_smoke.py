@@ -60,6 +60,7 @@ from ai_client.llm import (  # noqa: E402
     StructuredGenerationRequest,
 )
 from ai_client.llm.types import LlamaCppStructuredOutputConfig  # noqa: E402
+from ai_client.game_time import GameTime  # noqa: E402
 
 
 _SCRIPT = Path(__file__).resolve()
@@ -560,6 +561,8 @@ class RunConfig:
     sanitized_arguments: tuple[str, ...]
     diagnostic_environment: ProviderDiagnosticEnvironment | None = None
     phase6: bool = False
+    game_time: GameTime = GameTime()
+    real_supervision_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1154,6 +1157,13 @@ def _prepare_run(
     environ: Mapping[str, str] | None = None,
 ) -> RunConfig:
     effective = dict(os.environ if environ is None else environ)
+    game_time = GameTime.from_env(effective)
+    game_time.real_budget(float(args.max_seconds))
+    supervision = getattr(args, "real_supervision_seconds", None)
+    if supervision is not None and (
+        not math.isfinite(supervision) or not 0 < supervision <= 86400
+    ):
+        raise ValueError("--real-supervision-seconds must be in (0, 86400]")
     if args.endpoint is not None:
         effective["AIWOLF_LLM_ENDPOINT"] = args.endpoint
     if args.model is not None:
@@ -1226,6 +1236,8 @@ def _prepare_run(
         sanitized_arguments=_sanitized_arguments(args),
         diagnostic_environment=diagnostic_environment,
         phase6=bool(getattr(args, "phase6", False)),
+        game_time=game_time,
+        real_supervision_seconds=supervision,
     )
 
 
@@ -2057,7 +2069,11 @@ def _validate_game_evidence(
     sentinels: Sequence[str],
     evidence_root: Path,
     expected_player_to_client: Mapping[str, str],
+    phase6: bool = False,
 ) -> list[str]:
+    from ai_client import DiscussionChatConfig, ShortChatConfig
+
+    chat_profile = DiscussionChatConfig() if phase6 else ShortChatConfig()
     errors: list[str] = []
     if len(statuses) != 9:
         errors.append("nine client status records are required")
@@ -2133,9 +2149,9 @@ def _validate_game_evidence(
     if any(
         not (
             isinstance(item.get("message_chars"), int)
-            and 1 <= item["message_chars"] <= 80
+            and 1 <= item["message_chars"] <= chat_profile.max_text_chars
             and isinstance(item.get("message_utf8_bytes"), int)
-            and 1 <= item["message_utf8_bytes"] <= 96
+            and 1 <= item["message_utf8_bytes"] <= chat_profile.max_text_utf8_bytes
             and item.get("accepted_at", math.inf) < item.get("phase_deadline", -math.inf)
         )
         for item in day_one_chat
@@ -2729,11 +2745,12 @@ def _plain_snapshot(value: object) -> object:
 
 
 class _StartGateClock:
-    def __init__(self, start_path: Path, *, integer: bool = False) -> None:
+    def __init__(self, start_path: Path, *, integer: bool = False, game_time: GameTime = GameTime()) -> None:
         self._start_path = start_path
         self._origin = time.monotonic()
         self._started: float | None = None
         self._integer = integer
+        self._game_time = game_time
 
     def __call__(self) -> float | int:
         now = time.monotonic()
@@ -2742,7 +2759,7 @@ class _StartGateClock:
         else:
             if self._started is None:
                 self._started = now
-            elapsed = now - self._started
+            elapsed = self._game_time.logical_elapsed(now - self._started)
             value = elapsed if self._integer else self._origin + elapsed
         return int(value) if self._integer else value
 
@@ -2829,7 +2846,8 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     if len(players) != 9:
         raise ValueError("standard_9 must contain exactly nine seats")
     game_id = str(uuid4())
-    clock = _StartGateClock(args.start, integer=True)
+    game_time = GameTime.from_env()
+    clock = _StartGateClock(args.start, integer=True, game_time=game_time)
     game = GameState.create_from_preset(
         content,
         preset,
@@ -2970,7 +2988,7 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             failure = "STOP_REQUESTED"
         else:
             phase_started = game_started
-        async with asyncio.timeout(args.max_seconds):
+        async with asyncio.timeout(game_time.real_budget(args.max_seconds)):
             while game.game_result is None and not args.stop.exists():
                 for player_id in game.players:
                     remember_expected(player_id)
@@ -3024,6 +3042,10 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             "success": failure is None and game.game_result is not None,
             "failure": failure,
             "game_end": game.game_result is not None,
+            "winner": None if game.game_result is None else game.game_result.winner_team,
+            "reached_day": game.day,
+            "reached_phase": game.phase.value,
+            **game_time.evidence(None if total_game_wall is None else total_game_wall / 1_000_000),
             "accepted_reservations": accepted,
             "accepted_chats": chats,
             "expected_reservations": list(expected.values()),
@@ -3159,7 +3181,7 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     failure: str | None = None
     active_written = False
     try:
-        async with asyncio.timeout(args.max_seconds + _READY_SECONDS):
+        async with asyncio.timeout((args.real_supervision_seconds or args.max_seconds) + _READY_SECONDS):
             while not args.stop.exists():
                 snapshot = broker.snapshot
                 maximum_pending = max(maximum_pending, snapshot.pending_total)
@@ -3231,7 +3253,16 @@ def _audit_summary(path: Path) -> dict[str, object]:
     membership_valid = True
     request_ids: list[object] = []
     for record in records:
-        request_ids.append(record.get("request_id"))
+        request_id = record.get("request_id")
+        if record.get("schema_version") in {
+            "aiwolf.ai-discussion-generation.v1", "aiwolf.ai-discussion-generation.v2",
+        }:
+            attempt = record.get("attempt_ordinal")
+            if not isinstance(request_id, str) or not request_id or type(attempt) is not int or attempt not in {1, 2}:
+                raise ValueError("invalid discussion generation request identity")
+            # Match LLMBrain._attempt transport identity; repair shares logical request_id.
+            request_id = f"{request_id}:attempt:{attempt}"
+        request_ids.append(request_id)
         decision = record.get("decision")
         if not isinstance(decision, dict) or decision.get("kind") == "none":
             continue
@@ -3318,6 +3349,10 @@ async def _client_child(args: argparse.Namespace, bootstrap: dict[str, object]) 
     phase6 = bootstrap.get("phase6") is True
     plan = PHASE6_GAME_PLAN if phase6 else GAME_PLAN
     clock = _StartGateClock(args.start)
+    game_time = GameTime.from_env()
+    # Cross-process admission cutoffs remain in the REAL monotonic domain.
+    runtime_clock = clock if game_time.time_scale == 1.0 else time.monotonic
+    runtime_sleep = clock.sleep if game_time.time_scale == 1.0 else asyncio.sleep
     player_id = str(bootstrap.get("player_id", ""))
     config = Phase5ClientRuntimeConfig(
         network=NetworkClientConfig(
@@ -3341,19 +3376,19 @@ async def _client_child(args: argparse.Namespace, bootstrap: dict[str, object]) 
             short_chat=DiscussionChatConfig() if phase6 else ShortChatConfig()
         ),
         brain=BrainRunConfig(
-            max_decision_seconds=_FEATURE_BRAIN_TIMEOUT_SECONDS if phase6 else 5.0,
+            max_decision_seconds=game_time.real_budget(_FEATURE_BRAIN_TIMEOUT_SECONDS if phase6 else 5.0),
             cancellation_grace_seconds=0.25,
         ),
         reaction=ReactionChatConfig(
             max_chat_attempts_per_phase=plan.max_chat_attempts_per_phase,
-            brain_timeout_seconds=_FEATURE_BRAIN_TIMEOUT_SECONDS,
-            deadline_guard_seconds=1.0,
-            minimum_start_budget_seconds=0.10,
+            brain_timeout_seconds=game_time.real_budget(_FEATURE_BRAIN_TIMEOUT_SECONDS),
+            deadline_guard_seconds=game_time.real_budget(1.0),
+            minimum_start_budget_seconds=game_time.real_budget(0.10),
         ),
         vote_ability=VoteAbilityConfig(
-            brain_timeout_seconds=_FEATURE_BRAIN_TIMEOUT_SECONDS,
-            deadline_guard_seconds=1.0,
-            minimum_start_budget_seconds=0.10,
+            brain_timeout_seconds=game_time.real_budget(_FEATURE_BRAIN_TIMEOUT_SECONDS),
+            deadline_guard_seconds=game_time.real_budget(1.0),
+            minimum_start_budget_seconds=game_time.real_budget(0.10),
         ),
         speaking=SpeakingProfile(
             talkativeness=plan.talkativeness,
@@ -3377,8 +3412,8 @@ async def _client_child(args: argparse.Namespace, bootstrap: dict[str, object]) 
     runtime = await connect(
         config,
         store,
-        clock=clock,
-        sleep=clock.sleep,
+        clock=runtime_clock,
+        sleep=runtime_sleep,
         request_id_factory=lambda: str(uuid4()),
         **discussion_kwargs,
     )
@@ -3671,6 +3706,7 @@ def _recover_phase6_wait_failure_evidence(
 def _phase6_wait_failure_row(
     *, root: Path, label: str, errors: list[str], cleanup: list[dict[str, object]],
     recovered: Mapping[str, object],
+    game_time: GameTime = GameTime(),
 ) -> dict[str, object]:
     """Build a failed row even when secondary diagnostics cannot be calculated."""
     from server.aiwolf_core.models import GamePhase
@@ -3727,11 +3763,15 @@ def _phase6_wait_failure_row(
     }
     return {
         "_phase6_wait_failure": True,
+        **game_time.evidence(None if total_wall is None else total_wall / 1_000_000),
         "semantic": recovered.get("semantic", {}), "machine_semantic_pass": False,
         "row": label, "success": False, "errors": list(dict.fromkeys(errors))[:32],
         "process_topology": {"server": 1, "broker": 1, "clients": 9},
         "server": {
             "game_end": boolean(server.get("game_end")),
+            "winner": server.get("winner"),
+            "reached_day": number(server.get("reached_day")),
+            "reached_phase": server.get("reached_phase"),
             "accepted_chat_count": count(server.get("accepted_chats")),
             "accepted_reservation_count": count(server.get("accepted_reservations")),
             "phase_wall_durations": phase_wall, "total_game_wall_microseconds": total_wall,
@@ -3755,6 +3795,7 @@ async def _run_game(
 ) -> dict[str, object]:
     if phase6_fixture and not config.phase6:
         raise ValueError("semantic fixture requires Phase 6")
+    environ = {**environ, "AIWOLF_TIME_SCALE": str(config.game_time.time_scale)}
     broker_config = _game_broker_config(config.settings, phase6=config.phase6)
     _private_directory(root)
     process_dir = _new_private_subdirectory(root, "process")
@@ -3804,7 +3845,7 @@ async def _run_game(
         broker = await _spawn_owned(
             owned,
             label="broker",
-            arguments=("--_child-mode", "broker", "--ready", str(broker_ready), "--result", str(broker_result_path), "--active", str(broker_active), "--metrics", str(metrics_path), "--stop", str(broker_stop), "--max-seconds", str(config.max_seconds)),
+            arguments=("--_child-mode", "broker", "--ready", str(broker_ready), "--result", str(broker_result_path), "--active", str(broker_active), "--metrics", str(metrics_path), "--stop", str(broker_stop), "--max-seconds", str(config.max_seconds), "--real-supervision-seconds", str(config.real_supervision_seconds or config.max_seconds)),
             output_dir=process_dir,
             bootstrap={**_broker_bootstrap(config, registry, f"{config.seed}:{label}"), **({"phase6_fixture": True} if phase6_fixture else {})},
             environ=environ,
@@ -3863,7 +3904,7 @@ async def _run_game(
         start.write_text("start\n", encoding="utf-8")
         os.chmod(start, _PRIVATE_FILE_MODE)
         completion_wait_pending = True
-        await _wait_for_paths((server_result_path,), tuple(owned), config.max_seconds)
+        await _wait_for_paths((server_result_path,), tuple(owned), config.real_supervision_seconds or config.max_seconds)
         completion_wait_pending = False
         completion_wait_pending = True
         await _wait_for_paths(tuple(status_paths.values()), tuple(owned[2:]), 60.0)
@@ -3928,6 +3969,7 @@ async def _run_game(
                         manifest=recovered["manifest"], ai_dir=ai_dir, owned=owned,
                         sentinels=sentinels, evidence_root=root,
                         expected_player_to_client=player_to_client,
+                        phase6=config.phase6,
                     )
                     if not isinstance(findings, list) or any(not isinstance(value, str) for value in findings):
                         raise ValueError("validation result shape")
@@ -3936,6 +3978,7 @@ async def _run_game(
                     errors.append("PHASE6_RECOVERY_VALIDATION_UNAVAILABLE")
         return _phase6_wait_failure_row(
             root=root, label=label, errors=errors, cleanup=cleanup, recovered=recovered,
+            game_time=config.game_time,
         )
     if ai_dir is not None and manifest is not None and not errors:
         errors.extend(
@@ -3950,18 +3993,26 @@ async def _run_game(
                 sentinels=sentinels,
                 evidence_root=root,
                 expected_player_to_client=player_to_client,
+                phase6=config.phase6,
             )
         )
     if any(item.get("alive") for item in cleanup):
         errors.append("owned process remains alive")
     return {
         **({"semantic": semantic, "machine_semantic_pass": not errors and semantic.get("semantic_requirements_met") is True} if config.phase6 else {}),
+        **config.game_time.evidence(
+            None if server_result.get("total_game_wall_microseconds") is None
+            else server_result["total_game_wall_microseconds"] / 1_000_000
+        ),
         "row": label,
         "success": not errors,
         "errors": errors[:32],
         "process_topology": {"server": 1, "broker": 1, "clients": 9},
         "server": {
             "game_end": server_result.get("game_end"),
+            "winner": server_result.get("winner"),
+            "reached_day": server_result.get("reached_day"),
+            "reached_phase": server_result.get("reached_phase"),
             "accepted_chat_count": len(server_result.get("accepted_chats", [])),
             "accepted_reservation_count": len(server_result.get("accepted_reservations", [])),
             "phase_wall_durations": server_result.get("phase_wall_durations", []),
@@ -4257,6 +4308,9 @@ def _run_metadata(config: RunConfig) -> dict[str, object]:
         "python": platform.python_version(),
         "os": platform.platform(),
         "seed": config.seed,
+        "time_scale": config.game_time.time_scale,
+        "game_completion_logical_seconds": config.max_seconds,
+        "real_supervision_seconds": config.real_supervision_seconds or config.max_seconds,
         "arguments": list(config.sanitized_arguments),
         "game_plan": asdict(PHASE6_GAME_PLAN if config.phase6 else GAME_PLAN),
         "frequency_profile": {
@@ -4726,6 +4780,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=8625)
     parser.add_argument("--max-seconds", type=float, default=_SMOKE_HARD_LIMIT_SECONDS)
+    parser.add_argument("--real-supervision-seconds", type=float, help="Independent REAL process-supervision budget; never scaled")
     parser.add_argument(
         "--output-dir",
         type=Path,

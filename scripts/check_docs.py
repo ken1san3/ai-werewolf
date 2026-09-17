@@ -704,7 +704,7 @@ def check_test_policy_refs() -> None:
 # 恒久的に上がる。上限は引き上げず、古い記録を review_archive/ へ退避する。
 SESSION_CONTEXT_LIMITS = {
     ROOT / "AGENTS.md": 8000,
-    DOCS / "CURRENT_STATE.md": 12000,
+    DOCS / "CURRENT_STATE.md": 3500,
     DOCS / "REVIEW_INBOX.md": 8000,
     DOCS / "ROADMAP.md": 10000,
     DOCS / "RUNBOOK.md": 16000,
@@ -739,6 +739,23 @@ def check_session_context_size() -> None:
             )
 
 
+def check_context_contract() -> None:
+    """Validate lean operating-document shape; never make dispatch/approval decisions."""
+    for heading in ("Current Phase", "Current Target", "Continuation Hold", "Current Blockers",
+                    "Test Status", "Latest Valid Evidence", "Next Integration Action"):
+        if not ai_status.section(read(CURRENT_STATE), heading):
+            fail("context-contract", f"CURRENT_STATEに現在値の{heading}が無い（holdなしも明記）")
+    packet = read(DOCS / "tasks/TEMPLATE.md")
+    for heading in ("Goal", "Scope", "Out of scope", "Changed/target files", "Canonical references",
+                    "Acceptance", "Required independence", "Evidence location"):
+        if not ai_status.section(packet, heading):
+            fail("context-contract", f"task templateに{heading}が無い")
+    review = read(DOCS / "handoffs/tasks/REVIEW_TEMPLATE.md")
+    for field in ("Verdict", "Findings", "Evidence", "Required fix", "Next gate"):
+        if not re.search(rf"(?m)^{re.escape(field)}:", review):
+            fail("context-contract", f"review templateに{field}が無い")
+
+
 def main() -> int:
     for check in (
         check_design_sections,
@@ -763,6 +780,7 @@ def main() -> int:
         check_random_event_table,
         check_test_policy_refs,
         check_session_context_size,
+        check_context_contract,
     ):
         check()
     if problems:

@@ -2439,7 +2439,7 @@ async def test_p6b_delayed_durable_generation_branch_wins_repeated_cancellation(
     )
 
 
-@pytest.mark.parametrize("case", ("success", "bad_envelope", "repair_rejected", "unknown_rejection"))
+@pytest.mark.parametrize("case", ("success", "fragment", "bad_envelope", "repair_rejected", "unknown_rejection"))
 @async_test
 async def test_contextful_repair_uses_distinct_transport_ids_and_preserves_logical_identity(case):
     import time
@@ -2467,7 +2467,12 @@ async def test_contextful_repair_uses_distinct_transport_ids_and_preserves_logic
 
         async def generate(self, sent):
             self.requests.append(sent)
-            return StructuredGenerationResponse(sent.request_id, "{}" if len(self.requests) == 1 else payload, "opaque-model", "stop", LLMUsage(3, 4))
+            first = "{}"
+            if case == "fragment":
+                invalid = json.loads(payload)
+                invalid["decision"]["message"] = "x" * 200
+                first = json.dumps(invalid)
+            return StructuredGenerationResponse(sent.request_id, first if len(self.requests) == 1 else payload, "opaque-model", "stop", LLMUsage(3, 4))
 
         async def aclose(self):
             pass
@@ -2504,13 +2509,15 @@ async def test_contextful_repair_uses_distinct_transport_ids_and_preserves_logic
             code = "PROMPT_TOO_LARGE" if case == "repair_rejected" else "private-exception-sentinel"
             context = patch("ai_client.llm.brain.build_repair_projection", side_effect=PromptProjectionError(code, projection=projection))
         with lease.activate(), context:
-            if case == "success":
+            if case in {"success", "fragment"}:
                 result = await asyncio.wait_for(brain.decide(request), 5.0)
                 assert isinstance(result, BrainResult)
                 assert [sent.request_id for sent in backend.requests] == [logical + ":attempt:1", logical + ":attempt:2"]
                 assert [row.request_id for row in audit.records] == [logical, logical]
                 assert [row.attempt_ordinal for row in audit.records] == [1, 2]
                 assert [row.status.value for row in audit.records] == ["OUTPUT_INVALID", "REPAIR_SUCCEEDED"]
+                if case == "fragment":
+                    assert audit.records[0].validation_code == "TEXT_BOUND"
                 assert session._call_ordinals["repair-invocation"] == 2
                 assert all(isinstance(row, AiDiscussionGenerationRecordV2) for row in audit.records)
                 transaction = DiscussionTransaction(state=_UnusedState(), audit=audit, utc_clock=lambda: NOW)

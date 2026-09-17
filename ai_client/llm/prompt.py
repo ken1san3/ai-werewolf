@@ -54,11 +54,20 @@ _SYSTEM_MESSAGE = (
 )
 
 
-def _system_message(short_chat: ChatOutputProfile | None) -> str:
+_DISCUSSION_INSTRUCTION = (
+    ' Private role/team/win/abilities guide strategy, not public introductions. Protect secrets that help opponents eliminate your team; reveal only for strategic benefit. You may deliberately deceive. Continue the SAME conversation: open with the issue, not your role/status. Repeat claims only with a new reason; consider grounding.self_co, strategy and history. Do not copy whole utterances. '
+    'grounding.current/ability_results override public claims/guesses. context.inspect_result/medium_result are Role attributes, NOT observed ability results. Only grounding.ability_results.records are results; target is not result_id. Omitted facts are unknown. '
+    'Check speech_act against your text: asking why = QUESTION; answering that question = ANSWER; disputing an accusation = REBUTTAL; revising suspicion = OPINION_CHANGE; asserting = CLAIM; relating players = RELATION_HYPOTHESIS. NONE only fits none of these, never hides a response. Use actual in_reply_to references and prior/current/causes; if unavailable, say something supportable, never invent them. '
+    'Use grounding.allowed_evidence_refs/allowed_decisions. Decision/discussion kind/option match; none option_id=null. DECLARE requires co_declare with the same option/claimed_role_id. SILENCE/DEFER require none and selected_option_id/claimed_role_id=null. Use option targets/roles for rankings. Claim updates assess received chat/CO; relation endpoints differ; unsupported updates stay empty. Write complete short English within limits; shorten ideas, never cut sentences.'
+)
+
+
+def _system_message(short_chat: ChatOutputProfile | None, *, discussion: bool = False) -> str:
+    base = _SYSTEM_MESSAGE + (_DISCUSSION_INSTRUCTION if discussion else "")
     if short_chat is None:
-        return _SYSTEM_MESSAGE
+        return base
     return (
-        _SYSTEM_MESSAGE
+        base
         + " For chat message or co_declare comment, return one short utterance "
         f"targeting {short_chat.target_min_text_tokens}-"
         f"{short_chat.target_max_text_tokens} model tokens. Such text must be at "
@@ -397,7 +406,7 @@ def project_brain_input(
                 request,
                 llm_config=config,
                 config=discussion_config,
-                system_message=_system_message(config.short_chat),
+                system_message=_system_message(config.short_chat, discussion=True),
             )
         except PromptProjectionError:
             raise
@@ -407,7 +416,7 @@ def project_brain_input(
                 raise
             rejected = _make_projection(
                 (
-                    LLMMessage(role="system", content=_system_message(config.short_chat)),
+                    LLMMessage(role="system", content=_system_message(config.short_chat, discussion=True)),
                     LLMMessage(
                         role="user",
                         content=json.dumps(

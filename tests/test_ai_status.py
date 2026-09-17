@@ -541,7 +541,7 @@ class CoordinationRecoveryTests(unittest.TestCase):
         board = ("## T900\nTask ID: T900\nState: IN_PROGRESS\n"
                  "Task packet: Docs/ai/tasks/T900.md\n"
                  "Handoff path: Docs/ai/handoffs/tasks/T900.md\n")
-        sources = {"CURRENT_STATE.md": state, "TASKS.md": board,
+        sources = {"CURRENT_STATE.md": state, "TASKS.md": board, "T900.md": "## Canonical references\n",
                    "REVIEW_INBOX.md": "", "OPEN_QUESTIONS.md": ""}
 
         def read(path: Path) -> str:
@@ -558,10 +558,173 @@ class CoordinationRecoveryTests(unittest.TestCase):
             self.assertEqual(ai_status.main(), 0)
         rendered = output.getvalue()
         for expected in ("Phase 9 fixture", "T900 [IN_PROGRESS]", "CONTINUATION HOLD",
-                         "Human review", "host ownership UNKNOWN", "Verdict: PASS",
+                         "Human review", "host ownership UNKNOWN", "CONTEXT READ SET",
                          "do not redispatch", "TASKS lifecycle", "Honor hold"):
             self.assertIn(expected, rendered)
         self.assertNotIn("RUNBOOK:", rendered)
+        self.assertNotIn("Verdict: PASS", rendered)
+
+
+class ContextDietTests(unittest.TestCase):
+    def render(self, *args: str, state_override: str | None = None,
+               packet_override: str | None = None) -> tuple[int, str, list[str]]:
+        state = state_override or (
+            "## Current Phase\nPhase fixture\n## Current Target\nActive task: T900\n"
+            "Task state: IN_PROGRESS\n## Continuation Hold\nSTOP GAME; docs only\n"
+            "## Current Blockers\nCurrent blocker\n## Next Integration Action\nSelected work\n"
+            "## History\nDO NOT PRELOAD HISTORICAL CONTENT\n")
+        board = ("## T900\nTask ID: T900\nRole: Integrator\nState: IN_PROGRESS\n"
+                 "Task packet: `Docs/ai/tasks/T900.md`\nHandoff path: `old-private-handoff.md`\n"
+                 "## T901\nTask ID: T901\nRole: Reviewer\nState: READY\n"
+                 "Task packet: `Docs/ai/tasks/T901.md`\n"
+                 "## T899\nTask ID: T899\nState: DONE\nTask packet: `archived.md`\n")
+        sources = {"CURRENT_STATE.md": state, "TASKS.md": board,
+                   "T900.md": packet_override if packet_override is not None else
+                       "## Canonical references\n- `Docs/ai/OPERATIONS.md`\n"
+                       "## Evidence location\n`old-private-handoff.md`\n",
+                   "T901.md": "## Canonical references\n- `Docs/ai/INDEX.md`\n",
+                   "RUNBOOK.md": "## 1. Integrator\nDetails explicitly requested\n"}
+        reads: list[str] = []
+
+        def read(path: Path) -> str:
+            reads.append(path.name)
+            return sources[path.name]  # unrelated canonical/history/hand-off reads fail the test
+
+        output = io.StringIO()
+        with (patch.object(ai_status, "read", side_effect=read),
+              patch.object(ai_status, "git_summary", return_value="fixture HEAD"),
+              patch.object(ai_status, "print_design_gate") as gate,
+              patch.object(ai_status, "handoff_summary", return_value="EXPLICIT EVIDENCE") as evidence,
+              patch.object(Path, "is_file", return_value=True),
+              patch("sys.argv", ["ai_status.py", "integrate", *args]), redirect_stdout(output)):
+            result = ai_status.main()
+            if "--details" not in args:
+                gate.assert_not_called()
+                evidence.assert_not_called()
+        return result, output.getvalue(), reads
+
+    def test_default_reads_only_current_packet_and_never_opens_handoff(self) -> None:
+        result, output, reads = self.render()
+        self.assertEqual(result, 0)
+        self.assertEqual(reads, ["CURRENT_STATE.md", "TASKS.md", "T900.md"])
+        self.assertIn("STOP GAME; docs only", output)
+        self.assertIn("Docs/ai/OPERATIONS.md", output)  # pointer, not the file contents
+        self.assertNotIn("old-private-handoff", output)
+        self.assertNotIn("T901", output)
+        self.assertNotIn("T899", output)
+        self.assertNotIn("HISTORICAL CONTENT", output)
+
+    def test_assigned_worker_reads_its_packet_not_active_main_packet(self) -> None:
+        result, output, reads = self.render("--task", "T901")
+        self.assertEqual(result, 0)
+        self.assertEqual(reads, ["CURRENT_STATE.md", "TASKS.md", "T901.md"])
+        self.assertIn("ACTIVE TASK: T900; SELECTED TASK: T901", output)
+        self.assertIn("STOP GAME", output)
+        self.assertIn("Docs/ai/INDEX.md", output)
+
+    def test_explicit_all_live_lists_pointers_without_expanding_other_packets(self) -> None:
+        result, output, reads = self.render("--all-live")
+        self.assertEqual(result, 0)
+        self.assertIn("T901 [READY]", output)
+        self.assertNotIn("T899", output)
+        self.assertNotIn("T901.md", reads)
+
+    def test_unknown_and_done_task_do_not_fallback_or_read_archive(self) -> None:
+        for task in ("T998", "T899"):
+            with self.subTest(task=task):
+                result, output, reads = self.render("--task", task)
+                self.assertEqual(result, 1)
+                self.assertEqual(reads, ["CURRENT_STATE.md", "TASKS.md"])
+                self.assertNotIn("CONTEXT READ SET", output)
+
+    def test_duplicate_active_declaration_is_not_silently_selected(self) -> None:
+        result, _, reads = self.render(state_override="Active task: T900\nActive task: T901\n")
+        self.assertEqual(result, 1)
+        self.assertEqual(reads, ["CURRENT_STATE.md", "TASKS.md"])
+
+    def test_details_is_opt_in_and_limited_to_selected_context(self) -> None:
+        result, output, reads = self.render("--details")
+        self.assertEqual(result, 0)
+        self.assertIn("EXPLICIT EVIDENCE", output)
+        self.assertIn("RUNBOOK: integrate", output)
+        self.assertEqual(reads, ["CURRENT_STATE.md", "TASKS.md", "T900.md", "RUNBOOK.md"])
+
+    def test_read_set_rejects_escape_and_deduplicates_explicit_files(self) -> None:
+        outside = (ai_status.ROOT.parent / "not-a-canonical-file.md").as_posix()
+        result, output, _ = self.render(packet_override=f"## Canonical references\n`{outside}`\n")
+        self.assertEqual(result, 1)
+        self.assertIn("READ SET ERROR", output)
+        with (patch.object(ai_status, "read", return_value=
+                  "## Canonical references\n`Docs/ai/OPERATIONS.md` `Docs/ai/OPERATIONS.md`\n"),
+              patch.object(Path, "is_file", return_value=True)):
+            self.assertEqual(ai_status.packet_read_set({"Task packet": "`Docs/ai/tasks/T900.md`"}),
+                             ["Docs/ai/tasks/T900.md", "Docs/ai/OPERATIONS.md"])
+
+    def test_missing_reference_fails_closed(self) -> None:
+        with (patch.object(ai_status, "read", return_value="## Canonical references\n`missing.md`\n"),
+              patch.object(Path, "is_file", side_effect=lambda path: path.name != "missing.md", autospec=True)):
+            with self.assertRaisesRegex(ValueError, "reference is missing"):
+                ai_status.packet_read_set({"Task packet": "`Docs/ai/tasks/T900.md`"})
+
+
+class DispatchDocumentTests(unittest.TestCase):
+    """User-specified routing examples are documentation checks, not an agent router."""
+
+    def test_five_axes_keep_independence_without_automatic_role_chain(self) -> None:
+        doc = ai_status.read(ai_status.AI / "decisions/D075_RISK_BASED_DISPATCH_AND_CONTEXT.md")
+        rows = {}
+        for line in ai_status.section(doc, "Dispatch examples").splitlines():
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) == 9:
+                rows[cells[0]] = cells[1:]
+        expected = {
+            "known_local_bug": ["implement+focused", "no", "no", "no", "yes", "no", "no", "no"],
+            "unknown_after_one_diagnosis": ["bound", "no", "yes", "no", "no", "no", "no", "no"],
+            "real_game_acceptance": ["coordinate", "no", "no", "yes", "yes", "canonical", "conditional", "binding_only"],
+            "reviewer_did_previous_task_only": ["integrate", "no", "no", "no", "existing", "no", "no", "yes"],
+            "reviewer_authored_target": ["coordinate", "no", "no", "no", "independent", "yes", "no", "no"],
+            "canonical_fresh_required": ["coordinate", "no", "no", "no", "independent", "yes", "no", "no"],
+            "same_approved_bytes_context": ["verify_hash", "no", "no", "no", "no", "no", "no", "yes"],
+            "same_bytes_new_acceptance": ["coordinate", "yes", "no", "yes", "yes", "conditional", "conditional", "no"],
+            "high_risk_second_opinion": ["coordinate", "conditional", "no", "conditional", "yes", "conditional", "conditional", "no"],
+            "unchanged_unresolved_findings": ["fix", "no", "no", "no", "no", "no", "no", "unresolved"],
+        }
+        for case, columns in expected.items():
+            with self.subTest(case=case):
+                self.assertEqual(rows.get(case), columns)
+        for case in ("status_only", "deterministic_saved_log"):
+            self.assertEqual(rows[case][1:7], ["no"] * 6)
+
+    def test_prior_decision_and_history_bytes_are_preserved(self) -> None:
+        import hashlib
+        expected = {
+            "decisions/D053_TWO_REVIEWERS.md": "d3756bc203c1ac8781f8b1f81003cc6085b63ef3171674951b58f1f48801c49a",
+            "history/2026-09-16-before-d075/CURRENT_STATE.md": "8fd04746e92bb12675542077a21131c419499609a80d91d2b72ea3249f6e4924",
+            "history/2026-09-16-before-d075/TASKS.md": "01c3111a7f15cdddc52a49539783df55d1bea09bf403c870ccf7ee8bf46d3c0d",
+        }
+        for path, digest in expected.items():
+            with self.subTest(path=path):
+                self.assertEqual(hashlib.sha256((ai_status.AI / path).read_bytes()).hexdigest(), digest)
+
+    def test_context_checker_rejects_missing_hold_and_independence_fields(self) -> None:
+        originals = {path: check_docs.read(path) for path in (
+            check_docs.CURRENT_STATE,
+            check_docs.DOCS / "tasks/TEMPLATE.md",
+            check_docs.DOCS / "handoffs/tasks/REVIEW_TEMPLATE.md")}
+        cases = (
+            (check_docs.CURRENT_STATE, "## Continuation Hold", "## Removed hold", "Continuation Hold"),
+            (check_docs.DOCS / "tasks/TEMPLATE.md", "## Required independence", "## Removed field", "Required independence"),
+            (check_docs.DOCS / "handoffs/tasks/REVIEW_TEMPLATE.md", "Evidence:", "Removed:", "Evidence"),
+        )
+        self.addCleanup(check_docs.problems.clear)
+        for path, old, new, expected in cases:
+            with self.subTest(expected=expected):
+                modified = dict(originals)
+                modified[path] = originals[path].replace(old, new)
+                check_docs.problems.clear()
+                with patch.object(check_docs, "read", side_effect=lambda item: modified[item]):
+                    check_docs.check_context_contract()
+                self.assertTrue(any(expected in problem for problem in check_docs.problems))
 
     def test_bootstrap_discovers_state_and_preserves_human_boundary(self) -> None:
         prompt = ai_status.read(ai_status.AI / "MAIN_INTEGRATOR_PROMPT.md")

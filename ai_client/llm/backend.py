@@ -259,6 +259,8 @@ class OpenAICompatibleBackend:
         if not isinstance(config, OpenAICompatibleBackendConfig):
             raise TypeError("config must be OpenAICompatibleBackendConfig")
         self._config = config
+        from ai_client.game_time import GameTime
+        self._game_time = GameTime.from_env()
         parsed = urlsplit(config.endpoint)
         self._identity = BackendIdentity(
             backend_type="openai_compatible_http",
@@ -361,7 +363,7 @@ class OpenAICompatibleBackend:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
 
         try:
-            async with asyncio.timeout(self._config.request_timeout_seconds):
+            async with asyncio.timeout(self._game_time.real_budget(self._config.request_timeout_seconds)):
                 async with self._client.stream(
                     "POST",
                     self._config.endpoint,

@@ -7,10 +7,15 @@
 
 At the start of every session:
 
-1. Read this file.
-2. Run `python scripts/ai_status.py <entry>` for the assigned responsibility.
-3. Read the named task packet and only the canonical/design files it references.
-4. Inspect `git status` and the relevant diff before writing.
+1. Read this file's active rules.
+2. Run `python scripts/ai_status.py <entry> --task <assigned-id>` (Main未割当時は`--task`省略)。
+3. Read the assigned task packet.
+4. Read only the canonical files/sections explicitly named by that packet.
+5. Inspect `git status` and the relevant diff before writing.
+6. Read additional evidence only when a concrete unresolved question requires it.
+
+CURRENT_STATEやhandoffの過去全文を起動時に展開しない。現値はactive snapshot、履歴は
+history/archiveに分離する。引継ぎはpath/hashと今回の差分だけ。詳細はD075とOPERATIONS。
 
 Canonical entries are `integrate`, `architect`, `implement`, `review`, `fix`, `test`,
 and `investigate`; `design` remains a compatibility alias for `architect`. Do not use
@@ -20,12 +25,12 @@ conversation history as the sole source of project state.
 
 | Responsibility | Authority and output |
 |---|---|
-| Integrator | Maintains the critical path and task board, partitions non-overlapping work, verifies handoffs and evidence, resolves conflicts, decides the next wave, and coordinates phase/MVP completion. It chooses decomposition, delegation, and verification by risk and may perform bounded work locally when separate responsibility or independence is not required. |
-| Architect | Defines public interfaces, lifecycle, state transitions, concurrency, protocol interaction, acceptance criteria, and required tests for a task that passed a required Design Gate. It does not implement or self-approve. |
-| Implementer | Implements an approved contract or unambiguous existing specification, adds focused/regression tests, and writes measured handoff evidence. It does not change specifications on its own. |
-| Reviewer | Independently checks specification, design, implementation, tests, and diff; records findings and actual evidence. It does not approve a detailed design created in the same session. |
-| Tester | Runs focused, integration, completion, regression, and bounded long-running tests; preserves raw commands, logs, timing, and failures. It verifies facts and does not make design decisions. |
-| Investigator | Reproduces and isolates unclear, cross-component, flaky, concurrency, or E2E failures; reports cause, evidence, and recommended repair scope. It does not begin a broad repair without a separate implementation task. |
+| Integrator | critical path/board/競合/証拠照合/統合を管理。既定実行主体として限定作業を行い、riskと独立性で委譲を選ぶ。 |
+| Architect | 必要な詳細設計のinterface/lifecycle/state/concurrency/protocol/acceptance/testを定義。実装・自己承認しない。 |
+| Implementer | 承認契約または明白な既存仕様を実装し、focused/regressionと実測証拠を残す。仕様を独断変更しない。 |
+| Reviewer | 仕様/設計/実装/test/diffを独立照合し指摘と実測を記録。本人の対象設計を承認しない。 |
+| Tester | 必要な独立測定と有限testを実行しcommand/raw/時間/失敗を保全。設計判断はしない。 |
+| Investigator | 未知/横断/flaky/concurrency/E2E失敗を再現・分離し原因と最小修正scopeを報告。広い実装修正を始めない。 |
 
 The user retains final authority over product rules, scope, and direction.
 
@@ -46,18 +51,39 @@ IN_PROGRESSを重複実行しない。host所有権不明なら照合まで保�
 board/stateはMainが更新し、packetの明示割当なしにworkerが並行更新しない。
 
 host標準の委譲/隔離を使い、daemon、scheduler、workflow engine、model router、automatic merge、
-Autodev代替を作らない。責務は必要に応じ選び、独立Tester/fresh Reviewer gateを維持する。
+Autodev代替を作らない。Mainを既定実行主体とし、D075のAgent Dispatch Gateで必要な責務だけを選ぶ。
+追加担当で得る独立性・専門判断・測定結果を一文で説明できなければ呼ばない。役割chainを作らない。
+必要な独立Tester/Reviewer gateを維持する。fresh sessionは独立性不成立またはcanonical明示時だけ。
 required independenceをMainや対象の実装・設計を担当したsessionで代替しない。
-agent thread limit時は既存担当の状態と独立性を確認し、利用可能な独立Reviewerを再利用する。
-次に不要な完了担当をhost標準機能で終了・解放して生成、並列数を減らして直列生成、
-それでも不可なら利用可能な既存Reviewerへの割当を順に検討する。上限だけで全体停止せず、
-レビュー省略・Main自己承認・未実行の完了扱いは禁止。不要な担当は証拠回収後に解放し、
+agent thread limit時は既存担当の独立性確認と再利用→不要な完了担当の解放→Mainで非依存作業→
+対象gateだけ保留の順。固定agent回数上限は設けない。上限だけで全体停止、レビュー省略、
+Main自己承認、未実行の完了扱いは禁止。不要な担当は証拠回収後に解放し、
 解放APIがない場合はその制約を記録する。中断・archiveだけで枠解放済みと推定しない。
 Reviewer→必要な修正→再レビュー→admission/実ゲームのgateを維持する。
 明確な修正は直接、原因不明は早期調査へ。
 D068はtask名や症状が異なっても同一acceptance/evidence objectiveの失敗3round後に経路再評価を
 要求する（`OPERATIONS.md`）。canonical/decision/code/Architectでも解けない重要なproduct選択
 だけをユーザーへ上げ、判断待ちの間も独立した安全な作業を進める。
+
+## Agent Dispatch Gate（D075）
+
+- Architect: public interface/protocol/schema/state transition/lifecycle/concurrency ownership/
+  acceptance/product rule/component boundaryを変更する場合だけ。既存設計内の局所修正では不要。
+- Investigator: 原因不明、flaky/race/concurrency、component横断、またはMainの1回の限定診断で
+  原因候補を絞れない場合。既知原因には挟まない。
+- Implementer: 独立した実装単位を分離する価値がある場合。小さく明白な既存契約内修正はMainが行う。
+- Tester: acceptance独立測定、E2E/concurrency/long-running/completion/実provider/実game、
+  または実装者の測定だけでは不足する場合。focused/regression/syntax/check_docsはMainでも可。
+- Reviewer: 製品code/test contractの実質変更、detailed design、acceptance独立判定、高risk運用変更。
+  status/handoff整形/集計/hash照合/証拠コピーだけでは新担当を呼ばない。
+
+既存Reviewerは対象設計・実装を担当せず自己採点の立場でなければ複数taskへ再利用できる。
+fresh必須は本人の対象設計/実装、以前の判断による直接の独立性毀損、canonicalの明示要求だけ。
+second Reviewerは通常経路に置かず、Critical/High、protocol/concurrency/security/authority境界、
+重要設計gate、第一担当UNKNOWN/判断不能、実質的見解差、同種見落としの高い再発riskだけで検討する。
+担当完了後は「新しい未知/独立性/設計判断/測定」の4点を再判定し、全NOならMainが続行する。
+同一artifact SHA-256かつ承認scope/依存/acceptance/環境条件が同じなら既存判定を再利用し、
+同一証拠・同一diffの再レビューは禁止。新runの所有権・秘密境界・一回許可は旧承認で代替しない。
 
 ## Design Gate
 

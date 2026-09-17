@@ -323,12 +323,12 @@ def test_phase6_discussion_profile_prompt_parser_boundary() -> None:
     )
     system = projection.messages[0].content
     assert "20" in system and "120" in system
-    for text in ("x" * 200, "あ" * 200):
+    for text in ("x" * 199 + ".", "あ" * 199 + "."):
         payload = _payload(request, "chat")
         payload["decision"]["message"] = text
         parsed = parse_llm_output(json.dumps(payload), projection=projection)
         assert parsed.decision.message == text
-    for text in ("x" * 201, "あ" * 199 + "😀"):
+    for text in ("x" * 201, "あ" * 199 + "😀", "x" * 200):
         payload = _payload(request, "chat")
         payload["decision"]["message"] = text
         with pytest.raises(DecisionValidationError):
@@ -757,7 +757,7 @@ def test_p6b_sent_schema_requires_chat_reaction_trigger() -> None:
 
     action_without_option = _payload(peer_request, "chat")
     action_without_option["discussion"]["option_id"] = None
-    assert peer_validator.is_valid(action_without_option)
+    assert not peer_validator.is_valid(action_without_option)
     with pytest.raises(DecisionValidationError):
         _parse(peer_request, action_without_option)
 

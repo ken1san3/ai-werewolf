@@ -251,6 +251,7 @@ def test_p6b_projection_mandatory_order_and_complete_budget_rejection() -> None:
         "action_context",
         "capture",
         "context",
+        "grounding",
         "limits",
         "lifecycle",
         "state",
@@ -295,18 +296,18 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
     # Mandatory-only complete contract: exact fixture KAT and hard byte edge.
     request = _request()
     baseline = project_brain_input(request, config=LLMBrainConfig())
-    assert baseline.prompt_bytes == 10_429
+    assert baseline.prompt_bytes == 13_155
     assert baseline.prompt_sha256 == (
-        "c061a98161d478594cad9f0ce333ee9e22e2ef46ebfbfaf2accb345c6108e6a2"
+        "e4805480ed2bb2f1a0d86ebd64950b08befb2c5895f9c974519ce130a3f0e176"
     )
     with pytest.raises(PromptProjectionError) as mandatory_under:
         project_brain_input(
             request,
             config=LLMBrainConfig(),
-            discussion_config=DiscussionPromptConfig(max_prompt_bytes=10_882),
+            discussion_config=DiscussionPromptConfig(max_prompt_bytes=13_608),
         )
     assert mandatory_under.value.code == "PROMPT_TOO_LARGE"
-    for limit in (10_883, 10_884):
+    for limit in (13_609, 13_610):
         projected = project_brain_input(
             request,
             config=LLMBrainConfig(),
@@ -419,18 +420,18 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
     # simultaneous pressure records both exact exhaustion markers.
     combined_request = _with_assessment(_request(_chats(2), trigger_order=1))
     combined = project_brain_input(combined_request, config=LLMBrainConfig())
-    assert (combined.prompt_bytes, combined.token_proxy_units) == (11_798, 6_028)
+    assert (combined.prompt_bytes, combined.token_proxy_units) == (14_685, 7_413)
     assert combined.included_history_records == 2
     byte_under = project_brain_input(
         combined_request,
         config=LLMBrainConfig(),
-        discussion_config=DiscussionPromptConfig(max_prompt_bytes=12_251),
+        discussion_config=DiscussionPromptConfig(max_prompt_bytes=15_138),
     )
-    assert (byte_under.prompt_bytes, byte_under.token_proxy_units) == (11_358, 5_796)
+    assert (byte_under.prompt_bytes, byte_under.token_proxy_units) == (14_180, 7_141)
     assert byte_under.included_history_records == 1
     assert byte_under.canonical_input["memory"]["memory_byte_exhausted"] is True
     assert byte_under.canonical_input["memory"]["token_proxy_exhausted"] is False
-    for limit in (12_252, 12_253):
+    for limit in (15_139, 15_140):
         projected = project_brain_input(
             combined_request,
             config=LLMBrainConfig(),
@@ -442,13 +443,13 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
     proxy_under = project_brain_input(
         combined_request,
         config=LLMBrainConfig(),
-        discussion_config=DiscussionPromptConfig(max_token_proxy_units=6_216),
+        discussion_config=DiscussionPromptConfig(max_token_proxy_units=7_601),
     )
-    assert (proxy_under.prompt_bytes, proxy_under.token_proxy_units) == (11_358, 5_796)
+    assert (proxy_under.prompt_bytes, proxy_under.token_proxy_units) == (14_180, 7_141)
     assert proxy_under.included_history_records == 1
     assert proxy_under.canonical_input["memory"]["memory_byte_exhausted"] is False
     assert proxy_under.canonical_input["memory"]["token_proxy_exhausted"] is True
-    for limit in (6_217, 6_218):
+    for limit in (7_602, 7_603):
         projected = project_brain_input(
             combined_request,
             config=LLMBrainConfig(),
@@ -460,11 +461,11 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
         combined_request,
         config=LLMBrainConfig(),
         discussion_config=DiscussionPromptConfig(
-            max_prompt_bytes=12_251,
-            max_token_proxy_units=6_216,
+            max_prompt_bytes=15_138,
+            max_token_proxy_units=7_601,
         ),
     )
-    assert (both_under.prompt_bytes, both_under.token_proxy_units) == (11_357, 5_795)
+    assert (both_under.prompt_bytes, both_under.token_proxy_units) == (14_179, 7_140)
     assert both_under.included_history_records == 1
     assert both_under.canonical_input["memory"]["memory_byte_exhausted"] is True
     assert both_under.canonical_input["memory"]["token_proxy_exhausted"] is True
@@ -481,9 +482,9 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
         invalid_output="",
         config=LLMBrainConfig(),
     )
-    assert (repaired.prompt_bytes, repaired.token_proxy_units) == (10_835, 5_479)
+    assert (repaired.prompt_bytes, repaired.token_proxy_units) == (13_561, 6_763)
     assert repaired.prompt_sha256 == (
-        "465c15fd4e45b69862786ceade825ad7405b889a1599c8609354f2eee028b3aa"
+        "171915f9006f3564aeff514aa8ba5abebba79f34f6940bf6bfc7191591535fb2"
     )
     with pytest.raises(PromptProjectionError) as repair_under:
         build_repair_projection(
@@ -491,10 +492,10 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
             validation_code=DecisionValidationCode.SCHEMA,
             invalid_output="",
             config=LLMBrainConfig(),
-            discussion_config=DiscussionPromptConfig(max_prompt_bytes=10_834),
+            discussion_config=DiscussionPromptConfig(max_prompt_bytes=13_560),
         )
     assert repair_under.value.code == "PROMPT_TOO_LARGE"
-    for limit in (10_835, 10_836):
+    for limit in (13_561, 13_562):
         candidate = build_repair_projection(
             baseline,
             validation_code=DecisionValidationCode.SCHEMA,
@@ -524,11 +525,11 @@ def test_p6b_projection_one_under_equal_one_over_matrix() -> None:
         large_request,
         config=LLMBrainConfig(max_prompt_bytes=32_769),
     )
-    assert hard.prompt_bytes == legacy_over.prompt_bytes == 16_357
-    assert hard.token_proxy_units == legacy_over.token_proxy_units == 7_959
+    assert hard.prompt_bytes == legacy_over.prompt_bytes == 15_787
+    assert hard.token_proxy_units == legacy_over.token_proxy_units == 7_806
     assert hard.prompt_sha256 == legacy_over.prompt_sha256
-    assert hard.included_history_records == legacy_over.included_history_records == 10
-    assert hard.omitted_history_records == legacy_over.omitted_history_records == 14
+    assert hard.included_history_records == legacy_over.included_history_records == 4
+    assert hard.omitted_history_records == legacy_over.omitted_history_records == 20
     assert hard.canonical_input["memory"]["token_proxy_exhausted"] is True
 
 

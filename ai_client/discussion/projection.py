@@ -21,6 +21,7 @@ from ai_client.network import (
     CoReportAction,
     VoteAction,
 )
+from ai_client.world import AbilityResultRecord, CoDeclarationRecord, CoReportRecord
 
 from .context import canonical_json_bytes, canonical_sha256
 from .model import (
@@ -176,6 +177,10 @@ def _id_or_null() -> dict[str, object]:
 
 
 def _evidence_array(*, minimum: int = 0) -> dict[str, object]:
+    return {"$ref": "#/$defs/evidence_nonempty" if minimum else "#/$defs/evidence_array"}
+
+
+def _evidence_array_definition(*, minimum: int = 0) -> dict[str, object]:
     return {
         "items": {"$ref": "#/$defs/evidence_ref"},
         "maxItems": 8,
@@ -185,8 +190,8 @@ def _evidence_array(*, minimum: int = 0) -> dict[str, object]:
     }
 
 
-def _decision_schema(options: list[dict[str, object]], max_text: int) -> dict[str, object]:
-    branches: list[dict[str, object]] = [_closed({"kind": {"const": "none"}}, ["kind"])]
+def _decision_schema(options: list[dict[str, object]], max_text: int, *, allow_none: bool = True) -> dict[str, object]:
+    branches: list[dict[str, object]] = [_closed({"kind": {"const": "none"}}, ["kind"])] if allow_none else []
     for option in options:
         kind = option["action_kind"]
         if kind == "co_report":
@@ -226,8 +231,8 @@ def _decision_schema(options: list[dict[str, object]], max_text: int) -> dict[st
 
 
 def _speech_schema() -> dict[str, object]:
-    topic = {"enum": ["ALIGNMENT", "ROLE_CLAIM", "VOTE", "EVENT", "RELATION", "STRATEGY"]}
-    stance = {"enum": ["SUPPORT", "OPPOSE", "UNCERTAIN"]}
+    topic = {"$ref": "#/$defs/topic"}
+    stance = {"$ref": "#/$defs/stance"}
     branches = [
         _closed({"kind": {"const": "NONE"}}, ["kind"]),
         _closed(
@@ -265,9 +270,13 @@ def discussion_output_schema(
     max_text: int,
     player_ids: tuple[str, ...],
 ) -> dict[str, object]:
+    options = _trigger_options(options, capture)
+    allow_none = _no_decision_allowed(options, capture)
+    if not options and not allow_none:
+        raise ValueError("PROMPT_INVALID")
     player_id_schema: dict[str, object] = {"enum": list(player_ids)}
     relation = {"enum": ["SUPPORTS", "CONTRADICTS", "DEFENDS", "ACCUSES", "DISTANCES_FROM"]}
-    score = {"minimum": 0, "maximum": 100, "type": "integer"}
+    score = {"$ref": "#/$defs/score"}
     assessment = _closed(
         {"target_player_id": {"$ref": "#/$defs/player_id"}, "suspicion": score, "credibility": score, "confidence": score, "evidence": _evidence_array()},
         ["target_player_id", "suspicion", "credibility", "confidence", "evidence"],
@@ -288,49 +297,88 @@ def discussion_output_schema(
         {"trigger": {"const": _plain(capture.trigger.source)}, "score": score, "reason": {"enum": ["DIRECT_QUESTION", "DIRECT_MENTION", "CLAIM_CONFLICT", "VOTE_PRESSURE", "NEW_INFORMATION", "OTHER_AUTHORIZED"]}},
         ["trigger", "score", "reason"],
     )
-    co = _closed(
-        {"decision": {"enum": ["DECLARE", "SILENCE", "DEFER"]}, "selected_option_id": {"type": ["string", "null"]}, "claimed_role_id": {"type": ["string", "null"]}},
-        ["decision", "selected_option_id", "claimed_role_id"],
-    )
-    pre_vote = _closed(
-        {"option_id": {"minLength": 1, "type": "string"}, "ranked_target_player_ids": {"items": {"$ref": "#/$defs/player_id"}, "maxItems": 32, "type": "array", "uniqueItems": True}, "preferred_target_player_id": _id_or_null(), "evidence": _evidence_array()},
-        ["option_id", "ranked_target_player_ids", "preferred_target_player_id", "evidence"],
-    )
+    co = {"oneOf": [
+        _closed({"decision": {"enum": ["SILENCE", "DEFER"]},
+                 "selected_option_id": {"const": None}, "claimed_role_id": {"const": None}},
+                ["decision", "selected_option_id", "claimed_role_id"]),
+        *[_closed({"decision": {"const": "DECLARE"},
+                   "selected_option_id": {"const": option["option_id"]},
+                   "claimed_role_id": {"enum": option["claimed_role_ids"]}},
+                  ["decision", "selected_option_id", "claimed_role_id"])
+          for option in options if option["action_kind"] == "co_declare"],
+    ]}
+    vote_branches = [
+        _closed({"option_id": {"const": option["option_id"]},
+                 "ranked_target_player_ids": {"items": {"enum": option["valid_targets"]},
+                    "maxItems": 32, "type": "array", "uniqueItems": True},
+                 "preferred_target_player_id": {"enum": [*option["valid_targets"],
+                    *([None] if option["allows_abstain"] else [])]},
+                 "evidence": _evidence_array()},
+                ["option_id", "ranked_target_player_ids", "preferred_target_player_id", "evidence"])
+        for option in options if option["action_kind"] == "vote"
+    ]
+    pre_vote = {"oneOf": vote_branches} if vote_branches else {"const": None}
+    abstention_branches = [
+        _closed(branch["properties"] | {"preferred_target_player_id": {"const": None}}, branch["required"])
+        for option, branch in zip((option for option in options if option["action_kind"] == "vote"), vote_branches)
+        if option["allows_abstain"]
+    ]
     nullable = lambda value: {"anyOf": [value, {"type": "null"}]}
     peer_chat = capture.trigger.kind == "PEER_CHAT"
     co_opportunity = capture.trigger.kind == "CO_OPPORTUNITY"
     pre_vote_trigger = capture.trigger.kind == "PRE_VOTE"
-    proposal = _closed(
-        {
+    proposal_properties = {
             "schema_version": {"const": "aiwolf.discussion-proposal.v1"},
             "base_revision": {"const": capture.base_revision},
-            "decision_kind": {"enum": ["none", "chat", "vote", "ability", "co_declare"]},
-            "option_id": {"type": ["string", "null"]},
             "speech_act": {"$ref": "#/$defs/speech_act"},
-            "reaction": reaction if peer_chat else {"const": None},
+            "reaction": {"$ref": "#/$defs/reaction"} if peer_chat else {"const": None},
             "assessment_updates": {"items": {"$ref": "#/$defs/assessment"}, "maxItems": 4, "type": "array"},
             "claim_updates": {"items": {"$ref": "#/$defs/claim"}, "maxItems": 4, "type": "array"},
             "relation_updates": {"items": {"$ref": "#/$defs/relation_update"}, "maxItems": 2, "type": "array"},
             "strategy_update": nullable({"$ref": "#/$defs/strategy"}),
-            "co_judgment": co if co_opportunity else {"const": None},
-            "pre_vote_reassessment": pre_vote if pre_vote_trigger else {"const": None},
-        },
-        ["schema_version", "base_revision", "decision_kind", "option_id", "speech_act", "reaction", "assessment_updates", "claim_updates", "relation_updates", "strategy_update", "co_judgment", "pre_vote_reassessment"],
-    )
+            "co_judgment": {"$ref": "#/$defs/co"} if co_opportunity else {"const": None},
+            "pre_vote_reassessment": {"$ref": "#/$defs/pre_vote"} if pre_vote_trigger else {"const": None},
+        }
+    # Keep closed branches without duplicating their larger shared schemas.
+    update_defs = {name: proposal_properties[name] for name in (
+        "assessment_updates", "claim_updates", "relation_updates")}
+    for name in update_defs:
+        proposal_properties[name] = {"$ref": f"#/$defs/{name}"}
+    proposal_required = ["schema_version", "base_revision", "decision_kind", "option_id", "speech_act", "reaction", "assessment_updates", "claim_updates", "relation_updates", "strategy_update", "co_judgment", "pre_vote_reassessment"]
+    none_properties = proposal_properties | ({"pre_vote_reassessment": {"$ref": "#/$defs/abstention"}}
+                                            if pre_vote_trigger and allow_none else {})
+    proposal_branches = ([_closed(none_properties | {
+        "decision_kind": {"const": "none"}, "option_id": {"const": None}}, proposal_required)]
+        if allow_none else [])
+    if options:
+        proposal_branches.append(_closed(proposal_properties | {
+            "decision_kind": {"const": options[0]["action_kind"]},
+            "option_id": {"enum": [option["option_id"] for option in options]}}, proposal_required))
+    proposal = {"oneOf": proposal_branches}
     return {
         "$defs": {
+            **update_defs,
             "assessment": assessment,
             "claim": claim,
             "evidence_ref": _evidence_schema(),
+            "evidence_array": _evidence_array_definition(),
+            "evidence_nonempty": _evidence_array_definition(minimum=1),
+            "score": {"minimum": 0, "maximum": 100, "type": "integer"},
+            "topic": {"enum": ["ALIGNMENT", "ROLE_CLAIM", "VOTE", "EVENT", "RELATION", "STRATEGY"]},
+            "stance": {"enum": ["SUPPORT", "OPPOSE", "UNCERTAIN"]},
             "player_id": player_id_schema,
             "relation": relation,
             "relation_update": relation_update,
             "speech_act": _speech_schema(),
             "strategy": strategy,
+            **({"reaction": reaction} if peer_chat else {}),
+            **({"co": co} if co_opportunity else {}),
+            **({"pre_vote": pre_vote} if pre_vote_trigger else {}),
+            **({"abstention": {"oneOf": abstention_branches}} if pre_vote_trigger and allow_none else {}),
         },
         **_closed(
             {
-                "decision": _decision_schema(options, max_text),
+                "decision": _decision_schema(options, max_text, allow_none=allow_none),
                 "discussion": proposal,
             },
             ["decision", "discussion"],
@@ -338,8 +386,121 @@ def discussion_output_schema(
     }
 
 
+def _trigger_options(options: list[dict[str, object]], capture: DiscussionCapture) -> list[dict[str, object]]:
+    kind = {"INITIAL_CHAT": "chat", "PEER_CHAT": "chat", "CO_OPPORTUNITY": "co_declare",
+            "PRE_VOTE": "vote", "ABILITY": "ability"}.get(capture.trigger.kind)
+    selected = [option for option in options if option["action_kind"] == kind]
+    if capture.trigger.kind == "PEER_CHAT":
+        source = next((event for event in capture.evidence if event.source == capture.trigger.source), None)
+        if source is not None and source.channel_id is not None:
+            selected = [option for option in selected if option["channel"] == source.channel_id]
+    return selected
+
+
+def _no_decision_allowed(options: list[dict[str, object]], capture: DiscussionCapture) -> bool:
+    return capture.trigger.kind != "PRE_VOTE" or any(
+        option["action_kind"] == "vote" and option["allows_abstain"] for option in options)
+
+
 def _event_key(event: ImportantEvent) -> tuple[EvidenceRecordKind, int]:
     return event.source.record_kind, event.source.order
+
+
+def _ground_id(value: object, *, optional: bool = False) -> object:
+    if value is None and optional:
+        return None
+    if not isinstance(value, str) or not 1 <= len(value) <= 128:
+        raise ValueError("PROMPT_INVALID")
+    if len(value.encode("utf-8")) > 512:
+        raise ValueError("PROMPT_INVALID")
+    return value
+
+
+def _ground_int(value: object, *, optional: bool = False) -> object:
+    if value is None and optional:
+        return None
+    if type(value) is not int or value < 0:
+        raise ValueError("PROMPT_INVALID")
+    return value
+
+
+def _grounding_sources(request: object, options: list[dict[str, object]]) -> tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]]]:
+    """Allowlist only facts already received by this immutable request's owner."""
+    snapshot = request.snapshot
+    if len(snapshot.players) > 32 or len(options) > 64:
+        raise ValueError("PROMPT_INVALID")
+    players = []
+    for player in sorted(snapshot.players, key=lambda item: item.player_id):
+        if type(player.alive) is not bool:
+            raise ValueError("PROMPT_INVALID")
+        death = player.death
+        if death is not None and (player.alive or death.player_id != player.player_id):
+            raise ValueError("PROMPT_INVALID")
+        players.append({"player_id": _ground_id(player.player_id), "alive": player.alive,
+                        "death": None if death is None else {
+                            "day": _ground_int(death.day, optional=True),
+                            "public_cause": _ground_id(death.public_cause, optional=True)}})
+    alive = [player["player_id"] for player in players if player["alive"]]
+    if (len({player["player_id"] for player in players}) != len(players)
+            or sorted(snapshot.alive_player_ids) != alive):
+        raise ValueError("PROMPT_INVALID")
+    vote_candidates = sorted({target for option in options if option["action_kind"] == "vote"
+                              for target in option["valid_targets"]})
+    if len(vote_candidates) > 32:
+        raise ValueError("PROMPT_INVALID")
+    for option in options:
+        _ground_id(option["option_id"])
+        for field in ("valid_targets", "claimed_role_ids"):
+            for value in option.get(field, []):
+                _ground_id(value)
+    current = {"day": _ground_int(snapshot.phase.day), "phase": _ground_id(snapshot.phase.phase),
+               "players": players, "alive_player_ids": alive,
+               "vote_candidate_player_ids": vote_candidates}
+    def header(record: object) -> dict[str, object]:
+        return {"order": _ground_int(record.order), "day": _ground_int(record.day, optional=True),
+                "phase": _ground_id(record.phase, optional=True)}
+    results = []
+    for record in request.ability_results.records:
+        if not isinstance(record, AbilityResultRecord):
+            raise ValueError("PROMPT_INVALID")
+        results.append(header(record) | {
+            "event_type": _ground_id(record.event_type),
+            "target_player_id": _ground_id(record.target_player_id, optional=True),
+            "result_id": _ground_id(record.result_id, optional=True),
+            "revealed_role_id": _ground_id(record.revealed_role_id, optional=True)})
+    claims = []
+    for record in request.co.records:
+        if record.player_id != request.discussion.player_id:
+            continue
+        if isinstance(record, CoDeclarationRecord):
+            if (not isinstance(record.comment, str) or len(record.comment) > 200
+                    or len(record.comment.encode("utf-8")) > 600):
+                raise ValueError("PROMPT_INVALID")
+            detail = {"record_kind": "co_declaration", "claimed_role_id": _ground_id(record.claimed_role_id),
+                      "comment": record.comment}
+        elif isinstance(record, CoReportRecord):
+            detail = {"record_kind": "co_report", "kind": _ground_id(record.kind),
+                      "target_player_id": _ground_id(record.target_player_id),
+                      "claimed_result": _ground_id(record.claimed_result)}
+        else:
+            raise ValueError("PROMPT_INVALID")
+        claims.append(header(record) | detail)
+    for records in (results, claims):
+        if len({record["order"] for record in records}) != len(records):
+            raise ValueError("PROMPT_INVALID")
+        records.sort(key=lambda record: -record["order"])
+    return current, results, claims
+
+
+def _ground_records(view: object, candidates: list[dict[str, object]], selected: list[dict[str, object]]) -> dict[str, object]:
+    selected_orders = {record["order"] for record in selected}
+    omitted = [record["order"] for record in candidates if record["order"] not in selected_orders]
+    return {"records": sorted(selected, key=lambda record: record["order"]),
+            "complete": view.complete and not omitted,
+            "omitted_count": len(omitted), "omitted_through_order": max(omitted, default=None),
+            "retention": {"complete": view.retention.complete,
+                          "dropped_count": view.retention.dropped_count,
+                          "dropped_through_order": view.retention.dropped_through_order}}
 
 
 def _memory_rank(event: ImportantEvent) -> tuple[int, int, str]:
@@ -548,6 +709,18 @@ def project_discussion_brain_input(
         max_text=max_text,
         player_ids=player_ids,
     )
+    current_grounding, ability_candidates, co_candidates = _grounding_sources(request, options)
+    legal_options = _trigger_options(options, capture)
+    allowed_decisions = ([{"kind": "none", "option_id": None}]
+                         if _no_decision_allowed(legal_options, capture) else []) + [
+        {"kind": option["action_kind"], "option_id": option["option_id"]}
+        for option in legal_options]
+    if len(allowed_decisions) > 64:
+        raise ValueError("PROMPT_INVALID")
+    selected_ability: list[dict[str, object]] = []
+    selected_co: list[dict[str, object]] = []
+    if ability_candidates:
+        selected_ability.append(ability_candidates[0])
 
     effective_bytes = min(32768, getattr(llm_config, "max_prompt_bytes"), config.max_prompt_bytes)
     effective_proxy = min(8192, config.max_token_proxy_units)
@@ -588,6 +761,14 @@ def project_discussion_brain_input(
                 "trigger": _plain(capture.trigger),
             },
             "context": _plain(capture.context),
+            "grounding": {
+                "current": current_grounding,
+                "ability_results": _ground_records(request.ability_results, ability_candidates, selected_ability),
+                "self_co": _ground_records(request.co, co_candidates, selected_co),
+                "allowed_evidence_refs": [_plain(event.source) for event in sorted(
+                    memory_records, key=lambda item: evidence_sort_key(item.source))],
+                "allowed_decisions": allowed_decisions,
+            },
             "limits": {
                 "max_proposal_utf8_bytes": config.max_proposal_bytes,
             },
@@ -686,6 +867,19 @@ def project_discussion_brain_input(
         if not fits()[0]:
             memory_records.pop()
             raise ValueError("PROMPT_TOO_LARGE")
+
+    # Receiver-owned observations and self claims precede optional cognition.
+    # The newest ability result is mandatory, including the repair reservation.
+    for selected, candidates in (
+        (selected_co, co_candidates[:1]),
+        (selected_ability, ability_candidates[1:8]),
+        (selected_co, co_candidates[1:8]),
+    ):
+        for candidate in candidates:
+            selected.append(candidate)
+            if not fits()[0]:
+                selected.pop()
+                break
 
     # The reserved peer trigger is mandatory and consumes both budgets before
     # any optional cognitive state.  Optional state can therefore never crowd

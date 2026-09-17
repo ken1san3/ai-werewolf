@@ -37,12 +37,12 @@ condition; continue the authorized objective unless completed, explicitly held, 
 
 ## 4. Review session (`review`)
 
-1. Run `python scripts/ai_status.py review` and read the assigned packet and handoff.
+1. Run `python scripts/ai_status.py review --task <id>` and read the assigned packet and its minimal canonical read set.
 2. Independently compare canonical specification, actual code/schema, tests, and detailed
    design in that order. Do not rely on the worker's completion claim.
 3. Apply `AGENTS.md`, inspect the scoped diff, and run proportionate verification.
-4. Return exactly `APPROVED`, `CHANGES_REQUIRED`, or `ARCHITECTURE_REVIEW_REQUIRED` with
-   issues, severity, required fix, test assessment, and regression risk.
+4. D075に従い既承認同scope/hashを再利用し、新差分・指摘だけをVerdict/Findings/Evidence/Required fix/Next gateへ。
+   APPROVED/CHANGES_REQUIRED/ARCHITECTURE_REVIEW_REQUIRED/UNKNOWNを区別する。
 5. Record actionable findings only when assigned that queue write. Never approve a design
    authored in the same session and never implement fixes while acting only as Reviewer.
 
@@ -57,9 +57,9 @@ condition; continue the authorized objective unless completed, explicitly held, 
 
 ## 6. Test session (`test`)
 
-1. Run `python scripts/ai_status.py test` and read the assigned task packet and handoff.
-2. Verify commands and environment independently. Run focused tests first, then named
-   regressions/completion checks, then the normal project suite when proportionate.
+1. Run `python scripts/ai_status.py test --task <id>` and read the assigned task packet and named evidence only.
+2. command/環境を独立確認し、D075に適合する既存focused/regression証拠は再利用する。
+   必要な独立測定・completionを実行する。同一検査の再実行は変更・失敗・未解決懸念がある場合だけ。
 3. Preserve stdout/stderr, exit codes, pass/fail/skip counts, durations, timeouts, and the
    first reproducible failure. Do not edit product code or make a design judgment.
 4. For a hang or unexplained/flaky failure, stop the bounded run and return deterministic

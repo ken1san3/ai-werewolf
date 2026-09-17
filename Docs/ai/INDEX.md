@@ -5,6 +5,11 @@ This is the authority and routing index. Start with `AGENTS.md` and
 canonical sections it names. Consult role/runbook/operations material only for the operation
 being performed. `--details` expands status; do not preload the documentation tree.
 
+D075: Mainが既定、担当には`--task <id>`で選択snapshotとpacket明示read setだけを渡す。
+fresh/second Reviewerと証拠再利用は `decisions/D075_RISK_BASED_DISPATCH_AND_CONTEXT.md`。
+毎task新sessionや過去handoff全文の再読を要求しない。CURRENT_STATEの過去全文と閉じたboardは
+`history/`へ保全し、現在の停止指示と合否を優先する。archiveは旧dispatch権限を復活させない。
+
 The entry is the session responsibility, not necessarily the role of the task it inspects.
 
 ## Authority and freshness

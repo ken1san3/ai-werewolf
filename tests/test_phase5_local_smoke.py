@@ -1335,6 +1335,29 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
                 expected_player_to_client=mapping,
             )
             self.assertEqual(errors, [])
+            original_chat = dict(chats[0])
+            for phase6, chars, byte_count, late, valid in (
+                (False, 80, 96, False, True),
+                (False, 81, 96, False, False),
+                (False, 80, 97, False, False),
+                (True, 81, 97, False, True),
+                (True, 200, 600, False, True),
+                (True, 201, 600, False, False),
+                (True, 200, 601, False, False),
+                (True, 200, 600, True, False),
+            ):
+                with self.subTest(phase6=phase6, chars=chars, byte_count=byte_count, late=late):
+                    chats[0].update(message_chars=chars, message_utf8_bytes=byte_count)
+                    chats[0]["accepted_at"] = chats[0]["phase_deadline"] if late else original_chat["accepted_at"]
+                    findings = runner._validate_game_evidence(
+                        statuses=statuses, server_result=server, broker_result=broker,
+                        metrics=metrics, manifest=manifest, ai_dir=ai_dir, owned=owned,
+                        sentinels=(), evidence_root=root, expected_player_to_client=mapping,
+                        phase6=phase6,
+                    )
+                    self.assertEqual(findings, [] if valid else ["accepted short chat violates bound or deadline"])
+            chats[0].clear()
+            chats[0].update(original_chat)
             server["accepted_chats"] = chats[:-1]
             self.assertIn(
                 "not every Day-1 living seat has accepted short chat",

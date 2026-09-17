@@ -8,9 +8,9 @@ runtime.
 
 Reconstruct through `ai_status.py integrate` and the authority map in `INDEX.md`. Choose the
 smallest useful work decomposition and verification depth justified by risk and acceptance.
-Responsibilities are available boundaries, not a fixed pipeline. Local bounded work is allowed
-when no independent assignment is required. Delegate when it improves speed, quality or context.
-D051 and acceptance-specific independent Tester/fresh Reviewer requirements take precedence.
+Mainを既定実行主体とする。役割は固定pipelineではなく、Mainにない独立性・専門判断・測定結果を
+得る理由が明確な場合だけ委譲する。D075のdispatch/fresh/second/evidence reuse条件を適用する。
+D051の必要な詳細設計と独立承認、acceptance固有の独立Tester・明示fresh session要求は維持する。
 
 Before dispatch inspect current board state, dependencies, required design, expected/shared files,
 actual Git diff and host task ownership. DONE/CANCELLED tasks are not candidates; IN_PROGRESS and
@@ -41,14 +41,42 @@ for each packet. Workers return at their assigned boundary. Honor explicit holds
 record recoverable evidence/pointers before context loss. Keep chat to meaningful transitions and
 store logs with evidence. No custom scheduler, supervisor, model router or automatic merge layer.
 
-## Task record
+## Agent Dispatch Gate（D075）
+
+判定表は `AGENTS.md` の同名節、厳密な適用条件と受入例は
+`decisions/D075_RISK_BASED_DISPATCH_AND_CONTEXT.md`。Mainが委譲理由をpacketのRequired independenceへ
+一文で記録する。境界変更時だけArchitect、原因不明/race/横断またはMain限定診断で絞れない場合だけ
+Investigator、分離価値がある実装単位だけImplementer。focused/regression/局所決定的確認はMainでよい。
+acceptance/E2E/concurrency/long-running/completion/実provider/実gameの独立Testerは省略しない。
+製品code/test contract実質変更・detailed design・acceptance判定・高risk運用変更には独立Reviewer。
+status/整形/集計/hash/証拠コピーだけに新Reviewerを作らない。
+
+担当完了後は新しい未知・独立性・設計判断・測定の4点だけを再判定し、全NOならMainが続行する。
+Independentは対象設計/実装/自己採点から独立していること。既存Reviewerを複数taskで再利用できる。
+freshは本人の対象設計/実装・以前の判断による直接の独立性毀損・canonical明示時だけ。
+第二ReviewerはCritical/High、protocol/concurrency/security/authority境界、重要設計gate、第一担当判断不能、
+実質的見解差、既知見落としの高い再発riskについて具体的論点がある場合だけ。通常経路に追加しない。
+
+## Evidence reuse / context diet
+
+artifact SHA-256と判定scope、canonical acceptance、関連依存、測定環境の適用条件が同じなら独立判定を
+再利用する。同一証拠・同一diffの再レビューは禁止。指摘を直していない再確認を別taskへ振らない。
+新依存/新criteria/新証拠/反証がある場合だけ、その差分と影響範囲を審査する。新runのidentity・private境界・
+一回許可・acceptanceは旧code承認で代用しない。再利用はMainのpointer/hash照合で行い新承認chainを作らない。
+
+起動はAGENTS active rules→`ai_status.py <entry> --task <id>`→packet→明示canonical→relevant diff。
+過去handoff全文やrepository全履歴を渡さず、追加読取りは具体的な未解決事項がある場合だけ。
+CURRENT_STATEは現在値だけ、過去全文はhistory/archiveへbyte保存。TASKSはliveと閉じた履歴pointerだけ。
+DONE/CANCELLEDの旧状態・証拠は保持し、archiveの指示から再割当しない。通常表示は選択taskのread setのみ。
+割当前の広い状態確認には`--all-live`、必要な証拠/RUNBOOK詳細には`--details`を明示する。
+packetは `tasks/TEMPLATE.md`、出力は短いhandoff templateに従い、path/hashで再利用する。
 
 ## agent/thread上限時の継続（2026-09-16ユーザー指示）
 
 `agent thread limit reached` だけで全体作業を停止しない。まず現在のagent/threadを一覧し、
-実行中・完了・不要・独立性を照合する。利用可能な既存独立Reviewerの再利用を優先し、
-次に完了した不要担当の終了・解放後の生成、並列数を減らした直列生成、最後に利用可能な
-既存Reviewerへの割当を検討する。Mainや対象の実装・設計担当を独立Reviewerに変えない。
+実行中・完了・不要・独立性を照合する。既存独立担当再利用→完了不要担当の解放→Mainの非依存作業→
+対象gateだけ保留の順。固定agent人数・呼出し回数上限を設けず、必要な担当を拒否しない。
+Mainや対象の実装・設計担当を独立Reviewerに変えない。
 reviewを省略せず、Reviewer→修正が必要なら修正→再レビュー→admission/実ゲームを維持する。
 証拠回収後の不要担当はhost標準の終了・解放機能を使う。機能未提供なら制約を記録し、
 中断やarchiveを枠解放と同一視しない。確認要求・実ゲームの未実行は0/未実行のまま残す。
@@ -80,15 +108,14 @@ the semantic result to the named authority or fails closed on its own outer boun
 
 After three failed correction rounds on the same acceptance/evidence objective, stop the
 repair loop and reassess the route even when each round has a different mutation or symptom
-name. Use an Investigator for an unclear cause and an Architect for a mismatched boundary.
+name. Mainがまず限定診断し、未解決の原因/境界にD075のInvestigator/Architect条件を適用する。
 This is not a task quota and never weakens the acceptance criterion. See
 `decisions/D068_EXTERNAL_PHASE5_REVIEW_DISPOSITION_AND_ACCEPTANCE_AUTHORITY.md`.
 
 ## Phase 6 test architecture
 
 - The Integrator records the named acceptance-to-test matrix and one semantic PASS authority in
-  each P6 packet. Implementer evidence does not replace independent Tester measurement or fresh
-  Reviewer judgment.
+  each P6 packet. 実装者測定は必要な独立Tester/Reviewerの代わりにならない。毎task新sessionにはしない。
 - Every spawned process has one owner, bounded wait/terminate/kill cleanup, retained first-failure
   diagnostics, and an explicit zero-residue check. Cross-process ordering uses a reviewed,
   parent-authored deterministic gate, never process-local clock coincidence.
@@ -101,10 +128,9 @@ This is not a task quota and never weakens the acceptance criterion. See
 
 ## Decision routing
 
-Public API, Brain/World boundary, protocol, concurrency, persistence, server lifecycle,
-large data-model changes, or multiple fundamentally conflicting implementations go to an
-Architect. Ask the user only when canonical sources, decisions, code, and Architect analysis
-still leave a material product choice.
+D075列挙のinterface/schema/state/lifecycle/concurrency ownership/acceptance/product rule/component境界を
+変更するときだけArchitectを選ぶ。既存契約内の実装・ログ・test修正には挟まない。
+canonical/decision/codeと必要なArchitect分析でも重要なproduct選択が残る場合だけユーザーへ上げる。
 
 Use this form:
 
@@ -129,8 +155,7 @@ an explicit user hold, irreconcilable authority, or when no safe authorized work
 ## Failure and recovery
 
 - Preserve the first failure, command, environment, logs, and reproduction.
-- A clear local defect returns to an Implementer; an architectural mismatch goes to an
-  Architect; a flaky/cross-component/unknown cause goes to an Investigator.
+- 明白な局所不具合はMainが直接修正できる。分離価値のある実装、境界変更、未解決原因にはD075を適用する。
 - Isolate only the failed task. Do not resume an archived run, build recovery state, discard
   inherited changes, or auto-merge.
 - On conflict, compare base/current diff and integrate deliberately. Never erase another
@@ -147,7 +172,7 @@ syntheticを `logs/phase6-private-evidence/synthetic/<task>-<utc>/` に分けて
 P6-Iの実provider/GPU/exact-model gameは一般的な続行指示では起動できない。G/Hと安全な
 前提準備の完了後、モデル・実行条件・token budget・保全・512 record上限対処・rerun禁止条件を
 具体的に提示して、実起動直前にユーザーの明示承認を得る。承認済みの同じ条件を再確認する
-だけの質問は不要。新規session上限時は上記の再利用・解放・直列化手順を使う。対象の
+だけの質問は不要。新規session上限時は上記の再利用・解放・非依存作業手順を使う。対象の
 設計/実装に関与していない既存独立Reviewerは再利用でき、Mainの審査代替はできない。
 
 pytest管理のtmp_path/basetempやTemporaryDirectoryは作業領域であり、acceptance evidenceの

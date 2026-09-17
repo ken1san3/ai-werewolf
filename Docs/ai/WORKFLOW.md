@@ -7,7 +7,8 @@ second role pipeline.
 Main chooses decomposition, responsibility, parallelism, and verification by task risk and
 acceptance. Architect, Implementer, Tester, Reviewer, and Investigator are scope and independence
 boundaries, not mandatory sequential stages. D051 design approval and packet/TEST_POLICY-required
-independent tests and fresh review still apply. No worker self-approval is permitted.
+independent tests still apply. fresh sessionと第二ReviewerはD075の明示条件だけで選ぶ。
+既存Reviewerと同scope/hashの独立証拠を再利用し、同一diffを再審査しない。No worker self-approval is permitted.
 
 Workers finish their bounded assignment, record measured evidence, and return. Main verifies it,
 updates coordination, and continues the authorized objective across packets/waves. An explicit

@@ -602,14 +602,22 @@ def _validate_generated_text(
     if not 1 <= len(value) <= char_limit:
         raise DecisionValidationError(DecisionValidationCode.TEXT_BOUND)
     short_chat = projection.short_chat
-    if short_chat is None:
+    if short_chat is None and projection.discussion_capture is None:
         return
     try:
         encoded_length = len(value.encode("utf-8"))
     except UnicodeEncodeError:
         raise DecisionValidationError(DecisionValidationCode.TEXT_BOUND) from None
-    if encoded_length > short_chat.max_text_utf8_bytes:
+    if short_chat is not None and encoded_length > short_chat.max_text_utf8_bytes:
         raise DecisionValidationError(DecisionValidationCode.TEXT_BOUND)
+    # Detect likely cap exhaustion without altering generated text. The existing
+    # single repair attempt handles TEXT_BOUND on the same generation lease.
+    if projection.discussion_capture is not None and (
+        len(value) >= 190 or encoded_length >= 570
+    ):
+        ending = value.rstrip().rstrip('"\'\u201d\u2019)]}').rstrip()
+        if not ending.endswith((".", "!", "?")):
+            raise DecisionValidationError(DecisionValidationCode.TEXT_BOUND)
 
 
 def _text_limit(

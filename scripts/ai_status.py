@@ -178,7 +178,9 @@ def handoff_summary(record: dict[str, str]) -> str:
             f"  reported: {'; '.join(claims) or '(inspect artifact)'}; not integrated approval")
 
 
-def coordination_warnings(state: str, records: list[dict[str, str]]) -> list[str]:
+def coordination_warnings(
+    state: str, records: list[dict[str, str]], *, focus: str | None = None,
+) -> list[str]:
     """Small structural/staleness checks, not a second acceptance/dependency engine."""
     warnings: list[str] = []
     ids = [r.get("Task ID", r.get("Header ID", "")) for r in records]
@@ -197,6 +199,8 @@ def coordination_warnings(state: str, records: list[dict[str, str]]) -> list[str
             warnings.append(f"Active {active} is {board_state}: do not redispatch from an old pointer.")
     for record in records:
         task_id = record.get("Task ID", record.get("Header ID", "?"))
+        if focus is not None and task_id != focus:
+            continue
         lifecycle = record.get("State")
         if lifecycle not in TASK_STATES:
             warnings.append(f"{task_id}: invalid lifecycle; reconcile before dispatch.")
@@ -457,116 +461,88 @@ def parse_args() -> argparse.Namespace:
         help="select responsibility context; use --details for its RUNBOOK",
     )
     parser.add_argument("--details", action="store_true",
-                        help="expand test evidence routing and the selected RUNBOOK")
+                        help="explicitly inspect selected evidence, design gate and RUNBOOK")
+    parser.add_argument("--task", help="assigned task ID; defaults to CURRENT_STATE active task")
+    parser.add_argument("--all-live", action="store_true",
+                        help="explicitly list all live task pointers for dispatch reconciliation")
     return parser.parse_args()
+
+
+def packet_read_set(record: dict[str, str]) -> list[str]:
+    """Return explicit packet/canonical pointers, never preload their contents/history."""
+    name = record.get("Task packet", "").strip().strip("`")
+    paths = [name] if name else []
+    if name:
+        packet = (ROOT / name).resolve()
+        if not packet.is_relative_to(ROOT.resolve()):
+            raise ValueError("task packet is outside repository")
+        if not packet.is_file():
+            raise ValueError("task packet is missing")
+        references = section(read(packet), "Canonical references")
+        paths += re.findall(r"`([^`]+)`", references)
+    result: list[str] = []
+    for value in paths:
+        path = (ROOT / value).resolve()
+        if not path.is_relative_to(ROOT.resolve()):
+            raise ValueError("canonical reference is outside repository")
+        if not path.is_file():
+            raise ValueError("canonical reference is missing")
+        normalized = path.relative_to(ROOT.resolve()).as_posix()
+        if normalized not in result:
+            result.append(normalized)
+    return result
 
 
 def main() -> int:
     args = parse_args()
     role = args.role or "integrate"
     state = read(AI / "CURRENT_STATE.md")
-    inbox = read(AI / "REVIEW_INBOX.md")
-    questions = read(AI / "OPEN_QUESTIONS.md")
     records = task_records()
-
+    selected_id = args.task or active_task_id(state)
+    selected = [record for record in records if record.get("Task ID") == selected_id]
     print("AUTHORITY: CURRENT_STATE phase/holds; TASKS lifecycle; packets scope; handoffs evidence.")
     print("Historical next actions never authorize dispatch. Host/process ownership: UNKNOWN here.")
     hold = section(state, "Continuation Hold")
     if hold:
         print("CONTINUATION HOLD\n" + hold + "\n")
-
-    print("=" * 60)
-    print("CURRENT PHASE")
-    print("=" * 60)
-    print(section(state, "Current Phase") or "(unknown)")
-
-    print()
-    print("=" * 60)
-    print("CURRENT TARGET")
-    print("=" * 60)
-    print(section(state, "Current Target") or "(unknown)")
-
-    print()
-    print("=" * 60)
-    print("LIVE TASKS")
-    print("=" * 60)
-    live_tasks = [
-        record
-        for record in records
-        if record.get("State") in LIVE_TASK_STATES
-    ]
-    print("\n".join(display_task(record) + "\n" + handoff_summary(record)
-                    for record in live_tasks) or "none")
+    print("CURRENT PHASE\n" + (section(state, "Current Phase") or "(unknown)"))
+    print(f"ACTIVE TASK: {active_task_id(state) or 'UNKNOWN'}; SELECTED TASK: {selected_id or 'UNKNOWN'}")
+    print("GIT\n" + git_summary())
+    if len(selected) != 1:
+        print("Task selection missing/ambiguous; reconcile TASKS. No fallback or dispatch.")
+        return 1
+    record = selected[0]
+    print("\nSELECTED TASK\n" + display_task(record))
+    if record.get("State") not in LIVE_TASK_STATES:
+        print("Historical task: do not redispatch. Inspect archive only if explicitly needed.")
+        return 1
+    print("Acceptance: " + record.get("Acceptance", "UNKNOWN"))
+    print("Required independence: " + record.get("Review required", "UNKNOWN"))
+    print("Design Gate (declared only): " + record.get("Design Gate", "UNKNOWN"))
+    print("Status output is not design approval, acceptance or execution authorization.")
+    try:
+        paths = packet_read_set(record)
+    except ValueError as error:
+        print(f"READ SET ERROR: {error}; reconcile packet before dispatch.")
+        return 1
+    print("\nCONTEXT READ SET\nAGENTS.md (active rules)\n" + "\n".join(paths))
+    print("Relevant diff only; additional sources only for a named unresolved question.")
+    if args.all_live:
+        print("\nLIVE TASK POINTERS\n" + "\n".join(
+            display_task(item) for item in records if item.get("State") in LIVE_TASK_STATES))
     print("\nRECONCILIATION")
-    print("\n".join(coordination_warnings(state, records)) or
+    print("\n".join(coordination_warnings(state, records, focus=selected_id)) or
           "No structural warning; still verify dependencies, evidence and host ownership.")
-
-    print()
-    print("=" * 60)
-    print("CURRENT BLOCKERS")
-    print("=" * 60)
-    print(section(state, "Current Blockers") or "(unknown)")
-
+    print("\nCURRENT BLOCKERS\n" + (section(state, "Current Blockers") or "(unknown)"))
     if role == "integrate":
-        print()
-        print("=" * 60)
-        print("CRITICAL PATH")
-        print("=" * 60)
-        print(section(state, "Critical Path") or "(unknown)")
-
-        print()
-        print("=" * 60)
-        print("NEXT INTEGRATION ACTION")
-        print("=" * 60)
-        print(section(state, "Next Integration Action") or "(unknown)")
-
-    if args.role:
-        print()
+        print("\nNEXT INTEGRATION ACTION\n" + (section(state, "Next Integration Action") or "(unknown)"))
+    if args.details:
+        print("\nSELECTED EVIDENCE (explicit details only)\n" + handoff_summary(record))
         print_design_gate(state)
         print("Design permission only; continuation holds, task scope and independent gates still apply.")
-
-    if role in {"integrate", "implement", "review", "fix", "test", "investigate"}:
-        print()
-        print("=" * 60)
-        print("OPEN REVIEWS")
-        print("=" * 60)
-        active_reviews = active_review_blocks(inbox)
-        if active_reviews:
-            print("\n\n".join(active_reviews))
-        else:
-            print("none")
-
-    if args.details and role not in {"architect", "design"}:
-        print()
-        print("=" * 60)
-        print("TEST STATUS")
-        print("=" * 60)
-        print(section(state, "Test Status") or "(unknown)")
-
-    if role in {"integrate", "architect", "design"}:
-        print()
-        print("=" * 60)
-        print("OPEN QUESTIONS")
-        print("=" * 60)
-        titles = re.findall(r"^## (Q\d+ .*)$", questions, flags=re.MULTILINE)
-        print("\n".join(titles) if titles else "none")
-
-    print()
-    print("=" * 60)
-    print("GIT")
-    print("=" * 60)
-    print(git_summary())
-
-    if args.role and args.details:
-        print()
-        print("=" * 60)
-        print(f"RUNBOOK: {args.role}")
-        print("=" * 60)
-        selected = runbook_section(read(AI / "RUNBOOK.md"), ROLE_SECTIONS[args.role])
-        print(selected or "(RUNBOOK section not found)")
-    else:
-        print("\nRouting: Docs/ai/INDEX.md; policy: AGENTS.md; operating contract: "
-              "Docs/ai/OPERATIONS.md. Use --details only as needed.")
+        print(f"\nRUNBOOK: {role}")
+        print(runbook_section(read(AI / "RUNBOOK.md"), ROLE_SECTIONS[role]) or "(not found)")
+    print("\nRouting on demand: Docs/ai/INDEX.md; Docs/ai/OPERATIONS.md.")
     return 0
 
 
