@@ -1,7 +1,7 @@
 # Phase 6 コードレビュー結果（外部レビュー）
 
 Status: FINDINGS（未承認・参考情報）
-作成: 2026-09-17
+作成: 2026-09-17（同日 F1 に実測訂正を追記）
 作成者: Claude Code（レビューのみ。製品変更0、テスト実行0、provider操作0）
 
 ## レビュー範囲
@@ -44,7 +44,7 @@ self._game_time.real_budget(self._backend_request_timeout_seconds)
 await asyncio.sleep(self._config.provider_drain_grace_seconds)
 ```
 
-### 再現シナリオ
+### 想定シナリオ（コード経路からの導出。実測ではない）
 
 `AIWOLF_TIME_SCALE=0.5`、`request_timeout_seconds=5.0`、`provider_drain_grace_seconds=5.0`。
 
@@ -53,11 +53,36 @@ await asyncio.sleep(self._config.provider_drain_grace_seconds)
 3. 正常に 7 秒かかる call が実行中に、`_drain_timeout` が **5 秒**で起床
 4. `_poison_locked("PROVIDER_QUIESCENCE_UNKNOWN")` を呼び、provider task を cancel
 
+### 実測による訂正（2026-09-17 追記）
+
+**T389 実ゲームではこの故障は発生しなかった。** 初版で「再発する」と断定したのは誤りであり、
+以下に訂正する。指摘そのもの（drain grace だけが未スケール）は取り下げないが、
+確度は「実測で確認された故障」ではなく **「未実行の潜在欠陥」** である。
+
+T389（`logs/t389-logical-clock-acceptance/measurement.json`）の実測:
+
+| 項目 | 値 |
+|---|---|
+| `game/time_scale` | 0.1 |
+| `semantic/unknown` | 0 |
+| `semantic/poisoned` | 0 |
+| `topology/broker_shutdown_clean` | True |
+| `provider/terminal_counts` | `RELEASED = 117` のみ |
+
+未発火の理由は terminal 内訳にある。EXPIRED / OVERLOADED / ABANDONED_DRAINED がいずれも 0 件で、
+**DRAINING 経路自体が一度も通っていない**。`network/client.py:1080` によりフェーズ期限も同率で
+10倍になったため、期限切れによる打ち切りが起きなかった。
+
+ただし潜在的な危険性は減っていない。`time_scale=0.1` では backend 予算が 10 倍になる一方、
+drain grace は実秒のまま据え置かれる。**取消や期限切れが一度でも発生すれば、
+未スケールのときより踏みやすくなる。** 現在の観測は「経路が通っていない」ことを示すだけで、
+「不整合が無害である」ことを示すものではない。
+
 ### 影響
 
-**T370 が除去したばかりの UNKNOWN / poison 終端が再発する。**
+`time_scale < 1` の実ゲームで DRAINING 経路に入った場合、
+T370 が除去した UNKNOWN / poison 終端が再発しうる。
 recovery-r3 実測では `provider_unknown_count=0`、`poison_transition_count=0` を達成していた。
-`time_scale < 1` を実ゲームで使った時点でこの成果が失われる。
 
 ### 検討すべき対応
 
