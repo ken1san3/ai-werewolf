@@ -74,6 +74,23 @@ candidate比較のactual余裕は送信前に確認する。製品context契約�
 
 ## 証拠と次gate
 
+### T408の本文なし構造比較
+
+T406 baselineのruntimeと入力hashが同じ場合に限り、その測定・本文判定を再利用する。
+`structure`は既存schemaのspeech_act参照閉包をsystemへ追加する。全7種を示すが、
+発言例、選択済みact、新しい事実を含めない。PRE_VOTE/CO_OPPORTUNITYの4件は入力不変。
+この比較は検証adapter内のみで、製品promptへの採用を意味しない。
+
+```powershell
+python scripts/phase6_conversation_suite.py --prepare --candidate-variant structure --reuse-baseline logs/t406-context-suite/suite --output logs/t408-structure-only
+python scripts/phase6_conversation_suite.py --run structure --output logs/t408-structure-only
+```
+
+上記はT408/T409の一回許可で実行した記録用コマンド。再実行の指示ではない。
+baseline.claimを作りbaseline再生成を防ぐ。同bytes4件を再利用し、新規生成は最大28件。
+同じ実Context・byte安全条件を維持し、修復0・自動再試行0とする。
+構造ラベルが増えても、本文・source・根拠が整合しなければ意味上の改善と判定しない。
+
 private入力/最終出力/GPU原本は既存Owner専用rootへ保存。repoへはcase ID・hash・数値・判定理由の
 安全な要約だけを残す。`generation_status`とoutput validationは別field。未実施を成功にしない。
 結果にはactual input/completion tokens・REAL latencyを保存し、性能と機能を分ける。

@@ -27,6 +27,25 @@ from tests.fixtures.phase6_evidence import create_private_evidence_container
 CONFIG = LLMBrainConfig(short_chat=DiscussionChatConfig())
 
 
+def structure_reference(projection):
+    """Expose the existing speech-act shapes, without any suggested speech text."""
+    schema = json.loads(canonical_json_bytes(projection.decision_schema))
+    definitions = schema['$defs']
+    selected = {}
+    def include(name):
+        if name in selected: return
+        selected[name] = definitions[name]
+        def visit(value):
+            if isinstance(value, dict):
+                if '$ref' in value: include(value['$ref'].removeprefix('#/$defs/'))
+                for item in value.values(): visit(item)
+            elif isinstance(value, list):
+                for item in value: visit(item)
+        visit(definitions[name])
+    include('speech_act')
+    return {'$ref':'#/$defs/speech_act', '$defs':selected}
+
+
 def example(value):
     """T405 request-local method, evaluated only here, never installed in product."""
     trigger = value['capture']['trigger']
@@ -61,12 +80,27 @@ def example(value):
 def project(case, variant):
     p = project_brain_input(case.request, config=CONFIG)
     if variant == 'baseline': return p
+    if variant not in ('candidate', 'structure'): raise ValueError('unknown variant')
+    if variant == 'structure':
+        if p.discussion_capture.trigger.kind not in ('INITIAL_CHAT','PEER_CHAT'): return p
+        system = p.messages[0].content + (
+            '\nSpeech-act structure reference only, not a response or a chosen act. '
+            'Write your own message about the current conversation and choose its matching act. '
+            'This fragment describes discussion.speech_act; still return the complete response. '
+            'Every EvidenceRef must come from grounding.allowed_evidence_refs. '
+            'Use the actual speaker/source for replies and actual prior assessment for changes. '
+            'NONE remains valid when its meaning fits.\n') + json.dumps(structure_reference(p), separators=(',', ':'))
+        return with_system(p, system)
     item = example(p.canonical_input)
     if item is None: return p
     # Validate the example against the unchanged schema AND semantic validator.
     parse_llm_output(json.dumps(item), projection=p)
     system = p.messages[0].content + (' Format example, not a suggested statement or belief. Choose your own text and '
         'matching act; do not copy the example. NONE remains valid when no act fits.\n') + json.dumps(item, separators=(',', ':'))
+    return with_system(p, system)
+
+
+def with_system(p, system):
     messages = (LLMMessage('system', system), *p.messages[1:])
     serialized = canonical_prompt_json(messages, p.decision_schema)
     if len(serialized.encode()) + 454 > 32768: raise ValueError('byte budget exceeded')
@@ -109,13 +143,23 @@ def evaluate(case, projection, raw):
         'exact_long_copy': copy_found, 'manual_text_review_required': True}
 
 
-def prepare(out):
-    meta = runtime(); manifest = {'runtime': meta, 'cases': [], 'generation_calls': 0}
+def prepare(out, *, candidate_variant='candidate', baseline_source=None):
+    meta = runtime(); manifest = {'runtime': meta, 'cases': [], 'generation_calls': 0,
+                                 'task_id':'T408' if candidate_variant=='structure' else 'T406'}
+    prior = None
+    if baseline_source is not None:
+        prior = json.loads((baseline_source/'plan.json').read_text(encoding='utf-8'))
+        if prior['runtime'] != meta: raise RuntimeError('baseline runtime differs')
     for case in cases():
         variants = {}
-        for variant in ('baseline', 'candidate'):
+        for variant in ('baseline', candidate_variant):
             p = project(case, variant); body = provider_body(p)
-            measurement = measure_body(body, meta['context_per_slot'], proxy=p.token_proxy_units)
+            if variant=='baseline' and prior:
+                measurement = next(c for c in prior['cases'] if c['case_id']==case.case_id)['variants']['baseline']
+                if measurement['input_hash'] != hashlib.sha256(wire_bytes(body)).hexdigest():
+                    raise RuntimeError('baseline bytes changed')
+            else:
+                measurement = measure_body(body, meta['context_per_slot'], proxy=p.token_proxy_units)
             if measurement['remaining_tokens'] < 0: raise RuntimeError('actual context overflow')
             if measurement['provider_request_bytes'] > 65536: raise RuntimeError('request byte overflow')
             variants[variant] = measurement
@@ -125,7 +169,11 @@ def prepare(out):
             'variants':variants})
     out.mkdir(parents=True, exist_ok=True)
     with (out/'plan.json').open('x', encoding='utf-8') as f: json.dump(manifest,f,indent=2)
-    print('Prepared 32 cases, 64 exact request counts, no generation.')
+    if baseline_source:
+        for name in ('baseline-results.json','baseline-locator.json','baseline-manual.json'):
+            with (out/name).open('xb') as f: f.write((baseline_source/name).read_bytes())
+        (out/'baseline.claim').write_text('Historical baseline reuse only; no generation authorized.',encoding='utf-8')
+    print('Prepared 32 cases; no generation. Baseline reused:',bool(baseline_source))
 
 
 def run(out, variant):
@@ -137,14 +185,14 @@ def run(out, variant):
         if case.case_id != entry['case_id'] or hashlib.sha256(wire_bytes(body)).hexdigest() != measured['input_hash']:
             raise RuntimeError('frozen input mismatch')
     baseline_rows = {}
-    if variant == 'candidate':
+    if variant != 'baseline':
         baseline_rows = {r['case_id']:r for r in json.loads((out/'baseline-results.json').read_text())['rows']}
         if len(baseline_rows) != 32 or any(r['generation_status'] != 'GENERATED' for r in baseline_rows.values()):
             raise RuntimeError('complete baseline required before candidate')
     # Exclusive claim consumes this variant even on interruption: no auto retry.
     with (out/(variant+'.claim')).open('x') as f: f.write(datetime.now(timezone.utc).isoformat())
     private = create_private_evidence_container(ROOT/'logs/phase6-private-evidence',
-        evidence_kind='synthetic', task_id='T406'+variant.upper(), created_at_utc=datetime.now(timezone.utc))
+        evidence_kind='synthetic', task_id=manifest.get('task_id','T406')+variant.upper(), created_at_utc=datetime.now(timezone.utc))
     (out/(variant+'-locator.json')).write_text(json.dumps({'path':str(private)}), encoding='utf-8')
     monitor_log = (private/'monitor-stdio.txt').open('x')
     monitor = subprocess.Popen([sys.executable, str(ROOT/'scripts/monitor_phase6_gpu.py'),
@@ -198,8 +246,10 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--prepare',action='store_true')
-    parser.add_argument('--run',choices=('baseline','candidate'))
+    parser.add_argument('--run',choices=('baseline','candidate','structure'))
+    parser.add_argument('--candidate-variant',choices=('candidate','structure'),default='candidate')
+    parser.add_argument('--reuse-baseline',type=Path)
     args=parser.parse_args()
     if args.prepare == bool(args.run): parser.error('choose exactly one of --prepare or --run')
-    if args.prepare: prepare(args.output)
+    if args.prepare: prepare(args.output,candidate_variant=args.candidate_variant,baseline_source=args.reuse_baseline)
     else: run(args.output,args.run)

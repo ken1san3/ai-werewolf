@@ -8,6 +8,7 @@ import pytest
 
 from scripts.phase6_conversation_suite import cases, project, example, evaluate
 from scripts.phase6_context_probe import provider_body, wire_bytes
+from ai_client.discussion.context import canonical_json_bytes
 from ai_client.llm.backend import OpenAICompatibleBackend
 from ai_client.llm.types import (OpenAICompatibleBackendConfig, GenerationSettings,
     LlamaCppStructuredOutputConfig, StructuredGenerationRequest)
@@ -49,6 +50,57 @@ def test_candidate_changes_only_system_and_valid_examples():
         assert b.prompt_bytes+454<=32768
         if c.request.discussion.trigger.kind in ('PRE_VOTE','CO_OPPORTUNITY'):
             assert a==b
+
+
+def test_structure_reference_has_all_acts_and_no_speech_example():
+    from scripts.phase6_conversation_suite import structure_reference
+    import jsonschema
+    for c in cases():
+        a,b=project(c,'baseline'),project(c,'structure')
+        assert a.messages[1:]==b.messages[1:] and a.decision_schema==b.decision_schema
+        assert a.canonical_input==b.canonical_input and b.prompt_bytes+454<=32768
+        fragment=structure_reference(a)
+        jsonschema.Draft202012Validator.check_schema(fragment)
+        assert set(x['properties']['kind']['const'] for x in fragment['$defs']['speech_act']['oneOf'])=={
+            'NONE','CLAIM','QUESTION','ANSWER','REBUTTAL','OPINION_CHANGE','RELATION_HYPOTHESIS'}
+        original=json.loads(canonical_json_bytes(a.decision_schema))
+        assert all(value==original['$defs'][key] for key,value in fragment['$defs'].items())
+        assert 'message' not in json.dumps(fragment) and 'comment' not in json.dumps(fragment)
+        item=example(a.canonical_input)
+        if item:jsonschema.validate(item['discussion']['speech_act'],fragment)
+        if c.request.discussion.trigger.kind in ('PRE_VOTE','CO_OPPORTUNITY'):assert a==b
+        else:assert a.messages[0]!=b.messages[0]
+
+
+def test_unknown_probe_variant_is_not_silently_a_different_experiment():
+    with pytest.raises(ValueError,match='unknown variant'):project(cases()[0],'typo')
+
+
+@pytest.mark.parametrize('changed',[False,True],ids=['reuse','changed_bytes'])
+def test_structure_preparation_reuses_and_locks_historical_baseline(monkeypatch,tmp_path,changed):
+    import hashlib
+    from scripts import phase6_conversation_suite as m
+    case=cases()[0]; p=project(case,'baseline')
+    baseline={'input_hash':hashlib.sha256(wire_bytes(provider_body(p))).hexdigest(),
+        'remaining_tokens':100,'provider_request_bytes':100}
+    if changed:baseline['input_hash']='0'*64
+    source=tmp_path/'prior';source.mkdir();meta={'context_per_slot':8192}
+    (source/'plan.json').write_text(json.dumps({'runtime':meta,'cases':[{'case_id':case.case_id,'variants':{'baseline':baseline}}]}))
+    for name in ('baseline-results.json','baseline-locator.json','baseline-manual.json'):
+        (source/name).write_text('{}')
+    calls=[]
+    monkeypatch.setattr(m,'runtime',lambda:meta)
+    monkeypatch.setattr(m,'cases',lambda:(case,))
+    monkeypatch.setattr(m,'measure_body',lambda *a,**kw: calls.append('count') or dict(baseline))
+    out=tmp_path/'new'
+    if changed:
+        with pytest.raises(RuntimeError,match='baseline bytes changed'):
+            m.prepare(out,candidate_variant='structure',baseline_source=source)
+        assert not calls and not out.exists()
+    else:
+        m.prepare(out,candidate_variant='structure',baseline_source=source)
+        assert calls==['count'] and (out/'baseline.claim').exists()
+        assert (out/'baseline-results.json').read_bytes()==(source/'baseline-results.json').read_bytes()
 
 
 def test_exact_payload_matches_real_backend():

@@ -28,9 +28,9 @@ def summarize(rows):
         'completion_tokens_new_calls':sum(r.get('completion_tokens') or 0 for r in new)}
 
 
-def report(suite, output):
+def report(suite, output, *, candidate_variant='candidate'):
     combined={}; known={c.case_id:c for c in cases()}
-    for variant in ('baseline','candidate'):
+    for variant in ('baseline',candidate_variant):
         results_path=suite/(variant+'-results.json'); manual_path=suite/(variant+'-manual.json')
         measured=json.loads(results_path.read_text(encoding='utf-8'))
         manual=json.loads(manual_path.read_text(encoding='utf-8'))
@@ -60,13 +60,13 @@ def report(suite, output):
             'annotations_sha256':hashlib.sha256(manual_path.read_bytes()).hexdigest(),
             'private_raw_sha256':hashlib.sha256(raw_path.read_bytes()).hexdigest(),
             'duration_real':measured['duration_real']}
-    combined['verdict']='CANDIDATE_NOT_ADOPTED; NO_GAME; product unchanged'
+    combined['verdict']='MEASUREMENT_ONLY; product adoption requires a separate decision'
     basic_groups={'QUESTION':['G03-1','G03-2'], 'ANSWER':['G01-1','G01-2'],
                   'REBUTTAL':['G02-1','G02-2'], 'OPINION_CHANGE':['G04-1']}
     combined['basic_act_cases']={}
     for act,ids in basic_groups.items():
         metric={'case_ids':ids}
-        for variant in ('baseline','candidate'):
+        for variant in ('baseline',candidate_variant):
             selected=[r for r in combined[variant]['rows'] if r['case_id'] in ids]
             metric[variant+'_label_correct']=sum(r['speech_act']==act for r in selected)
             metric[variant+'_fully_correct']=sum(r['speech_act']==act and r['semantic_pass'] is True for r in selected)
@@ -75,12 +75,13 @@ def report(suite, output):
     combined['limitations']=['one generation per distinct case/variant; no statistical generalization',
         'manual semantic judgments preserve UNKNOWN; no chain of thought',
         'non-disclosure is not a grounding failure; grounding capability may be unobserved',
-        'candidate complete examples can induce imitation; act frequency alone is insufficient']
+        'act frequency alone is insufficient; case meaning is reviewed separately']
     output.write_text(json.dumps(combined,ensure_ascii=False,indent=2),encoding='utf-8')
-    print(json.dumps({k:combined[k]['summary'] for k in ('baseline','candidate')},ensure_ascii=False))
+    print(json.dumps({k:combined[k]['summary'] for k in ('baseline',candidate_variant)},ensure_ascii=False))
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--suite',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
-    args=parser.parse_args();report(args.suite,args.output)
+    parser.add_argument('--candidate-variant',choices=('candidate','structure'),default='candidate')
+    args=parser.parse_args();report(args.suite,args.output,candidate_variant=args.candidate_variant)
