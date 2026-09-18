@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from scripts.ci_private_summary import summarize_private_junit
+from scripts.ci_private_summary import private_result_codes, summarize_private_junit
 
 
 @pytest.fixture
@@ -62,6 +62,60 @@ def test_bad_report_is_unavailable(source_root: Path, payload: str) -> None:
 def test_missing_report_is_unavailable(source_root: Path) -> None:
     result = summarize_private_junit(source_root, source_root / "SECRET_missing.xml")
     assert result == {"summary_status": "UNAVAILABLE", "reason": "REPORT_UNREADABLE"}
+
+
+@pytest.mark.parametrize("message, expected", [
+    ("tests.test_phase6_semantic_completion.P6FSemanticGameEndFailure", "P6FSemanticGameEndFailure"),
+    ("PermissionError: SECRET_PATH", "PermissionError"),
+    ("TimeoutError: SECRET_REQUEST", "TimeoutError"),
+    ("SECRET TimeoutError", "UNCLASSIFIED"),
+    ("TimeoutErrorSECRET", "UNCLASSIFIED"),
+    ("SecretException: TimeoutError", "UNCLASSIFIED"),
+])
+def test_pytest_xunit2_message_only_is_allowlisted(source_root, message, expected):
+    import xml.etree.ElementTree as ET
+    root = ET.Element("testsuite")
+    case = ET.SubElement(root, "testcase", classname="tests.test_public", name="test_one")
+    failure = ET.SubElement(case, "failure", message=message)
+    failure.text = "SECRET_TRACEBACK"
+    report = source_root / "private.xml"
+    ET.ElementTree(root).write(report, encoding="utf-8")
+    result = summarize_private_junit(source_root, report)
+    assert result["failures"] == [{"test": "tests.test_public::test_one", "kind": expected}]
+    assert "SECRET" not in json.dumps(result)
+
+
+def test_real_pytest_junit_without_type_attribute(source_root):
+    import subprocess
+    import sys
+    test = source_root / "tests" / "test_public.py"
+    test.write_text("class P6FSemanticGameEndFailure(AssertionError): pass\n"
+                    "def test_one(): raise P6FSemanticGameEndFailure('SECRET_PAYLOAD')\n")
+    report = source_root / "private.xml"
+    run = subprocess.run([sys.executable, "-m", "pytest", "tests/test_public.py", "-q", "-p", "no:cacheprovider",
+                          "--rootdir", str(source_root), "--junitxml", str(report)],
+                         cwd=source_root, capture_output=True, timeout=30)
+    assert run.returncode == 1
+    result = summarize_private_junit(source_root, report)
+    assert result["failures"] == [{"test": "tests.test_public::test_one", "kind": "P6FSemanticGameEndFailure"}]
+    assert "SECRET" not in json.dumps(result)
+
+
+def test_private_result_codes_require_exact_match():
+    assert private_result_codes(["global peak backend concurrency is not one", "SECRET", {"SECRET": 1}]) == "PEAK_CONCURRENCY,UNKNOWN"
+    assert private_result_codes("TimeoutError: SECRET") == "UNKNOWN"
+    assert private_result_codes([]) == ""
+
+
+def test_result_properties_are_reallowlisted(source_root):
+    report = source_root / "private.xml"
+    report.write_text('<testsuite><testcase classname="tests.test_public" name="test_one">'
+        '<properties><property name="ci_failure_codes" value="PEAK_CONCURRENCY,SECRET"/>'
+        '<property name="SECRET" value="SECRET"/></properties><failure message="AssertionError: SECRET"/>'
+        '</testcase></testsuite>')
+    result = summarize_private_junit(source_root, report)
+    assert result['failures'][0]['codes'] == 'PEAK_CONCURRENCY,UNKNOWN'
+    assert 'SECRET' not in json.dumps(result)
 
 
 def test_oversized_report_is_unavailable(source_root: Path) -> None:
