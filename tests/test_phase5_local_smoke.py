@@ -1160,6 +1160,8 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
             expected = []
             accepted = []
             metrics = []
+            # Synthetic PIDs must never collide with the actual pytest process PID.
+            base_pid = os.getpid() + 10000
             for index in range(9):
                 player = f"player-{index}"
                 opaque = f"opaque-{index}"
@@ -1169,7 +1171,7 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
                 audit_path = shard / "ai.jsonl"
                 audit_path.write_text('{"audit":true}\n', encoding="utf-8")
                 statuses[player] = {
-                    "pid": 1000 + index,
+                    "pid": base_pid + index,
                     "player_id": player,
                     "runtime_success": True,
                     "runtime_exit": "GAME_ENDED",
@@ -1276,7 +1278,7 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
                 owned.append(
                     runner.OwnedProcess(
                         player,
-                        _FinishedProcess(pid=1000 + index),
+                        _FinishedProcess(pid=base_pid + index),
                         stdout,
                         stderr,
                     )
@@ -1284,7 +1286,9 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
             metadata = ai_dir / "admission.jsonl"
             metadata.write_text("{}\n", encoding="utf-8")
             manifest = runner._write_manifest(ai_dir, statuses, metadata, mapping)
-            for label, pid in (("server", 2000), ("broker", 2001)):
+            server_pid = base_pid + 100
+            broker_pid = base_pid + 101
+            for label, pid in (("server", server_pid), ("broker", broker_pid)):
                 stdout, stderr = root / f"{label}.out", root / f"{label}.err"
                 stdout.write_bytes(b"")
                 stderr.write_bytes(b"")
@@ -1294,7 +1298,7 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
                     )
                 )
             server = {
-                "server_pid": 2000,
+                "server_pid": server_pid,
                 "success": True,
                 "game_end": True,
                 "listener_closed": True,
@@ -1307,7 +1311,7 @@ class PhaseFiveRunnerContractTests(unittest.TestCase):
                 "total_game_wall_microseconds": 10,
             }
             broker = {
-                "pid": 2001,
+                "pid": broker_pid,
                 "success": True,
                 "shutdown_clean": True,
                 "listener_closed": True,

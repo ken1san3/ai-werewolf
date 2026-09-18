@@ -51,6 +51,10 @@ if not hasattr(asyncio, "timeout"):  # Python 3.10
     # Call sites remain on asyncio.timeout so existing instrumentation and
     # tests observe the same boundary on every supported Python version.
     asyncio.timeout = _timeout  # type: ignore[attr-defined]
+    # Python 3.11 made asyncio.TimeoutError an alias of built-in TimeoutError.
+    # Normalize 3.10 so shared product code/tests observe the declared runtime contract.
+    asyncio.TimeoutError = TimeoutError  # type: ignore[attr-defined]
+    asyncio.exceptions.TimeoutError = TimeoutError  # type: ignore[attr-defined]
 
 
 __all__: list[str] = []

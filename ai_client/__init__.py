@@ -1,5 +1,7 @@
 """Client-side components for the AI Werewolf protocol."""
 
+from . import _compat as _compat  # noqa: F401
+
 from .network import (
     ActionHandle,
     AbilityAction,

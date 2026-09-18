@@ -35,6 +35,7 @@ class _DayOneBarrierClock:
         self._day_one_release = day_one_release
         self._started_at_ns: int | None = None
         self._day_one_released_at_ns: int | None = None
+        self._day_one_chat_complete = False
 
     def __call__(self) -> int:
         if not self._clock_start.exists():
@@ -44,11 +45,19 @@ class _DayOneBarrierClock:
         if not self._day_one_release.exists():
             elapsed = (time.monotonic_ns() - self._started_at_ns) // 1_000_000_000
             return min(elapsed, 1)
+        # Completion acceptance requires one Day-1 chat from every seat. Hold the
+        # synthetic game clock at Day-1 start until that observable condition is met,
+        # instead of relying on host scheduling speed.
+        if not self._day_one_chat_complete:
+            return 1
         if self._day_one_released_at_ns is None:
             self._day_one_released_at_ns = time.monotonic_ns()
         return 1 + (
             time.monotonic_ns() - self._day_one_released_at_ns
         ) // 1_000_000_000
+
+    def mark_day_one_chat_complete(self) -> None:
+        self._day_one_chat_complete = True
 
 
 def _private_json(path: Path, value: object) -> None:
@@ -184,6 +193,13 @@ async def run_server(
                         "message_utf8_bytes": len(text.encode("utf-8")),
                     }
                 )
+                day_one_speakers = {
+                    item["player_id"]
+                    for item in chats
+                    if item["day"] == 1 and item["phase"] == "day"
+                }
+                if day_one_speakers == set(game.players):
+                    clock.mark_day_one_chat_complete()
             return result
         finally:
             active_request_id = previous
