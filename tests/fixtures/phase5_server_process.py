@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from ai_client._compat import timeout as async_timeout
 from server.aiwolf_core import (
     GameState,
     InMemoryEventSink,
@@ -106,7 +107,8 @@ async def run_server(
             preset.rules,
             night_seconds=1,
             silence_after_dawn_seconds=0,
-            day_seconds=4,
+            # Give nine subprocess clients enough CI scheduling headroom for Day 1 chat.
+            day_seconds=10,
             vote_seconds=1,
         ),
     )
@@ -241,7 +243,7 @@ async def run_server(
     )
     failure: str | None = None
     try:
-        async with asyncio.timeout(175.0):
+        async with async_timeout(175.0):
             while game.game_result is None and not stop_path.exists():
                 for player_id in game.players:
                     remember_expected(player_id)

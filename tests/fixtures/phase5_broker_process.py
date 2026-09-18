@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from ai_client._compat import timeout as async_timeout
 from ai_client.llm import (
     AdmissionMetrics,
     GenerationAdmissionBroker,
@@ -98,7 +99,7 @@ async def run_broker(
     )
     failure: str | None = None
     try:
-        async with asyncio.timeout(175.0):
+        async with async_timeout(175.0):
             while not stop_path.exists():
                 snapshot = broker.snapshot
                 maximum_pending = max(maximum_pending, snapshot.pending_total)

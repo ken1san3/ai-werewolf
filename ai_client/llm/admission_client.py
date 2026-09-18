@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from ai_client._compat import timeout as async_timeout
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 import json
@@ -272,7 +273,7 @@ class BrokerAdmissionSession:
         if not isinstance(config, GenerationBrokerConfig):
             raise TypeError("config must be GenerationBrokerConfig")
         try:
-            async with asyncio.timeout(config.authentication_timeout_seconds):
+            async with async_timeout(config.authentication_timeout_seconds):
                 reader, writer = await asyncio.open_connection(host, port)
                 writer.write(
                     _encode_frame(
@@ -790,7 +791,7 @@ class BrokerAdmissionSession:
                 and lane.disposition == AdmissionStatus.EXPIRED.value
             ):
                 return AdmissionStatus.EXPIRED.value
-            async with asyncio.timeout(self._config.cancellation_grace_seconds):
+            async with async_timeout(self._config.cancellation_grace_seconds):
                 return await asyncio.shield(acknowledgement)
         except TimeoutError:
             await self._close_failed_transport(protocol_error=False)

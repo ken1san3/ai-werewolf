@@ -8,6 +8,7 @@ provider.
 from __future__ import annotations
 
 import asyncio
+from ai_client._compat import timeout as async_timeout
 from dataclasses import dataclass
 from enum import Enum, auto
 import hashlib
@@ -418,7 +419,7 @@ class GenerationAdmissionBroker:
         if server is not None:
             server.close()
         try:
-            async with asyncio.timeout(self._config.shutdown_grace_seconds):
+            async with async_timeout(self._config.shutdown_grace_seconds):
                 provider_tasks: list[asyncio.Task[None]] = []
                 async with self._lock:
                     for slot in tuple(self._slots.values()):
@@ -475,7 +476,7 @@ class GenerationAdmissionBroker:
                 return_exceptions=True,
             )
             try:
-                async with asyncio.timeout(self._config.cancellation_grace_seconds):
+                async with async_timeout(self._config.cancellation_grace_seconds):
                     await self._backend.aclose()
             except (TimeoutError, Exception):
                 self._cleanup_incomplete = True
@@ -492,7 +493,7 @@ class GenerationAdmissionBroker:
     ) -> None:
         connection: _Connection | None = None
         try:
-            async with asyncio.timeout(
+            async with async_timeout(
                 self._config.authentication_timeout_seconds
             ):
                 hello = _exact(
@@ -1047,7 +1048,7 @@ class GenerationAdmissionBroker:
                 self._offer_next_locked()
                 return
         try:
-            async with asyncio.timeout(timeout_seconds):
+            async with async_timeout(timeout_seconds):
                 response = await self._backend.generate(request)
         except asyncio.CancelledError:
             unclassified = True
@@ -1216,7 +1217,7 @@ class GenerationAdmissionBroker:
                 self._poison_locked("PROVIDER_QUIESCENCE_UNKNOWN")
                 provider_task.cancel()
             try:
-                async with asyncio.timeout(
+                async with async_timeout(
                     self._config.cancellation_grace_seconds
                 ):
                     await asyncio.shield(provider_task)
