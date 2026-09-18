@@ -42,7 +42,7 @@ if not hasattr(asyncio, "timeout"):  # Python 3.10
             if self._handle is not None:
                 self._handle.cancel()
             if self._expired and exc_type is asyncio.CancelledError:
-                raise asyncio.TimeoutError from exc
+                raise TimeoutError from exc
             return False
 
     def _timeout(delay: float | None) -> _Timeout:

@@ -1296,7 +1296,7 @@ class ReactionChatController:
     @staticmethod
     def _clear_current_cancellation() -> None:
         current = asyncio.current_task()
-        if current is not None:
+        if current is not None and hasattr(current, "uncancel"):
             current.uncancel()
 
     async def _resolve_discussion_observation(
