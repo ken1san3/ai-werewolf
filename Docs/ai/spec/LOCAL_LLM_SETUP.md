@@ -28,6 +28,41 @@ C:\AIagent\
 
 `agent\` 以下はプロジェクトに依存しない。特定リポジトリの話は `projects\` にだけ書く。
 
+## モデル配置（2026-09-18 実ファイル確認）
+
+ユーザー指定により、今後のモデル比較・provider設定・実行スクリプトは
+`C:\models\` 配下を基準とする。以下はこのhostの配置記録であり、モデル採用や
+実行許可、ロード可否・品質・性能の検証結果ではない。
+
+| モデル / 量子化 | GGUF絶対パス | サイズ（bytes） |
+|---|---|---:|
+| Qwen3.5-9B / Q4_K_M | `C:\models\Qwen3.5-9\Qwen3.5-9B-Q4_K_M.gguf` | 5680522464 |
+| Llama 3.1 8B Instruct / Q4_K_M | `C:\models\Llama-3.1-8B-Instruct\Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` | 4920739232 |
+| Gemma 3 12B Instruct / IQ4_XS | `C:\models\Gemma-3-12B-Instruct\google_gemma-3-12b-it-IQ4_XS.gguf` | 6550761504 |
+| Gemma 3 12B Instruct / Q4_K_M | `C:\models\Gemma-3-12B-Instruct\google_gemma-3-12b-it-Q4_K_M.gguf` | 7300575264 |
+| Gemma 3 12B Instruct / Q4_K_S | `C:\models\Gemma-3-12B-Instruct\google_gemma-3-12b-it-Q4_K_S.gguf` | 6935130144 |
+| Ternary Bonsai 2 27B / PTQ1_0 | `C:\models\Ternary-Bonsai-2-27B\Ternary-Bonsai-2-27B-PTQ1_0.gguf` | 5946648928 |
+
+Gemmaには3候補がある。比較時は量子化と完全なファイル名を明示し、
+ディレクトリ内の先頭ファイルやワイルドカードによって暗黙選択しない。
+この一覧だけから、各モデルが現在のllama-serverで動作すると推定しない。
+
+`C:\AIagent\agent\config.toml` の既存Qwen設定は維持する。
+新モデルを試す際は既存Qwenの設定を上書きせず、別profileまたは一時設定で切り替える。
+新profileや一時設定は今回作成していない。既存の起動手順・過去の測定記録は維持する。
+
+再確認用（PowerShell）:
+
+```powershell
+Get-ChildItem -LiteralPath 'C:\models\Gemma-3-12B-Instruct' -Filter *.gguf |
+    Select-Object FullName, Length
+Get-ChildItem -LiteralPath 'C:\models\Ternary-Bonsai-2-27B' -Filter *.gguf |
+    Select-Object FullName, Length
+```
+
+照合範囲はファイルの存在・名前・サイズ。GGUF本文読取、hash測定、provider起動は未実施。
+証拠: `Docs/ai/handoffs/tasks/T423_LOCAL_MODEL_PATHS.md`。
+
 ## サーバ
 
 OpenAI 互換 API を `127.0.0.1:8080` で提供する。

@@ -39,6 +39,7 @@ user. A newer timestamp alone does not overrule a stronger source.
 | Stable system and coordination boundaries | `ARCHITECTURE.md` |
 | Delegation, escalation, recovery, and long-test procedures | `OPERATIONS.md` |
 | Current operational model choices only | `MODEL_ASSIGNMENTS.md` |
+| Local GGUF paths and separate provider profiles | `spec/LOCAL_LLM_SETUP.md` — モデル配置節（2026-09-18確認） |
 | Responsibility procedures | `RUNBOOK.md` |
 | User-facing entry prompts | `PROMPTS.md` |
 | Main Integrator first-session prompt | `MAIN_INTEGRATOR_PROMPT.md` |
