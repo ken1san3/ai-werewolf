@@ -323,6 +323,25 @@ def discussion_output_schema(
         for option, branch in zip((option for option in options if option["action_kind"] == "vote"), vote_branches)
         if option["allows_abstain"]
     ]
+    # Share only identical vote subtrees.  Abstention adds a second ranking
+    # array; keep its candidates and constraints identical to the vote branch.
+    decision = _decision_schema(options, max_text, allow_none=allow_none)
+    vote_defs: dict[str, object] = {}
+    if capture.trigger.kind == "PRE_VOTE":
+        abstentions = iter(abstention_branches)
+        for index, (option, branch) in enumerate(zip(options, vote_branches)):
+            if not option["allows_abstain"]:
+                continue
+            abstention = next(abstentions)
+            targets_name, ranks_name = f"vote_targets_{index}", f"vote_ranks_{index}"
+            ranks = branch["properties"]["ranked_target_player_ids"]
+            vote_defs[targets_name] = ranks["items"]
+            targets_ref = {"$ref": f"#/$defs/{targets_name}"}
+            vote_defs[ranks_name] = ranks | {"items": targets_ref}
+            ranks_ref = {"$ref": f"#/$defs/{ranks_name}"}
+            branch["properties"]["ranked_target_player_ids"] = ranks_ref
+            abstention["properties"]["ranked_target_player_ids"] = ranks_ref
+            decision["oneOf"][index + int(allow_none)]["properties"]["target_player_id"] = targets_ref
     nullable = lambda value: {"anyOf": [value, {"type": "null"}]}
     peer_chat = capture.trigger.kind == "PEER_CHAT"
     co_opportunity = capture.trigger.kind == "CO_OPPORTUNITY"
@@ -358,6 +377,7 @@ def discussion_output_schema(
     return {
         "$defs": {
             **update_defs,
+            **vote_defs,
             "assessment": assessment,
             "claim": claim,
             "evidence_ref": _evidence_schema(),
@@ -378,7 +398,7 @@ def discussion_output_schema(
         },
         **_closed(
             {
-                "decision": _decision_schema(options, max_text, allow_none=allow_none),
+                "decision": decision,
                 "discussion": proposal,
             },
             ["decision", "discussion"],

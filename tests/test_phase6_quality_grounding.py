@@ -1,6 +1,7 @@
 """No-provider A-I contract regressions with receiver-owned synthetic facts."""
 from dataclasses import replace
 import copy
+import hashlib
 import json
 
 import jsonschema
@@ -333,7 +334,9 @@ def test_maximum_options_schema_bounded_branches_and_prompt_fails_closed(trigger
 
 
 @pytest.mark.parametrize("trigger", ["INITIAL_CHAT", "PEER_CHAT", "CO_OPPORTUNITY", "PRE_VOTE", "ABILITY"])
-def test_standard_nine_player_roles_fit_mandatory_grounding(trigger):
+@pytest.mark.parametrize("allows_abstain", [False, True])
+@pytest.mark.parametrize("game_id", ["opaque-game", "00000000-0000-0000-0000-000000000000"])
+def test_standard_nine_player_roles_fit_mandatory_grounding(trigger, allows_abstain, game_id):
     from tests.test_phase6_semantic_completion import objects, runner
     from ai_client.discussion.context import validate_discussion_bootstrap
     from ai_client.discussion.model import DiscussionTrigger
@@ -342,9 +345,13 @@ def test_standard_nine_player_roles_fit_mandatory_grounding(trigger):
     from ai_client.world import SelfView, ChatRecord, PhaseView
     content, preset, game = objects.__wrapped__()
     envelopes = runner._phase6_envelopes(content, preset, game)
+    phase = "vote" if trigger == "PRE_VOTE" else "day"
     for owner, envelope in envelopes.items():
         peer = next(p for p in game.players if p != owner)
         context = envelope["context_payload"]
+        envelope = copy.deepcopy(envelope)
+        envelope["context_payload"]["game_id"] = game_id
+        envelope["context_sha256"] = hashlib.sha256(canonical_json_bytes(envelope["context_payload"])).hexdigest()
         channel = next(c["channel_id"] for c in context["chat_channels"] if c["is_public"])
         chat = ChatRecord(1, 1, "day", channel, peer, "peer", "Which evidence explains your vote?")
         result = AbilityResultRecord(2, 1, "day", "inspect_result", peer, "not_wolf")
@@ -353,16 +360,16 @@ def test_standard_nine_player_roles_fit_mandatory_grounding(trigger):
         retention = _retention((chat, result, claim))
         snapshot = replace(base.snapshot, players=tuple(PlayerView(p, p) for p in game.players),
             alive_player_ids=tuple(game.players), self_view=SelfView(owner, context["role_id"], ()),
-            phase=PhaseView("day", 1), history_retention=retention)
-        bound = validate_discussion_bootstrap(envelope, network_game_id="opaque-game", player_id=owner).bind(snapshot)
+            phase=PhaseView(phase, 1), history_retention=retention)
+        bound = validate_discussion_bootstrap(envelope, network_game_id=game_id, player_id=owner).bind(snapshot)
         history, co, ability = HistoryView((chat, result, claim), True, retention), CoView((claim,), (), True, retention), AbilityResultView((result,), True, retention)
         source = evidence_ref_for_record(chat, bound_context=bound) if trigger == "PEER_CHAT" else None
         capture = DiscussionStateStore(bound).capture(DiscussionViews(snapshot, history, co, ability,
             TransportObservationView(1, None, None, False, (), None)), DiscussionTrigger(
-            "vote_ability" if trigger in ("ABILITY", "PRE_VOTE") else "reaction_chat", trigger, 1, "day", 1, 1, 1 if source else 0, source))
-        common = dict(connection_generation=1, action_generation=1, day=1, phase="day")
+            "vote_ability" if trigger in ("ABILITY", "PRE_VOTE") else "reaction_chat", trigger, 1, phase, 1, 1, 1 if source else 0, source))
+        common = dict(connection_generation=1, action_generation=1, day=1, phase=phase)
         handle = {"CO_OPPORTUNITY": CoDeclareAction(**common, type="co_declare", claimed_role_ids=tuple(content.roles)),
-                  "PRE_VOTE": VoteAction(**common, type="vote", valid_targets=tuple(p for p in game.players if p != owner), target_count=1, allows_abstain=False),
+                  "PRE_VOTE": VoteAction(**common, type="vote", valid_targets=tuple(p for p in game.players if p != owner), target_count=1, allows_abstain=allows_abstain),
                   "ABILITY": AbilityAction(**common, type="ability", ability_id="inspect", description=None,
                         valid_targets=tuple(p for p in game.players if p != owner), target_count=1, uses_remaining=1)
                   }.get(trigger, ChatAction(**common, type="chat", channel=channel))
