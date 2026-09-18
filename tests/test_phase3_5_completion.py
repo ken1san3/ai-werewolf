@@ -539,6 +539,11 @@ class PhaseThreeFiveCompletionTests(unittest.IsolatedAsyncioTestCase):
                         }
                         for player_id, evidence in client_evidence.items()
                     },
+                    "reservation_probe": {
+                        player_id: evidence.get("reservation_probe", [])
+                        if isinstance(evidence, dict) else []
+                        for player_id, evidence in client_evidence.items()
+                    },
                     "deadline_mapping": {
                         player_id: latest_deadline_mapping(player_id)
                         for player_id in client_evidence

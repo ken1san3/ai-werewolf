@@ -35,6 +35,7 @@ from ai_client.vote_ability import (
 from ai_client.world import ActionRejectionObservation, Freshness, WorldState
 from tests.fixtures.phase3_4_reaction_brain import CompletionReactionMode
 from tests.fixtures.phase3_5_brain import CompletionPhase35Brain
+from tests.fixtures.reservation_probe import ReservationProbe
 
 
 class _BarrierClock:
@@ -194,6 +195,7 @@ async def run_driver(
         invoker=arbiter,
         clock=shared_clock,
     )
+    reservation_probe = ReservationProbe(brain_controller, reservation)
 
     async def write_marker(path: Path, *, day: int, phase: str) -> None:
         while True:
@@ -302,6 +304,7 @@ async def run_driver(
                     "world_exit": world_exit.reason.value,
                     "brain_call_count": brain.call_count,
                     "brain_decisions": brain.decisions,
+                    "reservation_probe": reservation_probe.snapshot(),
                     "reaction": _reaction_evidence(reaction.snapshot(), observations),
                     "reservation": _reservation_evidence(
                         reservation.snapshot(), observations

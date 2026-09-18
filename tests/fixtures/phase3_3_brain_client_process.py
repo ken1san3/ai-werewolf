@@ -27,6 +27,7 @@ from ai_client.network import (
     ReconnectPolicy,
 )
 from ai_client.world import Freshness, WorldState
+from tests.fixtures.phase_attempt_barrier import acknowledge_attempt
 
 
 async def run_driver(
@@ -71,6 +72,9 @@ async def run_driver(
             timeout_seconds=timeout_seconds,
         )
         decision_statuses.append(outcome.status.value)
+        if outcome.invocation_started and ready_path is not None:
+            phase = request.snapshot.phase
+            acknowledge_attempt(ready_path, phase.day, phase.phase)
         return outcome
 
     controller.decide_and_send = record_decision

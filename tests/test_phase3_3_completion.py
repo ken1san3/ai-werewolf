@@ -25,6 +25,7 @@ from tests.fixtures.completion_process import (
     finish_process,
     load_process_output,
 )
+from tests.fixtures.phase_attempt_barrier import phase_attempts_complete
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +64,19 @@ class PhaseThreeThreeCompletionTests(unittest.IsolatedAsyncioTestCase):
         registry = GameRegistry({GAME_ID: game})
         sessions = SessionManager(registry, clock=clock)
         ticker = TickDriver(registry, clock=clock)
+        ready_paths: dict[str, Path] = {}
+        advance_once = ticker.advance_once
+
+        def advance_after_attempts():
+            # Even zero-duration phases must remain observable until every
+            # coordinator completes its real invocation. The core still owns
+            # each transition; the fixture only controls when it is ticked.
+            if not phase_attempts_complete(ready_paths.values(), game.day, game.phase.value,
+                                           count=len(players)):
+                return {GAME_ID: False}
+            return advance_once()
+
+        ticker.advance_once = advance_after_attempts
         server = WebSocketGameServer(
             registry,
             sessions=sessions,
@@ -75,7 +89,6 @@ class PhaseThreeThreeCompletionTests(unittest.IsolatedAsyncioTestCase):
         outputs: dict[int, _ProcessOutput] = {}
         output_paths: dict[int, tuple[Path, Path]] = {}
         status_paths: dict[str, Path] = {}
-        ready_paths: dict[str, Path] = {}
 
         with TemporaryDirectory() as temporary_directory, \
             patch.object(game, "advance_phase", side_effect=AssertionError("manual advance_phase")) as manual_advance, \
