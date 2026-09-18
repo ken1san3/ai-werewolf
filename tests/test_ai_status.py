@@ -666,6 +666,39 @@ class ContextDietTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "reference is missing"):
                 ai_status.packet_read_set({"Task packet": "`Docs/ai/tasks/T900.md`"})
 
+    def entries(self, references: str) -> list[tuple[str, str]]:
+        with (patch.object(ai_status, "read", return_value=
+                  f"## Canonical references\n{references}"),
+              patch.object(Path, "is_file", return_value=True)):
+            return ai_status.packet_read_entries({"Task packet": "`Docs/ai/tasks/T900.md`"})
+
+    def test_declared_scope_is_carried_into_the_read_set(self) -> None:
+        """The packet already narrows each reference; dropping it causes whole-file reads."""
+        result, output, _ = self.render(packet_override=
+            "## Canonical references\n- `Docs/ai/OPERATIONS.md`：delegation section only\n")
+        self.assertEqual(result, 0)
+        self.assertIn("Docs/ai/OPERATIONS.md — delegation section only", output)
+        self.assertIn("a scoped reference is not a whole-file read", output)
+
+    def test_scope_applies_only_to_an_unambiguous_single_reference(self) -> None:
+        self.assertEqual(
+            self.entries("- `Docs/ai/OPERATIONS.md` `Docs/ai/INDEX.md`：ambiguous trailing text\n"),
+            [("Docs/ai/tasks/T900.md", ""), ("Docs/ai/OPERATIONS.md", ""), ("Docs/ai/INDEX.md", "")])
+
+    def test_repeated_bare_reference_does_not_widen_a_declared_scope(self) -> None:
+        self.assertEqual(
+            self.entries("- `Docs/ai/OPERATIONS.md`：only the escalation table\n"
+                         "- `Docs/ai/OPERATIONS.md`\n"),
+            [("Docs/ai/tasks/T900.md", ""), ("Docs/ai/OPERATIONS.md", "only the escalation table")])
+
+    def test_scope_text_is_bounded_so_it_cannot_become_the_payload(self) -> None:
+        long_scope = "x" * (ai_status.MAX_READ_SCOPE_CHARS + 50)
+        entries = self.entries(f"- `Docs/ai/OPERATIONS.md`：{long_scope}\n")
+        self.assertEqual(entries[1][1], "x" * ai_status.MAX_READ_SCOPE_CHARS + "…")
+
+    def test_packet_itself_is_listed_without_a_scope(self) -> None:
+        self.assertEqual(self.entries("")[0], ("Docs/ai/tasks/T900.md", ""))
+
 
 class DispatchDocumentTests(unittest.TestCase):
     """User-specified routing examples are documentation checks, not an agent router."""

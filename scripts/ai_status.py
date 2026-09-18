@@ -468,29 +468,58 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def packet_read_set(record: dict[str, str]) -> list[str]:
-    """Return explicit packet/canonical pointers, never preload their contents/history."""
+MAX_READ_SCOPE_CHARS = 120
+
+
+def reference_scope(line: str, end: int) -> str:
+    """Return the packet's own 'read only this much' text that follows one reference."""
+    scope = line[end:].strip().lstrip("：:-—").strip().rstrip("。").strip()
+    if len(scope) > MAX_READ_SCOPE_CHARS:
+        scope = scope[:MAX_READ_SCOPE_CHARS] + "…"
+    return scope
+
+
+def packet_read_entries(record: dict[str, str]) -> list[tuple[str, str]]:
+    """Return explicit packet/canonical pointers with the scope the packet declared.
+
+    The scope keeps whole-file reads from replacing the narrower read the packet
+    already asked for; it never widens a reference or adds a new one.
+    """
     name = record.get("Task packet", "").strip().strip("`")
-    paths = [name] if name else []
+    entries: list[tuple[str, str]] = [(name, "")] if name else []
     if name:
         packet = (ROOT / name).resolve()
         if not packet.is_relative_to(ROOT.resolve()):
             raise ValueError("task packet is outside repository")
         if not packet.is_file():
             raise ValueError("task packet is missing")
-        references = section(read(packet), "Canonical references")
-        paths += re.findall(r"`([^`]+)`", references)
-    result: list[str] = []
-    for value in paths:
+        for line in section(read(packet), "Canonical references").splitlines():
+            matches = list(re.finditer(r"`([^`]+)`", line))
+            # A scope belongs to exactly one reference; several on a line stay unscoped.
+            scope = reference_scope(line, matches[-1].end()) if len(matches) == 1 else ""
+            entries += [(match.group(1), scope) for match in matches]
+    result: list[tuple[str, str]] = []
+    seen: dict[str, int] = {}
+    for value, scope in entries:
         path = (ROOT / value).resolve()
         if not path.is_relative_to(ROOT.resolve()):
             raise ValueError("canonical reference is outside repository")
         if not path.is_file():
             raise ValueError("canonical reference is missing")
         normalized = path.relative_to(ROOT.resolve()).as_posix()
-        if normalized not in result:
-            result.append(normalized)
+        if normalized in seen:
+            # Keep the first declared scope; a later bare repeat must not widen it.
+            if scope and not result[seen[normalized]][1]:
+                result[seen[normalized]] = (normalized, scope)
+            continue
+        seen[normalized] = len(result)
+        result.append((normalized, scope))
     return result
+
+
+def packet_read_set(record: dict[str, str]) -> list[str]:
+    """Return explicit packet/canonical pointers, never preload their contents/history."""
+    return [path for path, _ in packet_read_entries(record)]
 
 
 def main() -> int:
@@ -521,11 +550,13 @@ def main() -> int:
     print("Design Gate (declared only): " + record.get("Design Gate", "UNKNOWN"))
     print("Status output is not design approval, acceptance or execution authorization.")
     try:
-        paths = packet_read_set(record)
+        entries = packet_read_entries(record)
     except ValueError as error:
         print(f"READ SET ERROR: {error}; reconcile packet before dispatch.")
         return 1
-    print("\nCONTEXT READ SET\nAGENTS.md (active rules)\n" + "\n".join(paths))
+    print("\nCONTEXT READ SET\nAGENTS.md (active rules)\n" + "\n".join(
+        f"{path} — {scope}" if scope else path for path, scope in entries))
+    print("Read only the scope shown after a path; a scoped reference is not a whole-file read.")
     print("Relevant diff only; additional sources only for a named unresolved question.")
     if args.all_live:
         print("\nLIVE TASK POINTERS\n" + "\n".join(
