@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client._compat import timeout as async_timeout
+from ai_client import _compat as _asyncio_compat  # noqa: F401
 from server.aiwolf_core import (
     GameState,
     InMemoryEventSink,
@@ -243,7 +243,7 @@ async def run_server(
     )
     failure: str | None = None
     try:
-        async with async_timeout(175.0):
+        async with asyncio.timeout(175.0):
             while game.game_result is None and not stop_path.exists():
                 for player_id in game.players:
                     remember_expected(player_id)

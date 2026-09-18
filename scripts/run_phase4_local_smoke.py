@@ -23,7 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client._compat import timeout as async_timeout
+from ai_client import _compat as _asyncio_compat  # noqa: F401
 from ai_client.llm import LocalLLMSettings
 from server.aiwolf_core import (
     GameState,
@@ -149,7 +149,7 @@ async def _server_child(state_path: Path, result_path: Path, seed: int) -> int:
         server_pid=os.getpid(),
     )
     try:
-        async with async_timeout(_HARD_LIMIT_SECONDS):
+        async with asyncio.timeout(_HARD_LIMIT_SECONDS):
             while game.game_result is None:
                 await asyncio.sleep(0.05)
             await asyncio.sleep(0.5)
@@ -180,7 +180,7 @@ def _bounded_tail(path: Path) -> str:
 
 
 async def _wait_for_file(path: Path, processes: list[asyncio.subprocess.Process], timeout: float) -> None:
-    async with async_timeout(timeout):
+    async with asyncio.timeout(timeout):
         while not path.exists():
             if any(process.returncode is not None for process in processes):
                 raise RuntimeError("child exited before readiness evidence")
@@ -364,7 +364,7 @@ async def _run_smoke(
                     )
                 children.append(process)
                 log_paths[id(process)] = (stdout_path, stderr_path)
-            async with async_timeout(
+            async with asyncio.timeout(
                 max(0.001, deadline - asyncio.get_running_loop().time())
             ):
                 await asyncio.gather(*(process.wait() for process in children))

@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client._compat import timeout as async_timeout
+from ai_client import _compat as _asyncio_compat  # noqa: F401
 from ai_client.llm import (  # noqa: E402
     AdmissionCredentials,
     AdmissionMetrics,
@@ -403,7 +403,7 @@ async def _observe_windows_process_command_line(
         oversize_wait = asyncio.create_task(oversize_event.wait())
         timed_out = False
         try:
-            async with async_timeout(2.0):
+            async with asyncio.timeout(2.0):
                 while not (process_wait.done() and reader_task.done()):
                     pending = {
                         task for task in (process_wait, reader_task, oversize_wait)
@@ -2989,7 +2989,7 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             failure = "STOP_REQUESTED"
         else:
             phase_started = game_started
-        async with async_timeout(game_time.real_budget(args.max_seconds)):
+        async with asyncio.timeout(game_time.real_budget(args.max_seconds)):
             while game.game_result is None and not args.stop.exists():
                 for player_id in game.players:
                     remember_expected(player_id)
@@ -3182,7 +3182,7 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     failure: str | None = None
     active_written = False
     try:
-        async with async_timeout((args.real_supervision_seconds or args.max_seconds) + _READY_SECONDS):
+        async with asyncio.timeout((args.real_supervision_seconds or args.max_seconds) + _READY_SECONDS):
             while not args.stop.exists():
                 snapshot = broker.snapshot
                 maximum_pending = max(maximum_pending, snapshot.pending_total)

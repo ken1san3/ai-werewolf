@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from ai_client._compat import timeout as async_timeout
+from ai_client import _compat as _asyncio_compat  # noqa: F401
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
@@ -364,7 +364,7 @@ class OpenAICompatibleBackend:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
 
         try:
-            async with async_timeout(self._game_time.real_budget(self._config.request_timeout_seconds)):
+            async with asyncio.timeout(self._game_time.real_budget(self._config.request_timeout_seconds)):
                 async with self._client.stream(
                     "POST",
                     self._config.endpoint,
