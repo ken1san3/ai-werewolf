@@ -1,8 +1,12 @@
 # Phase 6 会話品質: 強制層の不在に関する調査記録
 
 Status: FINDINGS（未承認・参考情報）
-作成: 2026-09-18
+作成: 2026-09-18（2026-09-19にT424–T428モデル比較の実測でF1/F2/F3を訂正）
 作成者: Claude Code（調査のみ。製品変更0、テスト以外の実行0、provider操作0、実game0、新規生成0）
+
+2026-09-19追記: `PHASE6_MODEL_COMPARISON_20260918.md`（5モデル160生成）の実測により、
+本記録のF1表現・F2解釈・F3数値を訂正した。各節の「訂正」小節を参照する。
+F2の能力境界の解釈は取り下げ、置き換えの仮説を同節に記載する。
 
 ## 調査範囲
 
@@ -60,6 +64,20 @@ T408で残った失敗と対照すると、強制層の穴と失敗の分布が�
 構造で表現できるルールは徹底して守られている一方、自由文だけが無防備であり、
 残存失敗はすべてそこに集まっている。
 
+### 訂正（2026-09-19 追記）
+
+**「本文の内容を検査するコードは1つもない」は広すぎる表現であり、訂正する。**
+
+`ai_client/brain/controller.py` の `_validate_generated_text` は、190 code points
+または570 UTF-8 bytes付近の非終止文を `TEXT_BOUND` へ送る検査を持つ。
+T427測定でこの経路は実際に発火しており、構造rejectの内訳は
+`qw9` 3件、`gm12` 1件、`tb27` 2件である。検出経路は存在する。
+
+取り下げるのは上記の全称表現だけであり、**自由文の意味検査が無いという主要指摘は維持する。**
+`PHASE6_MODEL_COMPARISON_20260918.md` も「自由文の意味検査不足という主要指摘は支持する」と
+独立に判定している。本節のガード表と失敗対照表のうち、`TEXT_BOUND` が関与するのは
+「中途切断」行だけであり、秘密自白・死者投票・自己紹介・act不一致に検査層が無い点は変わらない。
+
 ## F2 能力境界がカテゴリ単位で分離している
 
 T408保存rowをcategoryで集計した（各category n=2）。
@@ -88,6 +106,59 @@ T408保存rowをcategoryで集計した（各category n=2）。
 | OPINION_CHANGE | 0 / 32 | 0 / 32 |
 
 提示方法2通り・計64生成で1件も出ていない。semantic PASSは全体で7/32。
+
+### 訂正（2026-09-19 追記）
+
+**生成数「64」は誤りであり、60が正しい。** T408 structure variantの32 rowのうち4 rowは
+同一bytesのbaseline再利用であり、distinct generationは60である。
+T408 handoffが「新規28件/再利用4件」と明記しており、本記録の集計時の誤りである。
+
+**能力境界の解釈は取り下げる。** 本節は境界を「相手の発言への噛み合わせができない」と読んだが、
+T424–T428の5モデル160生成はこの読みを支持しない。
+
+| モデル | act/text不一致 | SEMANTIC | 非NONE | 内容回答/18 |
+|---|---:|---:|---:|---:|
+| Qwen3.5-9B | 23 | 7/32 | 0 | 9 |
+| Llama3.1-8B | 23 | 7/32 | 0 | 5 |
+| Gemma3-12B | 24 | 6/32 | 0 | 11 |
+| Bonsai2-27B | 24 | 6/32 | 0 | **13** |
+| Qwen3.6-35B-A3B | 27 | 4/32 | 0 | 8 |
+
+Bonsai2-27Bは共通18質問のうち13件に**内容としては回答している**。
+本文は相手の発言へ噛み合っており、`speech_act.kind` だけがNONEへ落ちている。
+したがって失敗は会話能力の不足ではなく、本文とラベルの結合の失敗である。
+5ファミリー・8B〜35B・3種の量子化・2種のruntimeを跨いで非NONEが160件中0という
+モデル非依存性も、能力分布ではなく構造的性質を示す。
+
+### 置き換え仮説（未測定）
+
+取り下げた解釈の代わりに、次の仮説を記録する。**静的確認のみで、生成による検証はしていない。**
+
+投影したschemaの `speech_act.oneOf` は7枝で、必須fieldは次のとおりである。
+
+| 枝 | kind | required数 | kind以外の必須field |
+|---:|---|---:|---|
+| 0 | NONE | 1 | （なし） |
+| 1 | CLAIM | 5 | subject_player_id, topic, stance, evidence |
+| 2 | QUESTION | 5 | addressee_player_id, subject_player_id, topic, source |
+| 3 | ANSWER | 7 | addressee_player_id, in_reply_to, source_interpretation, topic, stance, evidence |
+| 4 | REBUTTAL | 7 | addressee_player_id, in_reply_to, source_interpretation, topic, stance, evidence |
+| 5 | OPINION_CHANGE | 6 | subject_player_id, dimension, prior, current, causes |
+| 6 | RELATION_HYPOTHESIS | 6 | source_player_id, target_player_id, relation, confidence, evidence |
+
+**NONEは先頭枝であり、かつ `kind` 以外に何も要求しない唯一の枝である。**
+他6枝は4〜6個の追加fieldを要求し、その多くは接地が必要な相互参照である。
+生成は `ai_client/llm/backend.py:293` の `response_format.json_schema` / `strict: True` による
+制約付きdecodeで行われ、`kind` を出した時点で枝が確定する。
+さらに `_DISCUSSION_INSTRUCTION` は接地できない参照を書かないよう明示的に指示しており、
+ANSWER/REBUTTALが要求する `in_reply_to` / `source_interpretation` / `evidence` と方向が一致する。
+
+この仮説は、モデル非依存性、本文だけが正しくラベルが落ちること、
+T406の別candidateでは非NONEが生成できたことを同時に説明する。
+
+検証は `PHASE6_MODEL_COMPARISON_20260918.md` の次手順2の対照へ、次の条件を足せば足りる。
+NONEへ必須の理由fieldを1つ与えて無償の枝でなくする、actが明確に必要なcaseでNONEを枝から外す、
+枝順を入れ替える。いずれも既存suite内で完結し、「actを出せない」と「構造的costを払わない」を分離する。
 
 ## F3 token proxy予算が誤較正されている（品質の原因ではない）
 
@@ -125,6 +196,23 @@ structured-output schemaがrendered promptのtoken列に入らないことを確
 欠落した側が悪化していない。本調査は当初これを主因と仮説したが、対照の結果その仮説は棄却された。
 proxy誤較正は独立した実装欠陥として扱い、修正による品質改善を見込まない。
 
+### 訂正（2026-09-19 追記）
+
+**「約2.8倍」は旧条件の参考値であり、現条件の実測値ではない。**
+T427が固定条件で測ったproxy/native比は、Gemma3-12Bが3.81〜4.25、
+他4モデルが4.18〜4.82である。本記録の2.8倍はT408保存rowから求めた旧条件の値であり、
+モデルのtokenizerごとに異なるため単一の定数として扱えない。
+
+**「実装欠陥」という断定も訂正する。** proxyは安全側へ倒した決定的heuristicであり、
+`PHASE6_MODEL_COMPARISON_20260918.md` は「安全側proxy自体を即バグとはせず、
+過剰切捨ての契約/影響を別に修正設計する」と判定している。
+本記録が指摘すべきは、proxyとnative tokenの単位差とschema寄与が混在している点、
+および過剰切捨ての契約が明示されていない点であり、proxyの存在自体ではない。
+
+**context不足でないという判断は維持される。** T427の実測は全160生成で
+最大input 2062 token、最大生成360 tokenであり、
+「このsuiteで8192不足を示す証拠はない」と独立に結論づけられている。
+
 ## F4 打ち手が最も強制力の弱い手段に集中している
 
 `ai_client/llm/prompt.py` の `_SYSTEM_MESSAGE` + `_DISCUSSION_INSTRUCTION` は
@@ -159,13 +247,35 @@ T396からT408までの反復は、この手段の有効性を支持する結果
 それはmodel側の能力天井を示す。人工suiteを別modelで1回流す測定は実gameも製品変更も伴わず、
 この変数だけを切り分けられる。
 
+### 実施済み（2026-09-19 追記）
+
+上記のmodel切り分けはT424–T428として5モデル160生成で実施され、
+`PHASE6_MODEL_COMPARISON_20260918.md` に結果がある。結論は次のとおり。
+
+- **model交換だけではPhase 6を通せない。** 5モデル全てで非NONEは0。
+- ただし空振りではなく、model依存と非依存の失敗が分離された。
+  秘密自白（qw9 5 / qw35 2 / 他0）、コピー（ll8 18 / gm12・qw35 1）、
+  自己紹介反復（qw9 11 / gm12 2）、STYLEはmodel依存であり、交換で改善する。
+  act/text不一致（23〜27）とSEMANTIC（4〜7/32）はmodel非依存である。
+- したがって上記の「0のままなら能力天井」という判定基準は成立しない。
+  非NONEが0のままでも、本文は噛み合っている（Bonsai 13/18）。
+  能力天井ではなく、本文とラベルの結合の問題として扱う。
+
+本節の推奨1〜5のうち、1〜4（コード側の強制）は依然有効である。
+5はF3訂正のとおり「実装欠陥」ではなく単位差と切捨て契約の問題として扱う。
+順序は `PHASE6_MODEL_COMPARISON_20260918.md` の「Phase6の次の最小作業順」に従う。
+
 ## 限界
 
 - T408は各category n=2、1 caseあたり1生成である。T408自身が統計的優劣を主張しない旨を
   明記しており、本記録も同じ制約に従う。件数比較を有意差として扱わない。
-- 強い主張をしているのはF1（検証コードに内容検査が存在しない）と
-  F2の「64生成でQUESTION/REBUTTAL/OPINION_CHANGEが0」の2点であり、
+- 強い主張をしているのはF1（自由文の意味を検査する層が無い）と
+  F2の「60 distinct generationで非NONEが0」の2点であり、
   いずれも標本比較ではなくコードの全定義と保存rowの全件集計から確定している。
+  2026-09-19訂正: F1の全称表現は`TEXT_BOUND`検査の存在により限定した。
+  F2の生成数は64ではなく60である。非NONE 0はT424–T428の160生成でも再現した。
+- F2の能力境界の解釈は2026-09-19に取り下げた。置き換え仮説（NONEが唯一の無償枝である）は
+  schemaとbackendの静的確認のみで、生成による検証をしていない。
 - F3の実token値はT408保存rowの再利用であり、本調査でtokenizerを実行していない。
 - private生成本文は参照しておらず、本記録にも含まれない。
 - 本調査はpytest・実game・provider操作・製品変更を行っていない。
