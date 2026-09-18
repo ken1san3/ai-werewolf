@@ -18,3 +18,7 @@
 # GitHub の言語統計から設計文書を除外し、Python を主言語として表示させる
 Docs/**    linguist-documentation
 *.md       linguist-documentation
+
+# D075保全原本: 記録済みSHA-256を維持するため改行変換を行わない。
+Docs/ai/history/2026-09-16-before-d075/CURRENT_STATE.md -text
+Docs/ai/history/2026-09-16-before-d075/TASKS.md -text

@@ -2488,14 +2488,23 @@ def test_http_error_detail_never_reaches_public_and_writer_failure_is_finite(tmp
     target = locked_root / "admission.jsonl"
     with private_review._locked_path(target, create=True) as descriptor:
         os.write(descriptor, b"{}\n")
-    with unittest.TestCase().assertRaises(private_review.ReviewFailure):
+    collision = private_review.ReviewFailure if os.name == "nt" else FileExistsError
+    with unittest.TestCase().assertRaises(collision):
         with private_review._locked_path(target, create=True):
             pass
+    assert target.read_bytes() == b"{}\n"
     rejected = locked_root / "rejected.jsonl"
-    with patch.object(private_review, "_windows_private_path", return_value=False), \
-         unittest.TestCase().assertRaises(private_review.ReviewFailure):
-        with private_review._locked_path(rejected, create=True):
-            pass
+    if os.name == "nt":
+        with patch.object(private_review, "_windows_private_path", return_value=False), \
+             unittest.TestCase().assertRaises(private_review.ReviewFailure):
+            with private_review._locked_path(rejected, create=True):
+                pass
+    else:
+        rejected.write_bytes(b"{}\n")
+        rejected.chmod(0o644)
+        with unittest.TestCase().assertRaises(private_review.ReviewFailure):
+            with private_review._locked_path(rejected):
+                pass
 
 
 class _CommandStdout:
@@ -2574,7 +2583,8 @@ def test_provider_command_observer_executes_bounded_cim_mapping_and_redaction() 
     exact_payload = _cim_payload("private raw")
     exact_process = _CommandProcess(exact_payload + b" " * (131072 - len(exact_payload)))
     async def create_exact(*_args, **_kwargs): return exact_process
-    with patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
+    with patch.object(runner.shutil, "which", return_value="powershell.exe"), \
+         patch.object(runner, "_windows_command_line_to_argv", return_value=argv):
         exact = asyncio.run(runner._observe_windows_process_command_line(123, create_subprocess_exec=create_exact))
     assert exact.command_observation == "OBSERVED"
     assert set(exact_process.stdout.read_sizes) == {4096}
