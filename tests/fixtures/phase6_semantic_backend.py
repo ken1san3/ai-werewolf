@@ -37,7 +37,9 @@ def semantic_response(value: dict) -> dict:
             proposal["speech_act"] = {"kind": "ANSWER", "addressee_player_id": source["actor_player_ids"][0],
                 "in_reply_to": source["source"], "source_interpretation": "QUESTION",
                 "topic": "VOTE", "stance": stance, "evidence": [source["source"]]}
-            decision["message"] = f"I {stance.lower()} that proposal; let us compare the evidence."
+            # Multiple receivers may agree with the same source. Keep this a
+            # short agreement, not a shared long sentence rejected as copying.
+            decision["message"] = f"I {stance.lower()} that proposal."
         else:
             peer = next(player for player in capture["current_player_ids"] if player != context["player_id"])
             proposal["speech_act"] = {"kind": "QUESTION", "addressee_player_id": peer,
