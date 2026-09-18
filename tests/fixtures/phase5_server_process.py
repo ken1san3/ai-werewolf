@@ -126,6 +126,7 @@ async def run_server(
 ) -> int:
     content = load_content(PROJECT_ROOT / "content")
     preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
+    day_seconds = 10
     preset = replace(
         preset,
         rules=replace(
@@ -142,7 +143,6 @@ async def run_server(
         for index in range(sum(preset.role_counts.values()))
     )
     game_id = f"123e4567-e89b-12d3-a456-{seed:012d}"
-    day_seconds = 10
     clock = _DayOneBarrierClock(
         clock_start, day_one_release, day_seconds=day_seconds
     )
