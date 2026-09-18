@@ -36,6 +36,7 @@ from ai_client.network import (
 )
 from tests.fixtures.phase5_client_process import _DisposableCredentialStore
 from tests.fixtures.completion_clock import publish_gate
+from tests.fixtures.completion_diagnostics import timeout_summary
 from ai_client.world import Freshness, WorldStateExit, WorldStateExitReason
 from tests.fixtures.phase5_deterministic_backend import (
     Phase5DeterministicBrokerBackend,
@@ -675,6 +676,8 @@ class PhaseFiveOfflineCompletionTests(unittest.IsolatedAsyncioTestCase):
                     for secret in sentinels:
                         self.assertNotIn(secret, value, path)
                 self.assertLess(time.monotonic() - started, 180.0)
+            except TimeoutError:
+                raise TimeoutError(json.dumps(timeout_summary(root), sort_keys=True)) from None
             finally:
                 client_stop.write_text("stop\n", encoding="utf-8")
                 server_stop.write_text("stop\n", encoding="utf-8")

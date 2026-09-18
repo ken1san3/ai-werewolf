@@ -30,6 +30,7 @@ from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGa
 
 
 from tests.fixtures.completion_clock import CompletionClock, DAY_SECONDS
+from tests.fixtures.completion_diagnostics import ProgressSampler
 
 
 class _DayOneBarrierClock(CompletionClock):
@@ -241,9 +242,16 @@ async def run_server(
     try:
         async def _wait_game():
             nonlocal failure
+            sampler = ProgressSampler(result_path.with_suffix(".progress.json"))
             while game.game_result is None and not stop_path.exists():
                 for player_id in game.players:
                     remember_expected(player_id)
+                sampler.sample(lambda: {
+                    "day": game.day, "phase": game.phase.value,
+                    "clock_stage": "RUNNING" if clock.complete.exists() else "HOLD",
+                    "day1_accepted": len({item["player_id"] for item in chats
+                                           if item["day"] == 1 and item["phase"] == "day"}),
+                })
                 await asyncio.sleep(0.02)
             if stop_path.exists() and game.game_result is None:
                 failure = "STOP_REQUESTED"

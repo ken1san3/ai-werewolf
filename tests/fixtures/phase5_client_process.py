@@ -35,6 +35,7 @@ from ai_client.world import Freshness
 
 
 from tests.fixtures.completion_clock import CompletionClock as _BarrierClock
+from tests.fixtures.completion_diagnostics import client_progress, ProgressSampler
 
 
 class _DisposableCredentialStore:
@@ -249,7 +250,9 @@ async def run_client(arguments: argparse.Namespace, bootstrap: dict[str, object]
         asyncio.create_task(marker(arguments.day_one_ready, 1, "day")),
     )
     async def wait_for_stop() -> None:
+        sampler = ProgressSampler(arguments.status.with_suffix(".progress.json"))
         while not arguments.stop.exists():
+            sampler.sample(lambda: client_progress(runtime, clock, arguments.day_one_ready.exists()))
             await asyncio.sleep(0.02)
 
     runtime_wait = asyncio.create_task(runtime.wait())
