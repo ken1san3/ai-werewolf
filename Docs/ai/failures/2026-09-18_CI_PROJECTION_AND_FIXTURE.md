@@ -29,3 +29,20 @@ private本文・秘密値・request payloadは本記録に含めない。
 
 aa7a8a2 / CI35319487229は全9job PASS、Windows74/74 PASS、failure kind/codeなし。
 独立TesterとMainが同じHEAD/終端を照合。変更前runや個別seatの原本因果は推測で補わない。
+
+## completionの別再発と同期修正
+
+文書のみ9433fd4のCI35321051364は8job PASS / completion FAIL。
+Phase3.3では最後のnight中のclient invocationが先行phaseのawaitと重なり、
+coordinatorの観測が次phaseをまとめる余地があった。fixtureのtickerを、全9席の
+実invocation完了ackが揃うまで（0秒phaseも含め）進めない。production、時計、
+watchdog、assertionは不変。独立審査APPROVED、Windows9process1 PASS（19.319秒）。
+
+Phase3.5はsame-bのplayer-1 / day3 night能力がSTALE一件。mapping内一回の
+attempt契約は維持し、追加await/read/retryなしのbounded固定値probeをfixtureへ追加。
+独立審査APPROVED、Windows1 node PASS（66.602秒）、STALE NOT_OBSERVED。
+7e57780のCI35323433097は全9job PASS。STALE直接原因の確定/修正とは扱わない。
+
+新barrier単体のPython3.10実行で一度Path.replaceがWinError5となった。
+権限/属性確認後のfresh directory有限再現確認は1 PASS、9processでも再現なし。
+元の11 PASS / 1 FAIL証拠は保持し、外部lock等の原因は断定しない。
