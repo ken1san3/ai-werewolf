@@ -1,60 +1,87 @@
-"""Compatibility shims required by the declared Python runtime range."""
-
+"""Version-local timeout supervision; never replace Task or the loop factory."""
 from __future__ import annotations
 
 import asyncio
-from types import TracebackType
-from typing import Optional, Type
+from collections.abc import Callable, Coroutine
+import inspect
+import sys
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 
-if not hasattr(asyncio, "timeout"):  # Python 3.10
-    class _Timeout:
-        """Minimal Python-3.10 equivalent of asyncio.timeout for this project."""
+async def await_with_timeout(
+    delay: float | None, operation: Callable[[], Coroutine[Any, Any, _T]]
+) -> _T:
+    """Run a fresh operation, preserving external cancellation during cleanup.
 
-        def __init__(self, delay: float | None) -> None:
-            self._delay = delay
-            self._task: asyncio.Task[object] | None = None
-            self._handle: asyncio.TimerHandle | None = None
-            self._expired = False
+    3.11+ keeps native timeout instrumentation and the caller's Task identity.
+    3.10 owns one child: a deadline cancels that child, never the supervisor.
+    No cancellation messages, Task internals or task factory replacement.
+    """
+    if sys.version_info >= (3, 11):
+        async with asyncio.timeout(delay):
+            coroutine = operation()
+            if not inspect.iscoroutine(coroutine):
+                raise TypeError("timeout operation must return a fresh coroutine")
+            return await coroutine
 
-        async def __aenter__(self) -> "_Timeout":
-            task = asyncio.current_task()
-            if task is None:
-                raise RuntimeError("timeout requires an active asyncio task")
-            self._task = task
-            if self._delay is not None:
-                loop = asyncio.get_running_loop()
-                delay = max(0.0, float(self._delay))
-                self._handle = loop.call_later(delay, self._cancel)
-            return self
+    loop = asyncio.get_running_loop()
+    coroutine = operation()
+    if not inspect.iscoroutine(coroutine):
+        raise TypeError("timeout operation must return a fresh coroutine")
+    timer = None
+    handle = None
+    try:
+        timer = loop.create_future()
+        if delay is not None:
+            handle = loop.call_later(max(0, delay), timer.set_result, None)
+        child = asyncio.create_task(coroutine)
+    except BaseException:
+        if handle is not None:
+            handle.cancel()
+        if timer is not None:
+            timer.cancel()
+        coroutine.close()
+        raise
+    external: asyncio.CancelledError | None = None
+    try:
+        try:
+            done, _ = await asyncio.wait((child, timer), return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError as error:
+            external = error
+        else:
+            if child in done:  # explicit tie: completed operation wins
+                return child.result()
 
-        def _cancel(self) -> None:
-            if self._task is not None and not self._task.done():
-                self._expired = True
-                self._task.cancel()
-
-        async def __aexit__(
-            self,
-            exc_type: Type[BaseException] | None,
-            exc: BaseException | None,
-            tb: TracebackType | None,
-        ) -> bool:
-            if self._handle is not None:
-                self._handle.cancel()
-            if self._expired and exc_type is asyncio.CancelledError:
-                raise TimeoutError from exc
-            return False
-
-    def _timeout(delay: float | None) -> _Timeout:
-        return _Timeout(delay)
-
-    # Call sites remain on asyncio.timeout so existing instrumentation and
-    # tests observe the same boundary on every supported Python version.
-    asyncio.timeout = _timeout  # type: ignore[attr-defined]
-    # Python 3.11 made asyncio.TimeoutError an alias of built-in TimeoutError.
-    # Normalize 3.10 so shared product code/tests observe the declared runtime contract.
-    asyncio.TimeoutError = TimeoutError  # type: ignore[attr-defined]
-    asyncio.exceptions.TimeoutError = TimeoutError  # type: ignore[attr-defined]
+        if not child.done():
+            child.cancel()
+        # wait() does not propagate child exceptions/cancellation. A CancelledError
+        # here always belongs to the parent, even when child finishes concurrently.
+        while not child.done():
+            try:
+                await asyncio.wait((child,))
+            except asyncio.CancelledError as error:
+                if external is None:
+                    external = error
+                if not child.done():
+                    child.cancel()  # preserve subsequent caller cancellation pressure
+        if not child.cancelled():
+            child.exception()  # retrieve even when external cancellation wins
+        if external is not None:
+            raise external
+        raise TimeoutError
+    finally:
+        if handle is not None:
+            handle.cancel()
+        timer.cancel()
 
 
-__all__: list[str] = []
+if sys.version_info < (3, 11):
+    # Preserve the existing branch's exception-name compatibility for wait_for
+    # and consumers catching built-in TimeoutError. Native 3.11+ is untouched.
+    asyncio.TimeoutError = TimeoutError
+    asyncio.exceptions.TimeoutError = TimeoutError
+
+
+__all__ = ["await_with_timeout"]

@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client import _compat as _asyncio_compat  # noqa: F401
+from ai_client._compat import await_with_timeout
 from ai_client.llm import (
     AdmissionMetrics,
     GenerationAdmissionBroker,
@@ -27,25 +27,7 @@ from tests.fixtures.phase5_deterministic_backend import (
 )
 
 
-class _BarrierClock:
-    def __init__(self, clock_start: Path, day_one_release: Path) -> None:
-        self._clock_start = clock_start
-        self._day_one_release = day_one_release
-        self._origin = time.monotonic()
-        self._started_at: float | None = None
-        self._day_one_released_at: float | None = None
-
-    def __call__(self) -> float:
-        now = time.monotonic()
-        if not self._clock_start.exists():
-            return self._origin
-        if self._started_at is None:
-            self._started_at = now
-        if not self._day_one_release.exists():
-            return self._origin + min(now - self._started_at, 1.0)
-        if self._day_one_released_at is None:
-            self._day_one_released_at = now
-        return self._origin + 1.0 + (now - self._day_one_released_at)
+from tests.fixtures.completion_clock import CompletionClock as _BarrierClock
 
 
 def _private_json(path: Path, value: object) -> None:
@@ -99,7 +81,8 @@ async def run_broker(
     )
     failure: str | None = None
     try:
-        async with asyncio.timeout(175.0):
+        async def _watch_broker():
+            nonlocal maximum_pending, failure
             while not stop_path.exists():
                 snapshot = broker.snapshot
                 maximum_pending = max(maximum_pending, snapshot.pending_total)
@@ -107,6 +90,7 @@ async def run_broker(
                     failure = snapshot.poison_reason or "ADMISSION_POISONED"
                     break
                 await asyncio.sleep(0.001)
+        await await_with_timeout(175.0, _watch_broker)
     except TimeoutError:
         failure = "BROKER_STOP_TIMEOUT"
     finally:

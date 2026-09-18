@@ -34,30 +34,7 @@ from ai_client.vote_ability import VoteAbilityConfig, VoteAbilityLifecycle
 from ai_client.world import Freshness
 
 
-class _BarrierClock:
-    def __init__(self, clock_start: Path, day_one_release: Path) -> None:
-        self._clock_start = clock_start
-        self._day_one_release = day_one_release
-        self._origin = time.monotonic()
-        self._started_at: float | None = None
-        self._day_one_released_at: float | None = None
-
-    def __call__(self) -> float:
-        now = time.monotonic()
-        if not self._clock_start.exists():
-            return self._origin
-        if self._started_at is None:
-            self._started_at = now
-        if not self._day_one_release.exists():
-            return self._origin + min(now - self._started_at, 1.0)
-        if self._day_one_released_at is None:
-            self._day_one_released_at = now
-        return self._origin + 1.0 + (now - self._day_one_released_at)
-
-    async def sleep(self, delay: float) -> None:
-        deadline = self() + delay
-        while self() < deadline:
-            await asyncio.sleep(min(0.02, deadline - self()))
+from tests.fixtures.completion_clock import CompletionClock as _BarrierClock
 
 
 class _DisposableCredentialStore:

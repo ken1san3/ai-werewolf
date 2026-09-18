@@ -179,8 +179,11 @@ def test_p6f_nine_client_semantic_completion(pytestconfig, record_property):
     config = runner.RunConfig(LocalLLMSettings(endpoint="http://127.0.0.1:1/v1/chat/completions", model="Qwen3.5-9B-Q4_K_M.gguf", generation=GenerationSettings(max_output_tokens=512), llama_cpp_structured_output=runner.LlamaCppStructuredOutputConfig()), evidence_container / "run", False, False, None, 8625, 1200.0, (), phase6=True)
     result = asyncio.run(runner._run_game(config, config.output_dir, label="P6-F", environ=os.environ, phase6_fixture=True))
     runner._write_private_json_atomic(evidence_container / "completion-result.json", result)
-    from scripts.ci_private_summary import private_result_codes
-    record_property("ci_failure_codes", private_result_codes(result.get("errors")))
+    from scripts.ci_private_summary import private_semantic_codes, private_result_codes
+    record_property("ci_failure_codes", ",".join(filter(None, (
+        private_result_codes(result.get("errors")),
+        private_semantic_codes(result.get("semantic")),
+    ))))
     # Classify only public acceptance predicates; private result/error material stays on disk.
     if result["server"]["game_end"] is not True:
         raise P6FSemanticGameEndFailure

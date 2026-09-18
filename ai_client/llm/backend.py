@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from ai_client import _compat as _asyncio_compat  # noqa: F401
+from ai_client._compat import await_with_timeout
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
@@ -364,7 +364,7 @@ class OpenAICompatibleBackend:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
 
         try:
-            async with asyncio.timeout(self._game_time.real_budget(self._config.request_timeout_seconds)):
+            async def _read_response():
                 async with self._client.stream(
                     "POST",
                     self._config.endpoint,
@@ -411,6 +411,8 @@ class OpenAICompatibleBackend:
                             provider_quiescence=ProviderQuiescence.PROVEN_TERMINAL,
                         )
                     self._validate_content_type(response.headers.get("content-type"))
+                return encoded
+            encoded = await await_with_timeout(self._game_time.real_budget(self._config.request_timeout_seconds), _read_response)
         except asyncio.CancelledError:
             raise
         except LLMBackendError:

@@ -30,7 +30,8 @@ _RESULT_CODES = {
     "ValueError": "VALUE_VALIDATION_UNKNOWN",
     "RuntimeError": "RUNTIME_UNKNOWN",
 }
-_SAFE_CODES = frozenset(_RESULT_CODES.values()) | {"UNKNOWN"}
+_PROJECTION_CODES = {"PROMPT_INVALID": "PROJECTION_INVALID", "PROMPT_TOO_LARGE": "PROJECTION_TOO_LARGE"}
+_SAFE_CODES = frozenset(_RESULT_CODES.values()) | frozenset(_PROJECTION_CODES.values()) | {"UNKNOWN"}
 
 
 def private_result_codes(errors: object) -> str:
@@ -39,6 +40,26 @@ def private_result_codes(errors: object) -> str:
         return "UNKNOWN"
     return ",".join(sorted({_RESULT_CODES.get(item, "UNKNOWN") if isinstance(item, str)
                             else "UNKNOWN" for item in errors}))
+
+
+def private_projection_codes(counts: object) -> str:
+    """Expose only fixed rejection categories, never private keys or values."""
+    if not isinstance(counts, dict):
+        return "UNKNOWN"
+    codes = set()
+    for key, count in counts.items():
+        if key not in _PROJECTION_CODES or type(count) is not int or count < 0:
+            codes.add("UNKNOWN")
+        elif count:
+            codes.add(_PROJECTION_CODES[key])
+    return ",".join(sorted(codes))
+
+
+def private_semantic_codes(semantic: object) -> str:
+    """Malformed failure results must not replace the original assertion."""
+    return private_projection_codes(
+        semantic.get("prompt_rejection_counts") if isinstance(semantic, dict) else semantic
+    )
 
 
 def _error_kind(error: ET.Element) -> str:

@@ -8,7 +8,7 @@ provider.
 from __future__ import annotations
 
 import asyncio
-from ai_client import _compat as _asyncio_compat  # noqa: F401
+from ai_client._compat import await_with_timeout
 from dataclasses import dataclass
 from enum import Enum, auto
 import hashlib
@@ -419,7 +419,7 @@ class GenerationAdmissionBroker:
         if server is not None:
             server.close()
         try:
-            async with asyncio.timeout(self._config.shutdown_grace_seconds):
+            async def _shutdown():
                 provider_tasks: list[asyncio.Task[None]] = []
                 async with self._lock:
                     for slot in tuple(self._slots.values()):
@@ -464,6 +464,7 @@ class GenerationAdmissionBroker:
                 await self._backend.aclose()
                 if metrics_error is not None:
                     raise metrics_error
+            await await_with_timeout(self._config.shutdown_grace_seconds, _shutdown)
         except TimeoutError:
             self._cleanup_incomplete = True
             async with self._lock:
@@ -476,8 +477,9 @@ class GenerationAdmissionBroker:
                 return_exceptions=True,
             )
             try:
-                async with asyncio.timeout(self._config.cancellation_grace_seconds):
+                async def _close_backend():
                     await self._backend.aclose()
+                await await_with_timeout(self._config.cancellation_grace_seconds, _close_backend)
             except (TimeoutError, Exception):
                 self._cleanup_incomplete = True
         finally:
@@ -493,9 +495,8 @@ class GenerationAdmissionBroker:
     ) -> None:
         connection: _Connection | None = None
         try:
-            async with asyncio.timeout(
-                self._config.authentication_timeout_seconds
-            ):
+            async def _authenticate():
+                nonlocal connection
                 hello = _exact(
                     await _read_frame(reader, self._config.max_frame_bytes),
                     {"client_id", "protocol", "token", "type"},
@@ -534,6 +535,7 @@ class GenerationAdmissionBroker:
                     )
                 )
                 await writer.drain()
+            await await_with_timeout(self._config.authentication_timeout_seconds, _authenticate)
             connection.writer_task = asyncio.create_task(
                 connection.writer_loop(),
                 name=f"aiwolf-admission-broker-writer-{connection.client_id}",
@@ -1048,8 +1050,10 @@ class GenerationAdmissionBroker:
                 self._offer_next_locked()
                 return
         try:
-            async with asyncio.timeout(timeout_seconds):
+            async def _generate_response():
                 response = await self._backend.generate(request)
+                return response
+            response = await await_with_timeout(timeout_seconds, _generate_response)
         except asyncio.CancelledError:
             unclassified = True
         except LLMBackendError as failure:
@@ -1217,10 +1221,9 @@ class GenerationAdmissionBroker:
                 self._poison_locked("PROVIDER_QUIESCENCE_UNKNOWN")
                 provider_task.cancel()
             try:
-                async with asyncio.timeout(
-                    self._config.cancellation_grace_seconds
-                ):
+                async def _wait_provider():
                     await asyncio.shield(provider_task)
+                await await_with_timeout(self._config.cancellation_grace_seconds, _wait_provider)
             except (TimeoutError, asyncio.CancelledError):
                 self._cleanup_incomplete = not provider_task.done()
         except asyncio.CancelledError:

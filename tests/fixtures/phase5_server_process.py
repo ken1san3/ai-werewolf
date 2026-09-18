@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client import _compat as _asyncio_compat  # noqa: F401
+from ai_client._compat import await_with_timeout
 from server.aiwolf_core import (
     GameState,
     InMemoryEventSink,
@@ -29,51 +29,12 @@ from server.aiwolf_core import (
 from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGameServer
 
 
-class _DayOneBarrierClock:
-    def __init__(
-        self, clock_start: Path, day_one_release: Path, *, day_seconds: int
-    ) -> None:
-        self._clock_start = clock_start
-        self._day_one_release = day_one_release
-        self._day_seconds = day_seconds
-        self._started_at_ns: int | None = None
-        self._day_one_released_at_ns: int | None = None
-        self._day_one_chat_complete = False
-        self._day_one_completed_at_ns: int | None = None
-        self._day_one_completed_value: int | None = None
+from tests.fixtures.completion_clock import CompletionClock, DAY_SECONDS
 
+
+class _DayOneBarrierClock(CompletionClock):
     def __call__(self) -> int:
-        if not self._clock_start.exists():
-            return 0
-        if self._started_at_ns is None:
-            self._started_at_ns = time.monotonic_ns()
-        if not self._day_one_release.exists():
-            elapsed = (time.monotonic_ns() - self._started_at_ns) // 1_000_000_000
-            return min(elapsed, 1)
-        if self._day_one_released_at_ns is None:
-            self._day_one_released_at_ns = time.monotonic_ns()
-        now = time.monotonic_ns()
-        elapsed = (now - self._day_one_released_at_ns) // 1_000_000_000
-        # Let due/jitter/cooldown work progress, but keep the synthetic clock one
-        # second before the Day-1 deadline until every seat has an accepted chat.
-        if not self._day_one_chat_complete:
-            return 1 + min(elapsed, self._day_seconds - 1)
-        assert self._day_one_completed_at_ns is not None
-        assert self._day_one_completed_value is not None
-        return self._day_one_completed_value + (
-            now - self._day_one_completed_at_ns
-        ) // 1_000_000_000
-
-    def mark_day_one_chat_complete(self) -> None:
-        if self._day_one_chat_complete:
-            return
-        now = time.monotonic_ns()
-        if self._day_one_released_at_ns is None:
-            self._day_one_released_at_ns = now
-        elapsed = (now - self._day_one_released_at_ns) // 1_000_000_000
-        self._day_one_completed_value = 1 + min(elapsed, self._day_seconds - 1)
-        self._day_one_completed_at_ns = now
-        self._day_one_chat_complete = True
+        return int(super().__call__())
 
 
 def _private_json(path: Path, value: object) -> None:
@@ -126,14 +87,14 @@ async def run_server(
 ) -> int:
     content = load_content(PROJECT_ROOT / "content")
     preset = load_preset(PROJECT_ROOT / "content" / "presets" / "standard_9.yaml", content)
-    day_seconds = 10
+    day_seconds = DAY_SECONDS
     preset = replace(
         preset,
         rules=replace(
             preset.rules,
             night_seconds=1,
             silence_after_dawn_seconds=0,
-            # Give nine subprocess clients enough CI scheduling headroom for Day 1 chat.
+            # Shared fixture clock holds Day 1 until all nine chats are accepted.
             day_seconds=day_seconds,
             vote_seconds=1,
         ),
@@ -144,7 +105,7 @@ async def run_server(
     )
     game_id = f"123e4567-e89b-12d3-a456-{seed:012d}"
     clock = _DayOneBarrierClock(
-        clock_start, day_one_release, day_seconds=day_seconds
+        clock_start, day_one_release
     )
     game = GameState.create_from_preset(
         content,
@@ -278,7 +239,8 @@ async def run_server(
     )
     failure: str | None = None
     try:
-        async with asyncio.timeout(175.0):
+        async def _wait_game():
+            nonlocal failure
             while game.game_result is None and not stop_path.exists():
                 for player_id in game.players:
                     remember_expected(player_id)
@@ -287,6 +249,7 @@ async def run_server(
                 failure = "STOP_REQUESTED"
             else:
                 await asyncio.sleep(0.25)
+        await await_with_timeout(175.0, _wait_game)
     except TimeoutError:
         failure = "GAME_TIMEOUT"
     finally:

@@ -131,10 +131,13 @@ def test_provider_total_budget_scaled_socket_timeouts_and_telemetry_real(monkeyp
         config = _config(request_timeout_seconds=4, connect_timeout_seconds=1.1,
                          read_timeout_seconds=2.2, write_timeout_seconds=3.3, pool_timeout_seconds=4.4)
         backend = OpenAICompatibleBackend(config, transport=httpx.MockTransport(response))
-        original = asyncio.timeout
-        with patch("ai_client.llm.backend.asyncio.timeout", wraps=original) as timeout:
+        from ai_client._compat import await_with_timeout
+        original = await_with_timeout
+        with patch("ai_client.llm.backend.await_with_timeout", wraps=original) as timeout:
             result = await backend.generate(_request())
-            assert timeout.call_args.args == (expected,)
+            assert timeout.call_count == 1
+            assert timeout.call_args.args[0] == expected
+            assert callable(timeout.call_args.args[1])
         assert captured == {"connect": 1.1, "read": 2.2, "write": 3.3, "pool": 4.4}
         assert result.usage.prompt_tokens == 8
         assert result.usage.completion_tokens == 4

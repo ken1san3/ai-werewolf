@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai_client import _compat as _asyncio_compat  # noqa: F401
+from ai_client._compat import await_with_timeout
 from ai_client.llm import (  # noqa: E402
     AdmissionCredentials,
     AdmissionMetrics,
@@ -403,7 +403,7 @@ async def _observe_windows_process_command_line(
         oversize_wait = asyncio.create_task(oversize_event.wait())
         timed_out = False
         try:
-            async with asyncio.timeout(2.0):
+            async def _wait_observation():
                 while not (process_wait.done() and reader_task.done()):
                     pending = {
                         task for task in (process_wait, reader_task, oversize_wait)
@@ -417,6 +417,7 @@ async def _observe_windows_process_command_line(
                         break
                     if reader_task in done and reader_task.result()[2]:
                         break
+            await await_with_timeout(2.0, _wait_observation)
         except TimeoutError:
             timed_out = True
         if timed_out:
@@ -2989,7 +2990,8 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
             failure = "STOP_REQUESTED"
         else:
             phase_started = game_started
-        async with asyncio.timeout(game_time.real_budget(args.max_seconds)):
+        async def _wait_game():
+            nonlocal current_phase, phase_started, game_finished, failure
             while game.game_result is None and not args.stop.exists():
                 for player_id in game.players:
                     remember_expected(player_id)
@@ -3013,6 +3015,7 @@ async def _server_child(args: argparse.Namespace, bootstrap: Mapping[str, object
                 failure = "STOP_REQUESTED"
             elif failure is None:
                 await asyncio.sleep(0.5)
+        await await_with_timeout(game_time.real_budget(args.max_seconds), _wait_game)
     except TimeoutError:
         game_finished = time.monotonic_ns()
         failure = "GAME_START_TIMEOUT" if game_started is None else "GAME_TIMEOUT"
@@ -3182,7 +3185,8 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
     failure: str | None = None
     active_written = False
     try:
-        async with asyncio.timeout((args.real_supervision_seconds or args.max_seconds) + _READY_SECONDS):
+        async def _watch_broker():
+            nonlocal maximum_pending, peak_backend, active_written, failure
             while not args.stop.exists():
                 snapshot = broker.snapshot
                 maximum_pending = max(maximum_pending, snapshot.pending_total)
@@ -3194,6 +3198,7 @@ async def _broker_child(args: argparse.Namespace, bootstrap: Mapping[str, object
                     failure = snapshot.poison_reason or "ADMISSION_POISONED"
                     break
                 await asyncio.sleep(0.005)
+        await await_with_timeout((args.real_supervision_seconds or args.max_seconds) + _READY_SECONDS, _watch_broker)
     except TimeoutError:
         failure = "BROKER_STOP_TIMEOUT"
     finally:

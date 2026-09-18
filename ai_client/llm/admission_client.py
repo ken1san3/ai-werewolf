@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from ai_client import _compat as _asyncio_compat  # noqa: F401
+from ai_client._compat import await_with_timeout
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 import json
@@ -272,8 +272,10 @@ class BrokerAdmissionSession:
             raise TypeError("credentials must be AdmissionCredentials")
         if not isinstance(config, GenerationBrokerConfig):
             raise TypeError("config must be GenerationBrokerConfig")
+        writer: asyncio.StreamWriter | None = None
         try:
-            async with asyncio.timeout(config.authentication_timeout_seconds):
+            async def _authenticate():
+                nonlocal writer
                 reader, writer = await asyncio.open_connection(host, port)
                 writer.write(
                     _encode_frame(
@@ -302,8 +304,10 @@ class BrokerAdmissionSession:
                 ):
                     raise _ProtocolViolation("configuration mismatch")
                 identity = _identity_from_wire(ready["backend_identity"])
+                return reader, identity
+            reader, identity = await await_with_timeout(config.authentication_timeout_seconds, _authenticate)
         except (OSError, TimeoutError, asyncio.IncompleteReadError, _ProtocolViolation):
-            if "writer" in locals():
+            if writer is not None:
                 writer.close()
                 try:
                     await writer.wait_closed()
@@ -791,8 +795,9 @@ class BrokerAdmissionSession:
                 and lane.disposition == AdmissionStatus.EXPIRED.value
             ):
                 return AdmissionStatus.EXPIRED.value
-            async with asyncio.timeout(self._config.cancellation_grace_seconds):
+            async def _wait_acknowledgement():
                 return await asyncio.shield(acknowledgement)
+            return await await_with_timeout(self._config.cancellation_grace_seconds, _wait_acknowledgement)
         except TimeoutError:
             await self._close_failed_transport(protocol_error=False)
             raise _admission_backend_error(

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from scripts.ci_private_summary import private_result_codes, summarize_private_junit
+from scripts.ci_private_summary import private_projection_codes, private_result_codes, private_semantic_codes, summarize_private_junit
 
 
 @pytest.fixture
@@ -116,6 +116,28 @@ def test_result_properties_are_reallowlisted(source_root):
     result = summarize_private_junit(source_root, report)
     assert result['failures'][0]['codes'] == 'PEAK_CONCURRENCY,UNKNOWN'
     assert 'SECRET' not in json.dumps(result)
+
+
+@pytest.mark.parametrize("counts,expected", [
+    ({"PROMPT_INVALID": 2, "PROMPT_TOO_LARGE": 1}, "PROJECTION_INVALID,PROJECTION_TOO_LARGE"),
+    ({"PROMPT_INVALID": 0}, ""),
+    ({"SECRET": 1, "PROMPT_INVALID": "SECRET"}, "UNKNOWN"),
+    ({"PROMPT_TOO_LARGE": True}, "UNKNOWN"),
+    ({"PROMPT_TOO_LARGE": -1}, "UNKNOWN"),
+    ("SECRET", "UNKNOWN"),
+])
+def test_projection_codes_never_expose_private_values(counts, expected):
+    assert private_projection_codes(counts) == expected
+
+
+@pytest.mark.parametrize("semantic", [None, "SECRET", 3, [], {}])
+def test_malformed_semantic_failure_does_not_break_diagnostics(semantic):
+    assert private_semantic_codes(semantic) == "UNKNOWN"
+
+
+def test_semantic_projection_counts_are_forwarded_safely():
+    assert private_semantic_codes({"prompt_rejection_counts": {"PROMPT_TOO_LARGE": 1},
+                                   "SECRET": "SECRET"}) == "PROJECTION_TOO_LARGE"
 
 
 def test_oversized_report_is_unavailable(source_root: Path) -> None:

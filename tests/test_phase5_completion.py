@@ -35,6 +35,7 @@ from ai_client.network import (
     SessionCheckpoint,
 )
 from tests.fixtures.phase5_client_process import _DisposableCredentialStore
+from tests.fixtures.completion_clock import publish_gate
 from ai_client.world import Freshness, WorldStateExit, WorldStateExitReason
 from tests.fixtures.phase5_deterministic_backend import (
     Phase5DeterministicBrokerBackend,
@@ -609,11 +610,11 @@ class PhaseFiveOfflineCompletionTests(unittest.IsolatedAsyncioTestCase):
                 await self._wait_for_files(
                     ready_paths.values(), list(client_processes.values()), 15.0
                 )
-                clock_start.write_text("release night0\n", encoding="utf-8")
+                publish_gate(clock_start)
                 await self._wait_for_files(
                     day_ready_paths.values(), list(client_processes.values()), 15.0
                 )
-                day_one_release.write_text("release Day 1\n", encoding="utf-8")
+                publish_gate(day_one_release)
 
                 await self._wait_for_file(
                     server_result_path, [server, *client_processes.values()], 120.0
