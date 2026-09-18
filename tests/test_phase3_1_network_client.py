@@ -397,11 +397,15 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
             server_event("game.state_sync", game_id, 3, initial_sync),
         ])
         deadline_sleep = GateSleep()
+        # GateSleep controls expiry; use its matching virtual clock rather than
+        # subtracting arbitrary real-clock floats in exact mapping assertions.
+        now = [10.0]
         client = NetworkClient(
             NetworkClientConfig("ws://fake", game_id, "entry-token"),
             MemoryStore(),
             connector=lambda _uri: socket,
             sleep=deadline_sleep,
+            clock=lambda: now[0],
         )
         observed_deadline = False
         mapped = []
@@ -432,6 +436,7 @@ class NetworkClientTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0)
                 else:
                     self.fail("replacement deadline timer was not scheduled")
+                now[0] = 12.0  # 10 + (replacement phase_ends_at 102 - timestamp 100)
                 deadline_sleep.calls[-1][1].set()
             elif isinstance(event, PhaseDeadlineReached):
                 observed_deadline = True
