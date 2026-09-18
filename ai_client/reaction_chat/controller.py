@@ -81,6 +81,9 @@ class _PendingOpportunity:
     source_message: str | None = None
     source_record: ChatRecord | None = None
     cooldown_deferred: bool = False
+    frequency_evidence: _FrequencyEvidence | None = None
+    stale_rearmed: bool = False
+    stale_wait_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -345,13 +348,15 @@ class ReactionChatController:
 
     def _observe(self) -> None:
         snapshot = self.world.snapshot()
-        if snapshot.freshness is Freshness.CURRENT and not snapshot.is_caught_up:
+        actions = self.world.current_actions()
+        if snapshot.freshness is Freshness.CURRENT and (
+            not snapshot.is_caught_up or not actions.is_caught_up
+        ):
             # The Network receiver may already have advanced beyond the World
             # consumer.  Preserve phase work while the exclusive consumer
             # drains instead of treating this transient as a phase reset.
             self._mapping_ready = False
             return
-        actions = self.world.current_actions()
         transport = self.world.transport_observations(
             TransportObservationQuery(after_order=self._transport_cursor)
         )
@@ -623,9 +628,13 @@ class ReactionChatController:
             return None
         if self._pending_co is not None:
             return self._pending_co
-        if self._pending_initial is not None:
-            return self._pending_initial
-        return self._pending_reaction
+        for pending in (self._pending_initial, self._pending_reaction):
+            if pending is not None and (
+                pending.stale_wait_version is None
+                or pending.stale_wait_version != self.world.snapshot().version
+            ):
+                return pending
+        return None
 
     async def _execute(self, pending: _PendingOpportunity) -> None:
         self._observe()
@@ -874,90 +883,108 @@ class ReactionChatController:
                 pending, FrequencySuppression.INVOCATION_CAP
             )
             return
-        if (
-            self._frequency_evaluation_count
-            >= profile.max_trigger_evaluations_per_phase
-        ):
-            self._record_frequency_suppression(
-                pending, FrequencySuppression.EVALUATION_CAP
-            )
-            return
+        evaluated_evidence = pending.frequency_evidence
+        if evaluated_evidence is None:
+            if (
+                self._frequency_evaluation_count
+                >= profile.max_trigger_evaluations_per_phase
+            ):
+                self._record_frequency_suppression(
+                    pending, FrequencySuppression.EVALUATION_CAP
+                )
+                return
 
-        opportunity = self._speaking_opportunity(pending)
-        prepared = policy.prepare(opportunity)
-        if not isinstance(prepared, PreparedSpeakingOpportunity):
-            raise TypeError("frequency prepare() must return PreparedSpeakingOpportunity")
-        PreparedSpeakingOpportunity(
-            prepared.opportunity,
-            prepared.event_importance,
-            prepared.source_message_sha256,
-        )
-        if prepared.opportunity != opportunity:
-            raise ValueError("frequency prepare() returned an inconsistent opportunity")
-        prepared_evidence = _FrequencyEvidence(
-            event_importance=prepared.event_importance,
-            source_fingerprint=prepared.source_message_sha256,
-        )
-        if (
-            prepared.source_message_sha256 is not None
-            and prepared.source_message_sha256 in self._frequency_source_fingerprints
-        ):
-            self._record_frequency_suppression(
-                pending,
-                FrequencySuppression.REPETITION,
-                evidence=prepared_evidence,
+            opportunity = self._speaking_opportunity(pending)
+            prepared = policy.prepare(opportunity)
+            if not isinstance(prepared, PreparedSpeakingOpportunity):
+                raise TypeError("frequency prepare() must return PreparedSpeakingOpportunity")
+            PreparedSpeakingOpportunity(
+                prepared.opportunity,
+                prepared.event_importance,
+                prepared.source_message_sha256,
             )
-            return
-        if self._newest_chat_is_self(pending):
-            self._record_frequency_suppression(
-                pending,
-                FrequencySuppression.SELF_CHAIN,
-                evidence=prepared_evidence,
+            if prepared.opportunity != opportunity:
+                raise ValueError("frequency prepare() returned an inconsistent opportunity")
+            prepared_evidence = _FrequencyEvidence(
+                event_importance=prepared.event_importance,
+                source_fingerprint=prepared.source_message_sha256,
             )
-            return
-
-        if self._last_accepted_chat_at is not None:
-            cooldown_due = self._last_accepted_chat_at + profile.cooldown_seconds
-            if now < cooldown_due:
-                if not pending.cooldown_deferred and cooldown_due < cutoff:
-                    self._store_pending(
-                        replace(
-                            pending,
-                            due=cooldown_due,
-                            cooldown_deferred=True,
-                        )
-                    )
-                    return
+            if (
+                prepared.source_message_sha256 is not None
+                and prepared.source_message_sha256 in self._frequency_source_fingerprints
+            ):
                 self._record_frequency_suppression(
                     pending,
-                    FrequencySuppression.COOLDOWN,
+                    FrequencySuppression.REPETITION,
+                    evidence=prepared_evidence,
+                )
+                return
+            if self._newest_chat_is_self(pending):
+                self._record_frequency_suppression(
+                    pending,
+                    FrequencySuppression.SELF_CHAIN,
                     evidence=prepared_evidence,
                 )
                 return
 
-        decision = policy.evaluate(prepared)
-        self._validate_frequency_decision(decision, prepared, profile)
-        self._frequency_evaluation_count += 1
-        evaluation_ordinal = self._frequency_evaluation_count
-        if prepared.source_message_sha256 is not None:
-            self._frequency_source_fingerprints.append(
-                prepared.source_message_sha256
+            if self._last_accepted_chat_at is not None:
+                cooldown_due = self._last_accepted_chat_at + profile.cooldown_seconds
+                if now < cooldown_due:
+                    if not pending.cooldown_deferred and cooldown_due < cutoff:
+                        self._store_pending(
+                            replace(
+                                pending,
+                                due=cooldown_due,
+                                cooldown_deferred=True,
+                            )
+                        )
+                        return
+                    self._record_frequency_suppression(
+                        pending,
+                        FrequencySuppression.COOLDOWN,
+                        evidence=prepared_evidence,
+                    )
+                    return
+
+            decision = policy.evaluate(prepared)
+            self._validate_frequency_decision(decision, prepared, profile)
+            self._frequency_evaluation_count += 1
+            evaluation_ordinal = self._frequency_evaluation_count
+            if prepared.source_message_sha256 is not None:
+                self._frequency_source_fingerprints.append(
+                    prepared.source_message_sha256
+                )
+            evaluated_evidence = _FrequencyEvidence(
+                evaluation_ordinal=evaluation_ordinal,
+                event_importance=decision.event_importance,
+                threshold=decision.threshold,
+                draw=decision.draw,
+                source_fingerprint=prepared.source_message_sha256,
+                suppression=decision.suppression,
             )
-        evaluated_evidence = _FrequencyEvidence(
-            evaluation_ordinal=evaluation_ordinal,
-            event_importance=decision.event_importance,
-            threshold=decision.threshold,
-            draw=decision.draw,
-            source_fingerprint=prepared.source_message_sha256,
-            suppression=decision.suppression,
-        )
-        if not decision.should_invoke:
+            if not decision.should_invoke:
+                self._record_frequency_suppression(
+                    pending,
+                    FrequencySuppression.PROBABILITY,
+                    evidence=evaluated_evidence,
+                )
+                return
+
+        elif self._newest_chat_is_self(pending):
             self._record_frequency_suppression(
-                pending,
-                FrequencySuppression.PROBABILITY,
-                evidence=evaluated_evidence,
+                pending, FrequencySuppression.SELF_CHAIN, evidence=evaluated_evidence
             )
             return
+        elif self._last_accepted_chat_at is not None:
+            cooldown_due = self._last_accepted_chat_at + profile.cooldown_seconds
+            if now < cooldown_due:
+                if cooldown_due < cutoff:
+                    self._store_pending(replace(pending, due=cooldown_due))
+                else:
+                    self._record_frequency_suppression(
+                        pending, FrequencySuppression.COOLDOWN, evidence=evaluated_evidence
+                    )
+                return
 
         timeout = min(self.config.brain_timeout_seconds, cutoff - self._clock())
         if timeout <= 0:
@@ -1069,9 +1096,68 @@ class ReactionChatController:
                 self._intentional_silence_count += 1
             elif status is ReactionOutcomeStatus.DEADLINE_SUPPRESSED:
                 self._deadline_suppressed_count += 1
-                self._chat_deadline_closed = True
+                if outcome.status is DecisionStatus.STALE and not committed:
+                    self._rearm_unstarted_stale(pending, evaluated_evidence)
+                else:
+                    self._chat_deadline_closed = True
             elif status is ReactionOutcomeStatus.TRANSPORT_GAP:
                 self._transport_gap_closed = True
+
+    def _rearm_unstarted_stale(
+        self, pending: _PendingOpportunity, evidence: _FrequencyEvidence
+    ) -> None:
+        """Retain a policy-approved opportunity, never its old dispatch handles."""
+        if self._lifecycle is not ReactionChatLifecycle.RUNNING:
+            return
+        # Incorporate replacements and latest-wins peer triggers before restoring
+        # anything. A temporarily uncaught-up World preserves pending work.
+        self._observe()
+        snapshot = self.world.snapshot()
+        deadline = self.world.transport_observations().current_deadline
+        if (
+            snapshot.freshness is not Freshness.CURRENT
+            or self._phase_key != pending.trigger.phase_key
+            or deadline is None
+            or not self._deadline_matches_key(deadline, pending.trigger.phase_key)
+            or deadline.mapping_order != pending.mapping_order
+            or deadline.local_deadline_monotonic is None
+            or self._chat_deadline_closed
+            or self._chat_rejected_closed
+            or self._transport_gap_closed
+            or self._phase_chat_invocations >= self.config.max_chat_attempts_per_phase
+        ):
+            return
+        cutoff = deadline.local_deadline_monotonic - self.config.deadline_guard_seconds
+        if cutoff - self._clock() < self.config.minimum_start_budget_seconds:
+            self._chat_deadline_closed = True
+            return
+        actions = self.world.current_actions()
+        relevant = tuple(
+            handle for handle in actions.actions
+            if isinstance(handle, ChatAction)
+            and (pending.channel is None or handle.channel == pending.channel)
+            and handle.connection_generation == pending.trigger.phase_key.connection_generation
+            and handle.action_generation == pending.trigger.phase_key.action_generation
+            and handle.day == pending.trigger.phase_key.day
+            and handle.phase == pending.trigger.phase_key.phase
+        )
+        if snapshot.is_caught_up and actions.is_caught_up and not relevant:
+            return
+        current = (
+            self._pending_initial
+            if pending.trigger.kind is ReactionTriggerKind.INITIAL_CHAT
+            else self._pending_reaction
+        )
+        if current is not None:
+            return  # Never overwrite a newer opportunity observed during invoke.
+        self._store_pending(replace(
+            pending,
+            due=self._clock(),
+            frequency_evidence=evidence,
+            stale_rearmed=True,
+            # One immediate rearm; another stale waits for a real World update.
+            stale_wait_version=snapshot.version if pending.stale_rearmed else None,
+        ))
 
     def _speaking_opportunity(self, pending: _PendingOpportunity) -> SpeakingOpportunity:
         snapshot = self.world.snapshot()

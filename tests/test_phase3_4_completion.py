@@ -53,6 +53,11 @@ from tests.fixtures.reaction_chat_evidence import (
     first_speaker_by_phase,
     validate_rejections,
 )
+from tests.fixtures.reaction_frontier import (
+    FirstSpeakerFrontier,
+    ReactionFrontierClock,
+    publish,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,33 +65,22 @@ CLIENT = PROJECT_ROOT / "tests" / "fixtures" / "phase3_4_reaction_client_process
 
 
 class _DayOneBarrierClock:
-    """Keep the two-second Day 1 budget behind an explicit process barrier."""
+    """Expose the shared fixture clock as server integer game time."""
 
     def __init__(self) -> None:
-        self._started_at_ns: int | None = None
-        self._day_one_released_at_ns: int | None = None
+        self.shared = None
+
+    def bind(self, root: Path) -> None:
+        self.shared = ReactionFrontierClock(root / "clock-start", root / "day-one-release")
 
     def __call__(self) -> int:
-        if self._started_at_ns is None:
-            return 0
-        if self._day_one_released_at_ns is None:
-            elapsed = (time.monotonic_ns() - self._started_at_ns) // 1_000_000_000
-            return min(elapsed, 1)
-        return 1 + (
-            time.monotonic_ns() - self._day_one_released_at_ns
-        ) // 1_000_000_000
+        return 0 if self.shared is None else int(self.shared())
 
     def release_initial_night(self) -> None:
-        if self._started_at_ns is not None:
-            raise RuntimeError("completion clock initial night was released twice")
-        self._started_at_ns = time.monotonic_ns()
-
-    def release_day_one(self) -> None:
-        if self._started_at_ns is None:
-            raise RuntimeError("initial night must be released before Day 1")
-        if self._day_one_released_at_ns is not None:
-            raise RuntimeError("completion clock Day 1 was released twice")
-        self._day_one_released_at_ns = time.monotonic_ns()
+        assert self.shared is not None
+        if self.shared.start.exists():
+            raise RuntimeError("completion initial night was released twice")
+        publish(self.shared.start, {"started_ns": time.monotonic_ns()})
 
 
 def _brain_input(*, include_chat: bool = True) -> BrainInput:
@@ -334,6 +328,7 @@ class PhaseThreeFourCompletionTests(unittest.IsolatedAsyncioTestCase):
             server._delivery_router, "queue_channel_message", side_effect=queue_spy  # noqa: SLF001
         ), patch.object(server._delivery_router, "drain", side_effect=drain_spy):  # noqa: SLF001
             root = Path(temporary_directory)
+            clock.bind(root)
 
             async def start_client(player_id: str) -> asyncio.subprocess.Process:
                 status_path = root / f"{player_id}.status.json"
@@ -439,7 +434,6 @@ class PhaseThreeFourCompletionTests(unittest.IsolatedAsyncioTestCase):
                     output_paths=output_paths,
                     status_paths=status_paths,
                 )
-                (root / "clock-start").write_text("release night0\n", encoding="utf-8")
                 clock.release_initial_night()
                 await self._wait_for(
                     lambda: load_reaction_markers(
@@ -456,9 +450,31 @@ class PhaseThreeFourCompletionTests(unittest.IsolatedAsyncioTestCase):
                     status_paths=status_paths,
                 )
 
-                (root / "day-one-release").write_text("release Day 1\n", encoding="utf-8")
                 day_one_budget_started = time.monotonic()
-                clock.release_day_one()
+                frontier = FirstSpeakerFrontier(root / "day-one-release", tuple(game.players))
+
+                def first_speaker_resolved() -> bool:
+                    reports = {}
+                    for player_id, status_path in status_paths.items():
+                        try:
+                            reports[player_id] = json.loads(
+                                status_path.with_suffix(".frontier.json").read_text(encoding="utf-8")
+                            )
+                        except (FileNotFoundError, json.JSONDecodeError):
+                            return False
+                    return frontier.step(reports, accepted=any(
+                        record.day == 1 and record.phase == "day" for record in accepted
+                    ))
+
+                await self._wait_for(
+                    first_speaker_resolved,
+                    timeout=2.0,
+                    description=f"{name}: CO-aware first-speaker frontier",
+                    processes=processes,
+                    outputs=outputs,
+                    output_paths=output_paths,
+                    status_paths=status_paths,
+                )
                 await self._wait_for(
                     lambda: game.game_result is not None,
                     timeout=45,

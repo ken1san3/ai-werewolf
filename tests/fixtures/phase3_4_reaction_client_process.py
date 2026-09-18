@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -31,40 +30,11 @@ from tests.fixtures.phase3_4_reaction_brain import (
     CompletionReactionBrain,
     CompletionReactionMode,
 )
-
-
-class _BarrierClock:
-    """Mirror the completion server's initial-night and Day 1 release barriers."""
-
-    def __init__(
-        self,
-        clock_start_path: Path | None,
-        day_one_release_path: Path | None,
-    ) -> None:
-        self._clock_start_path = clock_start_path
-        self._day_one_release_path = day_one_release_path
-        self._origin = time.monotonic()
-        self._started_at: float | None = None
-        self._day_one_released_at: float | None = None
-
-    def __call__(self) -> float:
-        if self._clock_start_path is None or self._day_one_release_path is None:
-            return time.monotonic()
-        now = time.monotonic()
-        if not self._clock_start_path.exists():
-            return self._origin
-        if self._started_at is None:
-            self._started_at = now
-        if not self._day_one_release_path.exists():
-            return self._origin + min(now - self._started_at, 1.0)
-        if self._day_one_released_at is None:
-            self._day_one_released_at = now
-        return self._origin + 1.0 + (now - self._day_one_released_at)
-
-    async def sleep(self, delay: float) -> None:
-        deadline = self() + delay
-        while self() < deadline:
-            await asyncio.sleep(min(0.02, deadline - self()))
+from tests.fixtures.reaction_frontier import (
+    ReactionFrontierClock as _BarrierClock,
+    pending_report,
+    publish,
+)
 
 
 async def run_driver(
@@ -106,6 +76,41 @@ async def run_driver(
         master_seed=seed,
         clock=shared_clock,
     )
+    executing = False
+    started = None
+    original_execute = reaction._execute
+
+    async def observe_execution(pending):
+        nonlocal executing, started
+        executing = True
+        started = {"due": pending.due,
+                   "terminal_count": len(reaction.snapshot().outcomes)}
+        try:
+            return await original_execute(pending)
+        finally:
+            executing = False
+
+    reaction._execute = observe_execution
+
+    async def report_frontier() -> None:
+        if day_one_release_path is None:
+            return
+        report_path = status_path.with_suffix(".frontier.json")
+        previous = None
+        while True:
+            state = barrier_clock.state()
+            if state is not None:
+                if state["running_ns"] is not None:
+                    return
+                report = pending_report(
+                    reaction, world, revision=state["revision"], executing=executing,
+                    started=started,
+                )
+                if report != previous:
+                    publish(report_path, report)
+                    previous = report
+            await asyncio.sleep(0.01)
+
     decisions: list[str] = []
     original_decide = brain.decide
 
@@ -191,6 +196,7 @@ async def run_driver(
     world_task = asyncio.create_task(world.run())
     reaction.start()
     ready_tasks = (
+        asyncio.create_task(report_frontier()),
         asyncio.create_task(
             write_ready_marker(ready_path, expected_day=0, expected_phase="night0")
         ),

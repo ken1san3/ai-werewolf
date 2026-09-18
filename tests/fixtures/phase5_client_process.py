@@ -35,7 +35,9 @@ from ai_client.world import Freshness
 
 
 from tests.fixtures.completion_clock import CompletionClock as _BarrierClock
-from tests.fixtures.completion_diagnostics import client_progress, ProgressSampler
+from tests.fixtures.completion_diagnostics import (
+    client_progress, controller_error_kind, install_reaction_failure_probe, ProgressSampler,
+)
 
 
 class _DisposableCredentialStore:
@@ -244,6 +246,7 @@ async def run_client(arguments: argparse.Namespace, bootstrap: dict[str, object]
                 return
             await asyncio.sleep(0.01)
 
+    reaction_failure = install_reaction_failure_probe(runtime.reaction)
     await runtime.start()
     marker_tasks = (
         asyncio.create_task(marker(arguments.ready, 0, "night0")),
@@ -301,6 +304,14 @@ async def run_client(arguments: argparse.Namespace, bootstrap: dict[str, object]
         "reaction_exit": None
         if exit_value.reaction is None
         else exit_value.reaction.reason.value,
+        "reaction_error_kind": controller_error_kind(
+            None if exit_value.reaction is None else exit_value.reaction.error_type
+        ),
+        "reaction_failure_site": (
+            reaction_failure["site"]
+            if exit_value.reaction is not None and exit_value.reaction.error_type is not None
+            else "NONE"
+        ),
         "vote_ability_exit": None
         if exit_value.vote_ability is None
         else exit_value.vote_ability.reason.value,

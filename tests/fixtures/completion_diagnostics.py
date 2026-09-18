@@ -1,5 +1,6 @@
 """Fixed-field, text-free progress for the disposable completion fixture."""
 from collections import Counter
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,44 @@ _FIELDS = frozenset({
     "initial", "reaction", "co", "deadline", "deadline_closed", "rejected_closed", "history_closed",
     "transport_closed", "outcomes", "observed_day1", "brain_outcomes", "caught_up", "actions_current", "diagnostic",
 })
+
+_ERROR_KINDS = frozenset({
+    "AssertionError", "AttributeError", "CancelledError", "KeyError", "TypeError",
+    "ValueError", "RuntimeError", "TimeoutError", "PermissionError", "OSError",
+    "NameError", "IndexError",
+})
+
+
+def controller_error_kind(value: object) -> str:
+    """Retain only a fixed exception class, never exception text or payload."""
+    if value is None:
+        return "NONE"
+    return value if type(value) is str and value in _ERROR_KINDS else "UNKNOWN"
+
+
+def install_reaction_failure_probe(controller) -> dict:
+    """Record only the exception boundary; preserve the original exception."""
+    observed = {"site": "UNKNOWN"}
+    finalization = controller._await_finalization
+    record = controller._record_outcome
+
+    async def await_finalization(*args, **kwargs):
+        try:
+            return await finalization(*args, **kwargs)
+        except (Exception, asyncio.CancelledError):
+            observed["site"] = "FINALIZATION"
+            raise
+
+    def record_outcome(*args, **kwargs):
+        try:
+            return record(*args, **kwargs)
+        except (Exception, asyncio.CancelledError):
+            observed["site"] = "OUTCOME_RECORD"
+            raise
+
+    controller._await_finalization = await_finalization
+    controller._record_outcome = record_outcome
+    return observed
 
 
 def safe_progress(value):

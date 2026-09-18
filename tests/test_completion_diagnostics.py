@@ -1,4 +1,5 @@
 import json
+from tests.fixtures.completion_diagnostics import controller_error_kind
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
 import pytest
@@ -61,3 +62,53 @@ def test_diagnostic_failure_does_not_stop_measured_process(tmp_path, failure):
     sampler.sample(Mock(side_effect=failure("SECRET")))
     assert sampler.enabled is False
     assert json.loads(sampler.path.read_text()) == {"diagnostic": "UNKNOWN"}
+@pytest.mark.parametrize("value, expected", [
+    (None, "NONE"), ("AssertionError", "AssertionError"),
+    ("CancelledError", "CancelledError"), ("RuntimeError", "RuntimeError"),
+    ("RuntimeError: SECRET /private/path", "UNKNOWN"),
+    ({"token": "SECRET"}, "UNKNOWN"), ("CustomPrivateException", "UNKNOWN"),
+])
+def test_controller_error_kind_is_fixed_allowlist(value, expected):
+    assert controller_error_kind(value) == expected
+
+
+@pytest.mark.parametrize("kind", ["success", "finalization", "record", "cancel"])
+def test_failure_probe_preserves_result_exception_identity_and_cancellation(kind):
+    import asyncio
+    from tests.fixtures.completion_diagnostics import install_reaction_failure_probe
+
+    error = asyncio.CancelledError("SECRET") if kind == "cancel" else RuntimeError("SECRET")
+    result = object()
+
+    async def finalize():
+        if kind in {"finalization", "cancel"}:
+            raise error
+        return result
+
+    def record():
+        if kind == "record":
+            raise error
+        return result
+
+    controller = NS(_await_finalization=finalize, _record_outcome=record)
+    observed = install_reaction_failure_probe(controller)
+
+    async def scenario():
+        if kind in {"finalization", "cancel"}:
+            with pytest.raises(type(error)) as caught:
+                await controller._await_finalization()
+            assert caught.value is error
+            assert observed == {"site": "FINALIZATION"}
+        else:
+            assert await controller._await_finalization() is result
+            if kind == "record":
+                with pytest.raises(RuntimeError) as caught:
+                    controller._record_outcome()
+                assert caught.value is error
+                assert observed == {"site": "OUTCOME_RECORD"}
+            else:
+                assert controller._record_outcome() is result
+                assert observed == {"site": "UNKNOWN"}
+        assert "SECRET" not in json.dumps(observed)
+
+    asyncio.run(scenario())
