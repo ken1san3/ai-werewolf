@@ -27,6 +27,8 @@ from ai_client.brain.controller import _invalid_or_repeated_self_text
 from ai_client.llm.decision import parse_llm_output, DecisionValidationError
 from scripts.phase6_context_probe import provider_body, wire_bytes
 from scripts.phase6_conversation_suite import cases, project, evaluate
+from scripts.phase6_none_reason_probe import candidate_body, assess_candidate
+from scripts.phase6_schema_order_probe import ordered_wire_bytes, PROPOSAL_ORDER
 from tests.fixtures.phase6_evidence import create_private_evidence_container
 
 PORT = 8082
@@ -48,7 +50,22 @@ PROFILES = {
 }
 SOURCES = ('scripts/phase6_model_comparison.py', 'scripts/phase6_conversation_suite.py',
            'scripts/phase6_context_probe.py', 'scripts/monitor_phase6_gpu.py',
-           'tests/fixtures/phase6_conversation_cases.py', 'tests/fixtures/phase6_evidence.py')
+           'tests/fixtures/phase6_conversation_cases.py', 'tests/fixtures/phase6_evidence.py',
+           'scripts/phase6_none_reason_probe.py', 'tests/test_phase6_none_reason_probe.py',
+           'scripts/phase6_schema_order_probe.py', 'tests/test_phase6_schema_order_probe.py')
+C2 = 'none_reason_v1'
+C1 = 'schema_order_v1'
+BASELINE_FILES = {
+    'plan.json': 'c878456dc15b00b87549a8b91d29eba8ef64e63cb7cc972da1eff40942f4c1c4',
+    'qw9-results.json': '72007dca98868b857ce92092aa0fae0247f36189c934c487cd9ea9246a7aae15',
+    'qw9-annotations.json': 'b346551994891617cbd85ec4a17c7066be4eede7c676979a670dfdba61ebd6ad',
+}
+# These exact additions originate in T430/C2 and T434/C1. Both experiments
+# freeze their current bytes, including the unused helper; no directory wildcard.
+EXPERIMENT_SOURCE_DELTA = {variant: frozenset({
+    'scripts/phase6_model_comparison.py', 'scripts/phase6_none_reason_probe.py',
+    'tests/test_phase6_none_reason_probe.py', 'scripts/phase6_schema_order_probe.py',
+    'tests/test_phase6_schema_order_probe.py'}) for variant in (C1, C2)}
 
 
 class StopComparison(RuntimeError):
@@ -102,18 +119,82 @@ def launch_args(key):
             '--chat-template-kwargs', '{"enable_thinking":false}', '--fit', 'off', *extra]
 
 
-def prepare(out):
+def experiment_body(projection, model, experiment):
+    body = body_for(projection, model)
+    return candidate_body(body) if experiment == C2 else body
+
+
+def baseline_binding(manifest, baseline_source):
+    """Bind the one reviewed baseline without reopening private raw or rescoring it."""
+    try:
+        source = Path(baseline_source)
+        if any(file_hash(source/name) != sha for name, sha in BASELINE_FILES.items()):
+            raise ValueError
+        old, measured, annotated = [json.loads((source/name).read_text(encoding='utf-8'))
+                                    for name in BASELINE_FILES]
+        for key in ('sampling', 'context', 'request_seconds', 'model_seconds', 'load_seconds',
+                    'max_generations_per_model', 'retry', 'repair'):
+            if manifest[key] != old[key]:
+                raise ValueError
+        if manifest['profiles'] != {'qw9': old['profiles']['qw9']}:
+            raise ValueError
+        allowed_delta = EXPERIMENT_SOURCE_DELTA[manifest.get('experiment', C2)]
+        stable = lambda m: {k: v for k, v in m.items() if k not in allowed_delta}
+        if stable(manifest['source']) != stable(old['source']):
+            raise ValueError
+        if (measured['status'] != 'COMPLETE' or not measured['source_unchanged']
+                or measured['owned_processes_remaining'] != 0
+                or measured['plan_sha256'] != BASELINE_FILES['plan.json']):
+            raise ValueError
+        groups = [manifest['cases'], old['cases'], measured['rows'], annotated['rows']]
+        maps = [{row['case_id']: row for row in group} for group in groups]
+        if any(len(group) != 32 or len(m) != 32 or set(m) != set(maps[0])
+               for group, m in zip(groups, maps)):
+            raise ValueError
+        for cid, current in maps[0].items():
+            previous, result, assessment = [m[cid] for m in maps[1:]]
+            if (current['baseline_common_input_sha256'] != previous['common_input_sha256']
+                    or previous['common_input_sha256'] != result['common_input_sha256']
+                    or current['baseline_input_sha256'] != result['input_sha256']
+                    or result['input_sha256'] != assessment['input_sha256']
+                    or result['final_output_sha256'] != assessment['final_output_sha256']
+                    or result['generation_status'] != 'GENERATED'):
+                raise ValueError
+        return {'directory': str(source.resolve()), 'artifacts': dict(BASELINE_FILES),
+                'runtime': measured['runtime'], 'source_delta_paths': sorted(allowed_delta)}
+    except (OSError, ValueError, KeyError, TypeError):
+        raise StopComparison('BASELINE_MISMATCH') from None
+
+
+def prepare(out, *, experiment='baseline', baseline_source=None):
+    if experiment not in ('baseline', C2, C1) or (experiment == 'baseline' and baseline_source is not None):
+        raise StopComparison('EXPERIMENT_INVALID')
     out.mkdir(parents=True, exist_ok=True)
     if (out/'plan.json').exists():
         raise StopComparison('PLAN_EXISTS')
     entries = []
     for case in cases():
         p = project(case, 'baseline')
-        entries.append({'case_id': case.case_id, 'category': case.category,
-                        'common_input_sha256': common_hash(body_for(p, PROFILES['qw9'][0])),
-                        'projection_sha256': p.prompt_sha256, 'proxy_units': p.token_proxy_units})
+        baseline = body_for(p, PROFILES['qw9'][0])
+        body = experiment_body(p, PROFILES['qw9'][0], experiment)
+        entry = {'case_id': case.case_id, 'category': case.category,
+                 'common_input_sha256': common_hash(body),
+                 'projection_sha256': p.prompt_sha256, 'proxy_units': p.token_proxy_units}
+        if experiment in (C2, C1):
+            entry.update(baseline_common_input_sha256=common_hash(baseline),
+                         baseline_input_sha256=digest(baseline), candidate_input_sha256=digest(body),
+                         candidate_schema_sha256=digest(body['response_format']['json_schema']['schema']))
+        if experiment == C1:
+            payload = ordered_wire_bytes(body)
+            entry.update(baseline_wire_sha256=digest(body),
+                         candidate_wire_sha256=hashlib.sha256(payload).hexdigest(),
+                         wire_size_bytes=len(payload), target_property_order=list(PROPOSAL_ORDER),
+                         serializer_version=1)
+        entries.append(entry)
     profiles = {}
     for key, (model, quant, server, _) in PROFILES.items():
+        if experiment in (C2, C1) and key != 'qw9':
+            continue
         binaries = [server, *sorted(server.parent.glob('*.dll'))] if server.is_file() else []
         profiles[key] = {'model': file_identity(model), 'quantization': quant,
                          'argv': launch_args(key), 'runtime_files': [file_identity(p) for p in binaries],
@@ -122,20 +203,32 @@ def prepare(out):
                 'sampling': SAMPLING, 'context': CONTEXT, 'request_seconds': REQUEST_SECONDS,
                 'model_seconds': MODEL_SECONDS, 'load_seconds': LOAD_SECONDS,
                 'max_generations_per_model': len(entries), 'retry': 0, 'repair': 0}
+    if experiment in (C2, C1):
+        manifest.update(experiment=experiment, experiment_version=1, task_id='T433' if experiment == C2 else 'T435')
+        manifest['baseline'] = baseline_binding(manifest, baseline_source)
     with (out/'plan.json').open('x', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2)
     print('PLAN_READY', len(entries), len(profiles), flush=True)
 
 
-async def _request(path, body, timeout, *, transport=None):
+async def _request(path, body, timeout, *, transport=None, wire_payload=None):
     if path not in {'/health', '/props', '/slots', '/apply-template', '/tokenize', '/v1/chat/completions'}:
         raise StopComparison('ENDPOINT_NOT_ALLOWED')
+    if wire_payload is not None:
+        try:
+            if (type(wire_payload) is not bytes or body is None
+                    or path not in {'/apply-template', '/v1/chat/completions'}
+                    or json.loads(wire_payload) != body):
+                raise ValueError
+        except (ValueError, TypeError, UnicodeError):
+            raise StopComparison('WIRE_OVERRIDE_INVALID') from None
     async def perform():
         async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
                                      timeout=timeout, transport=transport) as client:
             async with client.stream('GET' if body is None else 'POST',
                                      f'http://127.0.0.1:{PORT}'+path,
-                                     content=None if body is None else wire_bytes(body),
+                                     content=(wire_payload if wire_payload is not None else
+                                              None if body is None else wire_bytes(body)),
                                      headers={'Content-Type': 'application/json'}) as response:
                 if response.status_code != 200:
                     raise StopComparison('HTTP_'+str(response.status_code))
@@ -151,12 +244,12 @@ async def _request(path, body, timeout, *, transport=None):
     return await await_with_timeout(timeout, perform)
 
 
-def request(path, body=None, *, timeout=20):
+def request(path, body=None, *, timeout=20, wire_payload=None):
     if _RUN_DEADLINE is not None:
         timeout = min(timeout, _RUN_DEADLINE-time.monotonic())
         if timeout <= 0:
             raise StopComparison('MODEL_TIME_BUDGET')
-    return asyncio.run(_request(path, body, timeout))
+    return asyncio.run(_request(path, body, timeout, wire_payload=wire_payload))
 
 
 def port_free():
@@ -164,8 +257,9 @@ def port_free():
         return sock.connect_ex(('127.0.0.1', PORT)) != 0
 
 
-def count_prompt(body):
-    rendered = request('/apply-template', body)['prompt']
+def count_prompt(body, *, wire_payload=None):
+    wire_options = {} if wire_payload is None else {'wire_payload': wire_payload}
+    rendered = request('/apply-template', body, **wire_options)['prompt']
     if not isinstance(rendered, str):
         raise StopComparison('TEMPLATE_TYPE')
     tok = request('/tokenize', {'content': rendered, 'add_special': True, 'parse_special': True})['tokens']
@@ -342,6 +436,13 @@ def attach_performance(result, private):
 def run(out, key):
     global _RUN_DEADLINE
     plan = json.loads((out/'plan.json').read_text(encoding='utf-8'))
+    experiment = plan.get('experiment', 'baseline')
+    if experiment not in ('baseline', C2, C1) or (experiment in (C2, C1) and key != 'qw9'):
+        raise StopComparison('EXPERIMENT_INVALID')
+    if experiment in (C2, C1):
+        if (plan.get('experiment_version') != 1 or plan.get('task_id') != ('T433' if experiment == C2 else 'T435')
+                or baseline_binding(plan, plan['baseline']['directory']) != plan['baseline']):
+            raise StopComparison('BASELINE_MISMATCH')
     profile = plan['profiles'][key]
     if source_identity() != plan['source'] or launch_args(key) != profile['argv']:
         raise StopComparison('FROZEN_SOURCE_CHANGED')
@@ -353,12 +454,28 @@ def run(out, key):
     if not port_free():
         raise StopComparison('PORT_IN_USE')
     projections = [(c, project(c, 'baseline')) for c in cases()]
+    prepared_wires = {}
     for (case, p), frozen in zip(projections, plan['cases'], strict=True):
-        if case.case_id != frozen['case_id'] or common_hash(body_for(p, profile['model']['path'])) != frozen['common_input_sha256']:
+        body = experiment_body(p, profile['model']['path'], experiment)
+        if case.case_id != frozen['case_id'] or common_hash(body) != frozen['common_input_sha256']:
             raise StopComparison('FROZEN_INPUT_CHANGED')
+        if experiment in (C2, C1) and (digest(body) != frozen['candidate_input_sha256']
+                or digest(body['response_format']['json_schema']['schema']) != frozen['candidate_schema_sha256']
+                or digest(body_for(p, profile['model']['path'])) != frozen['baseline_input_sha256']):
+            raise StopComparison('FROZEN_INPUT_CHANGED')
+        if experiment == C1:
+            payload = ordered_wire_bytes(body)
+            if (hashlib.sha256(payload).hexdigest() != frozen['candidate_wire_sha256']
+                    or digest(body) != frozen['baseline_wire_sha256']
+                    or len(payload) != frozen['wire_size_bytes']
+                    or frozen['target_property_order'] != list(PROPOSAL_ORDER)
+                    or frozen['serializer_version'] != 1):
+                raise StopComparison('FROZEN_WIRE_CHANGED')
+            prepared_wires[case.case_id] = payload
     claim_run(out, key)
     private = create_private_evidence_container(ROOT/'logs/phase6-private-evidence',
-        evidence_kind='synthetic', task_id='T424'+key.upper(), created_at_utc=datetime.now(timezone.utc))
+        evidence_kind='synthetic', task_id=({C1: 'T435', C2: 'T433'}.get(experiment, 'T424'))+key.upper(),
+        created_at_utc=datetime.now(timezone.utc))
     (out/(key+'-locator.json')).write_text(json.dumps({'path': str(private)}), encoding='utf-8')
     proc = monitor = None
     started = time.monotonic()
@@ -366,6 +483,8 @@ def run(out, key):
     result = {'model_key': key, 'model': Path(profile['model']['path']).name,
               'quantization': profile['quantization'], 'rows': [], 'retry': 0, 'repair': 0,
               'status': 'STARTING', 'clock_domain': 'REAL', 'plan_sha256': file_hash(out/'plan.json')}
+    if experiment in (C2, C1):
+        result.update(experiment=experiment, baseline_artifacts=plan['baseline']['artifacts'])
     call_started = None
     def save():
         result['real_duration_sec'] = time.monotonic()-started
@@ -393,6 +512,8 @@ def run(out, key):
             raise StopComparison('MODEL_IDENTITY')
         (private/'runtime.json').write_text(json.dumps(identity, indent=2), encoding='utf-8')
         result['runtime'] = safe_runtime(identity)
+        if experiment in (C2, C1) and result['runtime'] != plan['baseline']['runtime']:
+            raise StopComparison('BASELINE_RUNTIME_MISMATCH')
         with (private/'monitor.log').open('xb') as log:
             monitor = subprocess.Popen([sys.executable, str(ROOT/'scripts/monitor_phase6_gpu.py'),
                 '--output', str(private/'gpu.jsonl'), '--max-seconds', str(MODEL_SECONDS),
@@ -404,30 +525,54 @@ def run(out, key):
                     raise StopComparison('MODEL_TIME_BUDGET')
                 if proc.poll() is not None or runtime() != identity:
                     raise StopComparison('RUNTIME_CHANGED')
-                body = body_for(p, profile['model']['path'])
-                measurement = count_prompt(body)
+                body = experiment_body(p, profile['model']['path'], experiment)
+                wire_options = {}
+                if experiment == C1:
+                    payload = prepared_wires[case.case_id]
+                    if not re.fullmatch(r'G[0-9]{2}-[0-9]+', case.case_id):
+                        raise StopComparison('WIRE_CASE_ID_INVALID')
+                    wire_path = private/(case.case_id+'.request.bin')
+                    with wire_path.open('xb') as f:
+                        f.write(payload)
+                    if file_hash(wire_path) != hashlib.sha256(payload).hexdigest():
+                        raise StopComparison('WIRE_SAVE_MISMATCH')
+                    wire_options['wire_payload'] = payload
+                measurement = count_prompt(body, **wire_options)
                 row = {'case_id': case.case_id, 'category': case.category,
                        'common_input_sha256': common_hash(body), 'input_sha256': digest(body),
                        'proxy_units': p.token_proxy_units, **measurement,
                        'hard_pass': None, 'semantic_pass': None, 'style_pass': None,
                        'retry_count': 0, 'repair_count': 0, 'new_provider_calls': 1,
                        'generation_status': 'STARTED'}
+                if experiment == C2:
+                    row.update(baseline_input_sha256=digest(body_for(p, profile['model']['path'])),
+                               candidate_input_sha256=digest(body), candidate_schema_pass=None,
+                               legacy_contract_pass=None, adapter_status='NOT_APPLIED',
+                               none_reason=None, adapted_output_sha256=None)
+                if experiment == C1:
+                    row.update(baseline_input_sha256=digest(body), candidate_input_sha256=digest(body),
+                               baseline_wire_sha256=digest(body), candidate_wire_sha256=hashlib.sha256(payload).hexdigest(),
+                               wire_size_bytes=len(payload), serializer_version=1)
                 row['started_at_utc'] = datetime.now(timezone.utc).isoformat()
                 result['rows'].append(row)
                 call_started = None
                 save()  # A call is consumed before network dispatch.
                 call_started = time.monotonic()
-                response = request('/v1/chat/completions', body, timeout=REQUEST_SECONDS)
+                response = request('/v1/chat/completions', body, timeout=REQUEST_SECONDS, **wire_options)
                 choice = response['choices'][0]
                 text = choice['message'].get('content') or ''
                 if not isinstance(text, str):
                     raise StopComparison('CONTENT_TYPE')
                 usage = response.get('usage', {})
                 # Reasoning content is not copied or evaluated.
-                rawfile.write(json.dumps({'case_id': case.case_id, 'input': body,
-                    'final_content': text, 'usage': usage, 'finish_reason': choice.get('finish_reason')}, ensure_ascii=False)+'\n')
+                raw_record = {'case_id': case.case_id, 'input': body,
+                    'final_content': text, 'usage': usage, 'finish_reason': choice.get('finish_reason')}
+                if experiment == C1:
+                    raw_record['candidate_wire_sha256'] = row['candidate_wire_sha256']
+                rawfile.write(json.dumps(raw_record, ensure_ascii=False)+'\n')
                 rawfile.flush()
-                row.update(screen(case, p, text), generation_status='GENERATED',
+                assessment = assess_candidate(case, p, body, text) if experiment == C2 else screen(case, p, text)
+                row.update(assessment, generation_status='GENERATED',
                     latency_real_sec=time.monotonic()-call_started, final_output_sha256=hashlib.sha256(text.encode()).hexdigest(),
                     provider_prompt_tokens=usage.get('prompt_tokens') if type(usage.get('prompt_tokens')) is int else None,
                     completion_tokens=usage.get('completion_tokens') if type(usage.get('completion_tokens')) is int else None,
@@ -478,8 +623,12 @@ if __name__ == '__main__':
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--prepare', action='store_true')
     group.add_argument('--run', choices=PROFILES)
+    parser.add_argument('--experiment', choices=('baseline', C2, C1), default=None)
+    parser.add_argument('--baseline-source', type=Path)
     args = parser.parse_args()
     if args.prepare:
-        prepare(args.output)
+        prepare(args.output, experiment=args.experiment or 'baseline', baseline_source=args.baseline_source)
     else:
+        if args.experiment is not None or args.baseline_source is not None:
+            parser.error('experiment selection is prepare-only')
         raise SystemExit(run(args.output, args.run))
