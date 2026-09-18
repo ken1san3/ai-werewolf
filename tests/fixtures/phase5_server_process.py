@@ -30,12 +30,17 @@ from server.network import GameRegistry, SessionManager, TickDriver, WebSocketGa
 
 
 class _DayOneBarrierClock:
-    def __init__(self, clock_start: Path, day_one_release: Path) -> None:
+    def __init__(
+        self, clock_start: Path, day_one_release: Path, *, day_seconds: int
+    ) -> None:
         self._clock_start = clock_start
         self._day_one_release = day_one_release
+        self._day_seconds = day_seconds
         self._started_at_ns: int | None = None
         self._day_one_released_at_ns: int | None = None
         self._day_one_chat_complete = False
+        self._day_one_completed_at_ns: int | None = None
+        self._day_one_completed_value: int | None = None
 
     def __call__(self) -> int:
         if not self._clock_start.exists():
@@ -45,18 +50,29 @@ class _DayOneBarrierClock:
         if not self._day_one_release.exists():
             elapsed = (time.monotonic_ns() - self._started_at_ns) // 1_000_000_000
             return min(elapsed, 1)
-        # Completion acceptance requires one Day-1 chat from every seat. Hold the
-        # synthetic game clock at Day-1 start until that observable condition is met,
-        # instead of relying on host scheduling speed.
-        if not self._day_one_chat_complete:
-            return 1
         if self._day_one_released_at_ns is None:
             self._day_one_released_at_ns = time.monotonic_ns()
-        return 1 + (
-            time.monotonic_ns() - self._day_one_released_at_ns
+        now = time.monotonic_ns()
+        elapsed = (now - self._day_one_released_at_ns) // 1_000_000_000
+        # Let due/jitter/cooldown work progress, but keep the synthetic clock one
+        # second before the Day-1 deadline until every seat has an accepted chat.
+        if not self._day_one_chat_complete:
+            return 1 + min(elapsed, self._day_seconds - 1)
+        assert self._day_one_completed_at_ns is not None
+        assert self._day_one_completed_value is not None
+        return self._day_one_completed_value + (
+            now - self._day_one_completed_at_ns
         ) // 1_000_000_000
 
     def mark_day_one_chat_complete(self) -> None:
+        if self._day_one_chat_complete:
+            return
+        now = time.monotonic_ns()
+        if self._day_one_released_at_ns is None:
+            self._day_one_released_at_ns = now
+        elapsed = (now - self._day_one_released_at_ns) // 1_000_000_000
+        self._day_one_completed_value = 1 + min(elapsed, self._day_seconds - 1)
+        self._day_one_completed_at_ns = now
         self._day_one_chat_complete = True
 
 
@@ -117,7 +133,7 @@ async def run_server(
             night_seconds=1,
             silence_after_dawn_seconds=0,
             # Give nine subprocess clients enough CI scheduling headroom for Day 1 chat.
-            day_seconds=10,
+            day_seconds=day_seconds,
             vote_seconds=1,
         ),
     )
@@ -126,7 +142,10 @@ async def run_server(
         for index in range(sum(preset.role_counts.values()))
     )
     game_id = f"123e4567-e89b-12d3-a456-{seed:012d}"
-    clock = _DayOneBarrierClock(clock_start, day_one_release)
+    day_seconds = 10
+    clock = _DayOneBarrierClock(
+        clock_start, day_one_release, day_seconds=day_seconds
+    )
     game = GameState.create_from_preset(
         content,
         preset,

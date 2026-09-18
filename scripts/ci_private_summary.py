@@ -11,6 +11,9 @@ _ERROR_TYPES = frozenset({
     "AssertionError", "TimeoutError", "PermissionError", "FileExistsError",
     "TypeError", "ValueError", "RuntimeError", "OSError", "ImportError",
     "ModuleNotFoundError",
+    "P6FSemanticGameEndFailure", "P6FSemanticCleanupFailure",
+    "P6FSemanticResponsiveFailure", "P6FSemanticPreVoteFailure",
+    "P6FSemanticChatCapFailure", "P6FSemanticAggregateFailure",
 })
 
 

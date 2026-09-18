@@ -25,6 +25,30 @@ def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+class P6FSemanticGameEndFailure(AssertionError):
+    pass
+
+
+class P6FSemanticCleanupFailure(AssertionError):
+    pass
+
+
+class P6FSemanticResponsiveFailure(AssertionError):
+    pass
+
+
+class P6FSemanticPreVoteFailure(AssertionError):
+    pass
+
+
+class P6FSemanticChatCapFailure(AssertionError):
+    pass
+
+
+class P6FSemanticAggregateFailure(AssertionError):
+    pass
+
+
 @pytest.fixture
 def objects():
     content = load_content(runner.PROJECT_ROOT / "content")
@@ -155,13 +179,21 @@ def test_p6f_nine_client_semantic_completion(pytestconfig):
     config = runner.RunConfig(LocalLLMSettings(endpoint="http://127.0.0.1:1/v1/chat/completions", model="Qwen3.5-9B-Q4_K_M.gguf", generation=GenerationSettings(max_output_tokens=512), llama_cpp_structured_output=runner.LlamaCppStructuredOutputConfig()), evidence_container / "run", False, False, None, 8625, 1200.0, (), phase6=True)
     result = asyncio.run(runner._run_game(config, config.output_dir, label="P6-F", environ=os.environ, phase6_fixture=True))
     runner._write_private_json_atomic(evidence_container / "completion-result.json", result)
-    assert result["machine_semantic_pass"] is True, result["errors"]
-    assert result["semantic"]["responsive_accepted_count"] >= 1
-    assert result["semantic"]["pre_vote_reassessment_count"] >= 1
-    assert result["semantic"]["maximum_chat_starts_per_player_phase"] <= 2
-    assert len(result["cleanup"]) == 11
-    assert all(not child["alive"] for child in result["cleanup"])
-    assert result["server"]["game_end"] is True
+    # Classify only public acceptance predicates; private result/error material stays on disk.
+    if result["server"]["game_end"] is not True:
+        raise P6FSemanticGameEndFailure
+    if len(result["cleanup"]) != 11 or not all(
+        not child["alive"] for child in result["cleanup"]
+    ):
+        raise P6FSemanticCleanupFailure
+    if result["semantic"]["responsive_accepted_count"] < 1:
+        raise P6FSemanticResponsiveFailure
+    if result["semantic"]["pre_vote_reassessment_count"] < 1:
+        raise P6FSemanticPreVoteFailure
+    if result["semantic"]["maximum_chat_starts_per_player_phase"] > 2:
+        raise P6FSemanticChatCapFailure
+    if result["machine_semantic_pass"] is not True:
+        raise P6FSemanticAggregateFailure
 
 def semantic_shard():
     records, server = [], []
