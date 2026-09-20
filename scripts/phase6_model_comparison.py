@@ -59,11 +59,15 @@ C2 = 'none_reason_v1'
 C1 = 'schema_order_v1'
 K1 = 'speech_act_kind_first_v1'
 I1 = 'intent_first_v1'
+S1 = 'single_shape_v1'
 K1_SOURCES = ('scripts/phase6_kind_first_probe.py', 'tests/test_phase6_kind_first_probe.py')
 I1_SOURCES = (*K1_SOURCES, 'scripts/phase6_intent_first_probe.py',
               'tests/test_phase6_intent_first_probe.py', 'scripts/phase6_probe_outer.py',
               'tests/test_phase6_probe_outer.py', 'tests/test_phase6_intent_first_runner.py')
-TASK_IDS = {C2: 'T433', C1: 'T435', K1: 'T439', I1: 'T447'}
+S1_SOURCES = (*K1_SOURCES, 'scripts/phase6_single_shape_probe.py',
+              'tests/test_phase6_single_shape_probe.py', 'scripts/phase6_probe_outer.py',
+              'tests/test_phase6_probe_outer.py', 'tests/test_phase6_single_shape_runner.py')
+TASK_IDS = {C2: 'T433', C1: 'T435', K1: 'T439', I1: 'T447', S1: 'T451'}
 BASELINE_FILES = {
     'plan.json': 'c878456dc15b00b87549a8b91d29eba8ef64e63cb7cc972da1eff40942f4c1c4',
     'qw9-results.json': '72007dca98868b857ce92092aa0fae0247f36189c934c487cd9ea9246a7aae15',
@@ -77,6 +81,7 @@ EXPERIMENT_SOURCE_DELTA = {variant: frozenset({
     'tests/test_phase6_schema_order_probe.py'}) for variant in (C1, C2)}
 EXPERIMENT_SOURCE_DELTA[K1] = EXPERIMENT_SOURCE_DELTA[C1] | frozenset(K1_SOURCES)
 EXPERIMENT_SOURCE_DELTA[I1] = EXPERIMENT_SOURCE_DELTA[C1] | frozenset(I1_SOURCES)
+EXPERIMENT_SOURCE_DELTA[S1] = EXPERIMENT_SOURCE_DELTA[C1] | frozenset(S1_SOURCES)
 
 
 class StopComparison(RuntimeError):
@@ -108,7 +113,7 @@ def claim_run(out, key):
 
 
 def source_identity(experiment='baseline'):
-    extra = I1_SOURCES if experiment == I1 else K1_SOURCES if experiment == K1 else ()
+    extra = S1_SOURCES if experiment == S1 else I1_SOURCES if experiment == I1 else K1_SOURCES if experiment == K1 else ()
     sources = (*SOURCES, *extra)
     paths = [ROOT / p for p in sources] + sorted((ROOT/'ai_client').rglob('*.py'))
     return {p.relative_to(ROOT).as_posix(): file_hash(p) for p in paths}
@@ -133,6 +138,9 @@ def launch_args(key):
 
 
 def experiment_wire(body, experiment):
+    if experiment == S1:
+        from scripts.phase6_single_shape_probe import single_shape_wire_bytes
+        return single_shape_wire_bytes(body)
     if experiment == I1:
         from scripts.phase6_intent_first_probe import intent_first_wire_bytes
         return intent_first_wire_bytes(body)
@@ -140,6 +148,9 @@ def experiment_wire(body, experiment):
 
 
 def wire_target(experiment):
+    if experiment == S1:
+        from scripts.phase6_single_shape_probe import FIELDS
+        return {"speech_act": list(FIELDS)}
     if experiment == I1:
         return {'root': ['intent', 'realization', 'updates'],
                 'intent': ['discussion', 'decision'],
@@ -149,11 +160,14 @@ def wire_target(experiment):
 
 
 def experiment_sources(experiment):
-    return source_identity(experiment) if experiment in (K1, I1) else source_identity()
+    return source_identity(experiment) if experiment in (K1, I1, S1) else source_identity()
 
 
 def experiment_body(projection, model, experiment):
     body = body_for(projection, model)
+    if experiment == S1:
+        from scripts.phase6_single_shape_probe import candidate_body as shape_body
+        return shape_body(body)
     if experiment == I1:
         from scripts.phase6_intent_first_probe import candidate_body as intent_body
         return intent_body(body)
@@ -212,7 +226,7 @@ def baseline_binding(manifest, baseline_source):
                 raise ValueError
         binding = {'directory': str(source.resolve()), 'artifacts': dict(BASELINE_FILES),
                    'runtime': measured['runtime'], 'source_delta_paths': sorted(allowed_delta)}
-        if manifest.get('experiment') in (K1, I1):
+        if manifest.get('experiment') in (K1, I1, S1):
             if annotated['evaluated'] != 32 or annotated['unevaluated'] != 0:
                 raise ValueError
             reasons = Counter(code for row in annotated['rows'] for code in row['reason_codes'])
@@ -231,7 +245,7 @@ def baseline_binding(manifest, baseline_source):
 
 
 def prepare(out, *, experiment='baseline', baseline_source=None):
-    if experiment not in ('baseline', C2, C1, K1, I1) or (experiment == 'baseline' and baseline_source is not None):
+    if experiment not in ('baseline', C2, C1, K1, I1, S1) or (experiment == 'baseline' and baseline_source is not None):
         raise StopComparison('EXPERIMENT_INVALID')
     out.mkdir(parents=True, exist_ok=True)
     if (out/'plan.json').exists():
@@ -244,23 +258,23 @@ def prepare(out, *, experiment='baseline', baseline_source=None):
         entry = {'case_id': case.case_id, 'category': case.category,
                  'common_input_sha256': common_hash(body),
                  'projection_sha256': p.prompt_sha256, 'proxy_units': p.token_proxy_units}
-        if experiment in (C2, C1, K1, I1):
+        if experiment in (C2, C1, K1, I1, S1):
             entry.update(baseline_common_input_sha256=common_hash(baseline),
                          baseline_input_sha256=digest(baseline), candidate_input_sha256=digest(body),
                          candidate_schema_sha256=digest(body['response_format']['json_schema']['schema']))
-        if experiment in (C1, K1, I1):
+        if experiment in (C1, K1, I1, S1):
             payload = experiment_wire(body, experiment)
             entry.update(baseline_wire_sha256=digest(baseline),
                          candidate_wire_sha256=hashlib.sha256(payload).hexdigest(),
                          wire_size_bytes=len(payload), target_property_order=wire_target(experiment),
                          serializer_version=1)
-        if experiment == I1:
+        if experiment in (I1, S1):
             entry.update(intent_metrics(baseline, body))
             entry['baseline_projection_proxy_units'] = entry.pop('proxy_units')
         entries.append(entry)
     profiles = {}
     for key, (model, quant, server, _) in PROFILES.items():
-        if experiment in (C2, C1, K1, I1) and key != 'qw9':
+        if experiment in (C2, C1, K1, I1, S1) and key != 'qw9':
             continue
         binaries = [server, *sorted(server.parent.glob('*.dll'))] if server.is_file() else []
         profiles[key] = {'model': file_identity(model), 'quantization': quant,
@@ -270,7 +284,7 @@ def prepare(out, *, experiment='baseline', baseline_source=None):
                 'sampling': SAMPLING, 'context': CONTEXT, 'request_seconds': REQUEST_SECONDS,
                 'model_seconds': MODEL_SECONDS, 'load_seconds': LOAD_SECONDS,
                 'max_generations_per_model': len(entries), 'retry': 0, 'repair': 0}
-    if experiment in (C2, C1, K1, I1):
+    if experiment in (C2, C1, K1, I1, S1):
         manifest.update(experiment=experiment, experiment_version=1, task_id=TASK_IDS[experiment])
         manifest['baseline'] = baseline_binding(manifest, baseline_source)
     with (out/'plan.json').open('x', encoding='utf-8') as f:
@@ -504,9 +518,9 @@ def run(out, key):
     global _RUN_DEADLINE
     plan = json.loads((out/'plan.json').read_text(encoding='utf-8'))
     experiment = plan.get('experiment', 'baseline')
-    if experiment not in ('baseline', C2, C1, K1, I1) or (experiment in (C2, C1, K1, I1) and key != 'qw9'):
+    if experiment not in ('baseline', C2, C1, K1, I1, S1) or (experiment in (C2, C1, K1, I1, S1) and key != 'qw9'):
         raise StopComparison('EXPERIMENT_INVALID')
-    if experiment in (C2, C1, K1, I1):
+    if experiment in (C2, C1, K1, I1, S1):
         if (plan.get('experiment_version') != 1 or plan.get('task_id') != TASK_IDS[experiment]
                 or baseline_binding(plan, plan['baseline']['directory']) != plan['baseline']):
             raise StopComparison('BASELINE_MISMATCH')
@@ -526,11 +540,11 @@ def run(out, key):
         body = experiment_body(p, profile['model']['path'], experiment)
         if case.case_id != frozen['case_id'] or common_hash(body) != frozen['common_input_sha256']:
             raise StopComparison('FROZEN_INPUT_CHANGED')
-        if experiment in (C2, C1, K1, I1) and (digest(body) != frozen['candidate_input_sha256']
+        if experiment in (C2, C1, K1, I1, S1) and (digest(body) != frozen['candidate_input_sha256']
                 or digest(body['response_format']['json_schema']['schema']) != frozen['candidate_schema_sha256']
                 or digest(body_for(p, profile['model']['path'])) != frozen['baseline_input_sha256']):
             raise StopComparison('FROZEN_INPUT_CHANGED')
-        if experiment in (C1, K1, I1):
+        if experiment in (C1, K1, I1, S1):
             payload = experiment_wire(body, experiment)
             if (hashlib.sha256(payload).hexdigest() != frozen['candidate_wire_sha256']
                     or digest(body_for(p, profile['model']['path'])) != frozen['baseline_wire_sha256']
@@ -539,7 +553,7 @@ def run(out, key):
                     or frozen['serializer_version'] != 1):
                 raise StopComparison('FROZEN_WIRE_CHANGED')
             prepared_wires[case.case_id] = payload
-        if experiment == I1:
+        if experiment in (I1, S1):
             metrics = intent_metrics(body_for(p, profile['model']['path']), body)
             if any(frozen.get(k) != v for k, v in metrics.items()):
                 raise StopComparison('FROZEN_INPUT_CHANGED')
@@ -554,7 +568,7 @@ def run(out, key):
     result = {'model_key': key, 'model': Path(profile['model']['path']).name,
               'quantization': profile['quantization'], 'rows': [], 'retry': 0, 'repair': 0,
               'status': 'STARTING', 'clock_domain': 'REAL', 'plan_sha256': file_hash(out/'plan.json')}
-    if experiment in (C2, C1, K1, I1):
+    if experiment in (C2, C1, K1, I1, S1):
         result.update(experiment=experiment, baseline_artifacts=plan['baseline']['artifacts'])
     call_started = None
     def save():
@@ -583,7 +597,7 @@ def run(out, key):
             raise StopComparison('MODEL_IDENTITY')
         (private/'runtime.json').write_text(json.dumps(identity, indent=2), encoding='utf-8')
         result['runtime'] = safe_runtime(identity)
-        if experiment in (C2, C1, K1, I1) and result['runtime'] != plan['baseline']['runtime']:
+        if experiment in (C2, C1, K1, I1, S1) and result['runtime'] != plan['baseline']['runtime']:
             raise StopComparison('BASELINE_RUNTIME_MISMATCH')
         with (private/'monitor.log').open('xb') as log:
             monitor = subprocess.Popen([sys.executable, str(ROOT/'scripts/monitor_phase6_gpu.py'),
@@ -598,7 +612,7 @@ def run(out, key):
                     raise StopComparison('RUNTIME_CHANGED')
                 body = experiment_body(p, profile['model']['path'], experiment)
                 wire_options = {}
-                if experiment in (C1, K1, I1):
+                if experiment in (C1, K1, I1, S1):
                     payload = prepared_wires[case.case_id]
                     if not re.fullmatch(r'G[0-9]{2}-[0-9]+', case.case_id):
                         raise StopComparison('WIRE_CASE_ID_INVALID')
@@ -620,11 +634,11 @@ def run(out, key):
                                candidate_input_sha256=digest(body), candidate_schema_pass=None,
                                legacy_contract_pass=None, adapter_status='NOT_APPLIED',
                                none_reason=None, adapted_output_sha256=None)
-                if experiment in (C1, K1, I1):
+                if experiment in (C1, K1, I1, S1):
                     row.update(baseline_input_sha256=digest(body), candidate_input_sha256=digest(body),
                                baseline_wire_sha256=digest(body), candidate_wire_sha256=hashlib.sha256(payload).hexdigest(),
                                wire_size_bytes=len(payload), serializer_version=1)
-                if experiment == I1:
+                if experiment in (I1, S1):
                     baseline = body_for(p, profile['model']['path'])
                     row.update(baseline_input_sha256=digest(baseline), baseline_wire_sha256=digest(baseline),
                                candidate_schema_pass=None, legacy_contract_pass=None,
@@ -646,11 +660,14 @@ def run(out, key):
                 # Reasoning content is not copied or evaluated.
                 raw_record = {'case_id': case.case_id, 'input': body,
                     'final_content': text, 'usage': usage, 'finish_reason': choice.get('finish_reason')}
-                if experiment in (C1, K1, I1):
+                if experiment in (C1, K1, I1, S1):
                     raw_record['candidate_wire_sha256'] = row['candidate_wire_sha256']
                 rawfile.write(json.dumps(raw_record, ensure_ascii=False)+'\n')
                 rawfile.flush()
-                if experiment == I1:
+                if experiment == S1:
+                    from scripts.phase6_single_shape_probe import assess_candidate as assess_shape
+                    assessment = assess_shape(case, p, body, text)
+                elif experiment == I1:
                     from scripts.phase6_intent_first_probe import assess_candidate as assess_intent
                     assessment = assess_intent(case, p, body, text)
                 else:
@@ -706,7 +723,7 @@ if __name__ == '__main__':
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--prepare', action='store_true')
     group.add_argument('--run', choices=PROFILES)
-    parser.add_argument('--experiment', choices=('baseline', C2, C1, K1, I1), default=None)
+    parser.add_argument('--experiment', choices=('baseline', C2, C1, K1, I1, S1), default=None)
     parser.add_argument('--baseline-source', type=Path)
     args = parser.parse_args()
     if args.prepare:
