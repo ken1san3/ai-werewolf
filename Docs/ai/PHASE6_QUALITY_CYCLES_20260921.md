@@ -19,11 +19,40 @@
 
 ## Best known state
 
-現在の製品baselineを維持。S1はtest-only隔離され、製品採用なし。承認済み検証基盤を保持。S1は不採用、P2は設計中・未測定。
+現在の製品baselineを維持。S1/P2はtest-only隔離され、製品採用なし。独立承認済み検証基盤を保持。Cycle3 IC2は設計中・未実装。
 
 ## Cycle 2: 2-call Plan→Message（設計中）
 
 S1では自由なnullable単一shapeがkindごとの制約を満たせず、strict adapterは30件を受理しなかった。validatorを緩めず、次は旧grounded planを厳密schemaで先に生成し、その確定planから本文を別callで生成する仮説へ進む。S1は再実行せず、独立意味評価と並行してT452詳細設計を行う。モデル/製品境界は不変。新予算/呼出回数/失敗原子性を設計し、T453独立承認後だけ実装する。
+
+### Cycle 2 現在の証拠
+
+- T452設計 SHA `c2f46835bcb13e7f6008b0fb5e74e3cda0817b722d24030aca72b7497ce1db0c` はT453独立APPROVED。
+- T455がpure helper/受理同値testsを担当し、Mainがrunner/outer接点・呼出数/失敗経路testsを実装。製品schema/code不変。
+- Python3.13関連237 PASS、追加outer routing1 PASS。Python3.10 focused118 PASS。check_docs/diff-check PASS。
+- 公式converter32/32 PASS、native tokenizer71有限fixture、生成0。多byte最大文字数fixture1件は128 tokens超過したが、診断値として保存しschema受理集合やtoken予算を変更しない。
+- 2call合計512 tokens（384/128）、最大32 decisions/64calls、retry/repair0。新freeze `logs/t448-quality-cycles/frozen-p2/plan.json`、tool審査対象5filesは `p2-review-sources.json` に固定。
+- Windowsの置換保存でPermissionError5を観測。dispatch前の消費をexclusive個別ファイルへ記録し、結果snapshotは既存方式を維持した。通常のoffline fixture/保存不具合として修正し継続。
+- tool最終APPROVED後にT454で32判断/60callを一回測定し、T453独立意味評価まで完了。
+
+### Cycle 2 採否
+
+| 軸 | baseline | P2 |
+| --- | ---: | ---: |
+| HARD FAIL | 14 | 22 |
+| SEMANTIC PASS | 7 | 4 |
+| STYLE PASS | 15 | 15 |
+| act/text不一致 | 23 | 28 |
+| fabricated evidence | 0 | 2 |
+| 秘密 / 状態 / 能力矛盾 | 5 / 3 / 0 | 1 / 2 / 2 |
+| UNKNOWN | 0 | 0 |
+| 固定18質問への回答 | 9 | 7 |
+
+P2不採用。全32構造PASSでも全actがNONE、本文28件はすべて不一致。peer copy9/self copy7、合法NONE control0/2。32判断は302.679 REAL秒、prompt108,772/completion7,507、GPU peak6,322MiB/100%、終了process残存0。品質と性能は別評価。原本は保存し、製品rollback不要（製品未変更）。
+
+### Cycle 3 scope
+
+P2は本文を別callへ分離したが、intent kind選択時にgrounding/state update全体の生成costが残っていた。次はIC2として、call1でkindだけを等しいshapeのenumから選び、call2でそのkindを固定した旧完全出力を生成する設計をT456へ割当。NONEを禁止せず、旧validator/authority/512 tokens合計/32caseを維持する。field順やoneOf枝順の再調整ではない。設計独立承認前は実装・生成しない。
 
 ### Cycle 1 最終比較
 

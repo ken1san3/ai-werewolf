@@ -285,7 +285,8 @@ def main():
     args = parser.parse_args()
     # Fixed task command, no generic shell/daemon or arbitrary process cleanup.
     plan = json.loads((args.output/'plan.json').read_text(encoding='utf-8'))
-    expected_task = {'intent_first_v1': 'T447', 'single_shape_v1': 'T451'}.get(plan.get('experiment'))
+    expected_task = {'intent_first_v1': 'T447', 'single_shape_v1': 'T451',
+                     'two_call_v1': 'T454'}.get(plan.get('experiment'))
     if expected_task is None or plan.get('task_id') != expected_task:
         raise ValueError('OUTER_PLAN_INVALID')
     from tests.fixtures.phase6_evidence import create_private_evidence_container
@@ -293,7 +294,8 @@ def main():
         evidence_kind='synthetic', task_id=expected_task+'OUTER', created_at_utc=datetime.now(timezone.utc))
     with (args.output/'outer-private-locator.json').open('x', encoding='utf-8') as locator:
         json.dump({'path': str(private)}, locator)
-    command = [sys.executable, str(ROOT/'scripts/phase6_model_comparison.py'),
+    runner = 'phase6_two_call_runner.py' if plan['experiment'] == 'two_call_v1' else 'phase6_model_comparison.py'
+    command = [sys.executable, str(ROOT/'scripts'/runner),
                '--output', str(args.output.resolve()), '--run', 'qw9']
     result = supervise(command, args.output/'outer-qw9', raw_directory=private)
     print(json.dumps({key: result.get(key) for key in
