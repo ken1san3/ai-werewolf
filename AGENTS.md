@@ -154,6 +154,13 @@ Main IntegratorがBLOCKEDで停止する場合、停止報告と再開記録に�
 - Do not infer approval from a worker's completion claim.
 - Do not restore or execute the archived autonomous-development runtime.
 
+## ローカル検証とGitHub Actions（2026-09-21ユーザー指示）
+
+通常はローカル検証→commit/push。自動CI停止を維持し、workflow変更等で再開しない。
+Actionsの有効化/実行/再実行はローカル同等検証と理由説明後、ユーザー明示許可時だけ。
+明示指定がなければ完了/merge条件にしない。過去CI要求より本指示を優先する。
+複数Python検証・停止済みworkflow等の詳細は`Docs/ai/OPERATIONS.md`。
+
 ## End of task
 
 Before handing work back:

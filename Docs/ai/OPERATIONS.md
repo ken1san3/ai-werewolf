@@ -41,6 +41,25 @@ for each packet. Workers return at their assigned boundary. Honor explicit holds
 record recoverable evidence/pointers before context loss. Keep chat to meaningful transitions and
 store logs with evidence. No custom scheduler, supervisor, model router or automatic merge layer.
 
+## ローカル検証とGitHub Actions（2026-09-21ユーザー指示）
+
+通常経路はローカル実装→ローカルtest/lint/型check/関連regression→commit/push。
+Python複数versionも利用可能なローカル環境を使い、未検証環境は未検証と記録する。
+GitHub Actionsは通常利用せず、push/PR自動CIを停止状態に保つ。workflow fileの変更・追加、
+API、手動dispatch等で勝手に有効化・実行・再実行しない。必要時も先にローカル同等検証を行い、
+実行理由を報告してユーザーの明示許可を得る。無料実行時間の節約を優先する。
+明示指定がない限りActions成功は開発完了・merge gateではない。過去packetのCI要求はこの現行方針に従う。
+
+停止済みworkflow（repository設定、workflow fileは変更していない）:
+
+- `CI` / ID `345425149` / `.github/workflows/ci.yml`: `disabled_manually`
+- `One-time scoped CI repair` / ID `360985199` / `.github/workflows/ci-cleanup-apply.yml`: `disabled_manually`
+
+適用時に実行中だったrun `35574431743` はキャンセル完了。7 jobは既にPASS、
+Python3.10とwindows-privateはキャンセルであり、FAIL/PASSへ読み替えない。
+以後のpushで新runが起動していないことを設定とrun一覧から照合する。Actionsを使わないことは
+ローカル検証・独立Reviewer・privacy/authority gateを省略する許可ではない。
+
 ## Agent Dispatch Gate（D075）
 
 判定表は `AGENTS.md` の同名節、厳密な適用条件と受入例は
