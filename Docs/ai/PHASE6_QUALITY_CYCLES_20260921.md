@@ -149,3 +149,11 @@ CI同期修正の承認4fileはT473測定SHAとrootで一致。Python3.13 141 PA
 次は自由文groundingを対象に、authoritative stateと発話内容の対応を分離して検証する最小test-only設計を行う。機械的構造判定と意味HARD判定の合成漏れを防ぐ検証も必要。モデル変更やgame runへは進めない。今回6cycle到達のため次候補は未着手。
 
 累計新provider252call。通常game/Master Run/Phase7は0。独立審査を通過したtoolは保持し、品質候補は全件不採用。外部pushだけが明示確認待ちで、新HEAD CI未実施・Phase6未達を維持する。
+
+## 後続T476の有限2cycle（完了）
+
+旧6cycleは再実行せず、後続の新cycle1でGB1（kind＋authoritative basis選択）を独立設計/tool承認後に32case/64call一回測定。新cycle2ではCO tupleの既知構造矛盾だけを閉じるoffline helperを実装・独立承認し、新provider0。
+
+T478初回評価は内部表示の追加許可後に全32件完了。不採用。HARD fail14→12、SEMANTIC7→12、STYLE15→24、不一致23→3でも、秘密5→6、質問回答9→5、合法NONE0/2、長文peer copy3で個別gate未達。捏造0/状態1/能力0/UNKNOWN0。詳細とexact hashはT478_GROUNDING_BASIS_QUALITY.mdとT476_PHASE6_CONTINUATION.md、採否はD078。
+
+内部表示blockerは解消。旧時間枠終了により新provider cycleは始めず、会話baselineを保持。次はchoice適合とbasis支持関係を分ける最小設計。Actionsはユーザー追加指示で停止し、通常の完了gateはローカル検証とする。
