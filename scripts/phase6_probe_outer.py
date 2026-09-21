@@ -286,10 +286,12 @@ def main():
     # Fixed task command, no generic shell/daemon or arbitrary process cleanup.
     plan = json.loads((args.output/'plan.json').read_text(encoding='utf-8'))
     expected_task = {'intent_first_v1': 'T447', 'single_shape_v1': 'T451',
-                     'two_call_v1': 'T454', 'intent_choice_v1': 'T458', 'grounding_closed_v1': 'T462', 'stage_control_v1': 'T471'}.get(plan.get('experiment'))
+                     'two_call_v1': 'T454', 'intent_choice_v1': 'T458', 'grounding_closed_v1': 'T462', 'stage_control_v1': 'T471', 'grounding_basis_v1': 'T480'}.get(plan.get('experiment'))
     if (expected_task is None or plan.get('task_id') != expected_task
             or (plan.get('experiment') == 'stage_control_v1'
-                and plan.get('runner') != 'scripts/phase6_stage_control_runner.py')):
+                and plan.get('runner') != 'scripts/phase6_stage_control_runner.py')
+            or (plan.get('experiment') == 'grounding_basis_v1'
+                and plan.get('runner') != 'scripts/phase6_grounding_basis_runner.py')):
         raise ValueError('OUTER_PLAN_INVALID')
     from tests.fixtures.phase6_evidence import create_private_evidence_container
     private = create_private_evidence_container(ROOT/'logs/phase6-private-evidence',
@@ -299,7 +301,8 @@ def main():
     runner = {'two_call_v1': 'phase6_two_call_runner.py',
               'intent_choice_v1': 'phase6_intent_choice_runner.py',
               'grounding_closed_v1': 'phase6_grounding_closed_runner.py',
-              'stage_control_v1': 'phase6_stage_control_runner.py'}.get(
+              'stage_control_v1': 'phase6_stage_control_runner.py',
+              'grounding_basis_v1': 'phase6_grounding_basis_runner.py'}.get(
                   plan['experiment'], 'phase6_model_comparison.py')
     command = [sys.executable, str(ROOT/'scripts'/runner),
                '--output', str(args.output.resolve()), '--run', 'qw9']
