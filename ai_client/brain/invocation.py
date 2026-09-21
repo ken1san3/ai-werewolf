@@ -29,6 +29,7 @@ from ai_client.discussion.model import (
 from .controller import BrainController
 from .model import (
     BrainDecision,
+    BrainInput,
     DecisionOutcome,
     DecisionStatus,
     DispatchDeadline,
@@ -414,11 +415,10 @@ class BrainInvocationArbiter:
         remaining = pending.dispatch_deadline.not_after_monotonic - self._now()
         if remaining <= 0:
             return self._deadline_suppressed_result()
-        request = self.controller.capture_input(
-            allowed_handles=pending.allowed_handles
-        )
-        if request is None:
-            return self._stale_result()
+        captured = await self._capture_with_one_catchup(pending)
+        if isinstance(captured, BrainDispatchResult):
+            return captured
+        request = captured
         remaining = pending.dispatch_deadline.not_after_monotonic - self._now()
         if remaining <= 0:
             return self._deadline_suppressed_result()
@@ -562,8 +562,14 @@ class BrainInvocationArbiter:
                 )
             self._finish(pending, self._cancelled_result())
             return
-        if not self._context_is_current(pending):
-            self._finish(pending, self._current_context_terminal(pending))
+        initial_capture = await self._capture_with_one_catchup(
+            pending, allow_replacement=True
+        )
+        if isinstance(initial_capture, _ReplacementTransition):
+            await self._run_replacement(pending, initial_capture)
+            return
+        if isinstance(initial_capture, BrainDispatchResult):
+            self._finish(pending, initial_capture)
             return
 
         if offer_task is None:
@@ -601,14 +607,22 @@ class BrainInvocationArbiter:
         if lease is None or lease.invocation_id != pending.admission_invocation_id:
             raise RuntimeError("admission offer has an invalid lease")
 
-        request = self.controller.capture_input(
-            allowed_handles=pending.allowed_handles,
-            dispatch_deadline=pending.dispatch_deadline,
+        captured = await self._capture_with_one_catchup(
+            pending, allow_replacement=True
         )
-        if request is None:
-            await self._cancel_offered(pending, lease)
-            self._finish(pending, self._offered_context_terminal(pending))
+        if isinstance(captured, _ReplacementTransition):
+            await self._run_replacement(pending, captured)
             return
+        if isinstance(captured, BrainDispatchResult):
+            await self._cancel_offered(pending, lease)
+            terminal = (
+                self._offered_context_terminal(pending)
+                if captured.outcome.status is DecisionStatus.STALE
+                else captured
+            )
+            self._finish(pending, terminal)
+            return
+        request = captured
 
         transition = await self._replace_before_claim_if_needed(pending)
         if transition is not None:
@@ -756,6 +770,79 @@ class BrainInvocationArbiter:
             self._finish(pending, result)
         await self._run_attached_successor()
 
+    async def _capture_with_one_catchup(
+        self,
+        pending: _PendingInvocation,
+        *,
+        allow_replacement: bool = False,
+    ) -> BrainInput | BrainDispatchResult | _ReplacementTransition:
+        if pending.cancel_requested or self._stopped:
+            return self._cancelled_result()
+        remaining = pending.dispatch_deadline.not_after_monotonic - self._now()
+        if remaining <= 0:
+            return self._deadline_suppressed_result()
+        attempt = self.controller.capture_input_attempt(
+            allowed_handles=pending.allowed_handles,
+            dispatch_deadline=pending.dispatch_deadline,
+        )
+        if attempt.status == "CAPTURED":
+            assert attempt.request is not None
+            return attempt.request
+        if attempt.status != "NETWORK_AHEAD":
+            return self._current_context_terminal(pending)
+
+        world_task = asyncio.create_task(
+            self.controller.world.wait_for_update(attempt.after_world_version),
+            name="aiwolf-brain-capture-catchup-world",
+        )
+        changed_task = asyncio.create_task(
+            self._admission_changed.wait(),
+            name="aiwolf-brain-capture-catchup-state",
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {world_task, changed_task},
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            await self._cancel_watchers(world_task, changed_task)
+        if not done or self._now() >= pending.dispatch_deadline.not_after_monotonic:
+            return self._deadline_suppressed_result()
+
+        async with self._lock:
+            poisoned = self._poisoned
+            fatal = self._fatal_error
+            cancelled = pending.cancel_requested or self._stopped
+            active = self._active is pending
+            self._admission_changed.clear()
+        if poisoned:
+            if fatal is not None:
+                raise fatal
+            raise RuntimeError("BrainInvocationArbiter is poisoned")
+        if cancelled:
+            return self._cancelled_result()
+        if not active:
+            return self._stale_result()
+        if allow_replacement:
+            transition = await self._replace_before_claim_if_needed(pending)
+            if transition is not None:
+                return transition
+        if world_task not in done:
+            return self._current_context_terminal(pending)
+        try:
+            world_task.result()
+        except Exception:
+            return self._stale_result()
+        second = self.controller.capture_input_attempt(
+            allowed_handles=pending.allowed_handles,
+            dispatch_deadline=pending.dispatch_deadline,
+        )
+        if second.status == "CAPTURED":
+            assert second.request is not None
+            return second.request
+        return self._current_context_terminal(pending)
+
     async def _run_replacement(
         self,
         suspended: _PendingInvocation,
@@ -807,6 +894,8 @@ class BrainInvocationArbiter:
                 if transition is not None:
                     offer_task.add_done_callback(self._consume_task)
                     return transition
+            if offer_task.done():
+                return offer_task.result()
             if not self._context_is_current(pending):
                 offered_before_claim = self._completed_as_offer(offer_task)
                 await self._cancel_offer_wait(
@@ -817,9 +906,6 @@ class BrainInvocationArbiter:
                     if offered_before_claim
                     else self._current_context_terminal(pending)
                 )
-            if offer_task.done():
-                return offer_task.result()
-
             world_task = asyncio.create_task(
                 self.controller.world.wait_for_update(after_version)
             )

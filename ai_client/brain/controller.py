@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 import math
 import time
 import unicodedata
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from ai_client.discussion.context import canonical_sha256
 from ai_client.discussion.model import (
@@ -190,6 +190,25 @@ class _BrainFailure:
         self.status = status
 
 
+@dataclass(frozen=True)
+class CaptureAttempt:
+    status: Literal["CAPTURED", "NETWORK_AHEAD", "STALE"]
+    request: BrainInput | None
+    after_world_version: int
+
+    def __post_init__(self) -> None:
+        if self.status not in {"CAPTURED", "NETWORK_AHEAD", "STALE"}:
+            raise ValueError("invalid capture attempt status")
+        if isinstance(self.after_world_version, bool) or not isinstance(
+            self.after_world_version, int
+        ) or self.after_world_version < 0:
+            raise ValueError("after_world_version must be a non-negative integer")
+        if (self.status == "CAPTURED" and not isinstance(self.request, BrainInput)) or (
+            self.status != "CAPTURED" and self.request is not None
+        ):
+            raise ValueError("only CAPTURED may contain a BrainInput")
+
+
 @dataclass
 class _DiscussionObservationMaterial:
     """The sole unresolved local-send material retained for outer observation."""
@@ -273,23 +292,87 @@ class BrainController:
     ) -> BrainInput | None:
         """Synchronously capture a consistent, request-local World view."""
 
-        if dispatch_deadline is not None and not isinstance(
-            dispatch_deadline, DispatchDeadline
-        ):
+        attempt = self._capture_input(
+            allowed_handles=allowed_handles,
+            dispatch_deadline=dispatch_deadline,
+            report_network_ahead=False,
+        )
+        return attempt.request
+
+    def capture_input_attempt(
+        self,
+        *,
+        allowed_handles: tuple[ActionHandle, ...],
+        dispatch_deadline: DispatchDeadline,
+    ) -> CaptureAttempt:
+        """Capture once while distinguishing the narrow Network-ahead window."""
+
+        if not isinstance(dispatch_deadline, DispatchDeadline):
+            raise TypeError("dispatch_deadline must be DispatchDeadline")
+        return self._capture_input(
+            allowed_handles=allowed_handles,
+            dispatch_deadline=dispatch_deadline,
+            report_network_ahead=True,
+        )
+
+    def _capture_input(
+        self,
+        *,
+        allowed_handles: tuple[ActionHandle, ...] | None,
+        dispatch_deadline: DispatchDeadline | None,
+        report_network_ahead: bool,
+    ) -> CaptureAttempt:
+        if dispatch_deadline is not None and not isinstance(dispatch_deadline, DispatchDeadline):
             raise TypeError("dispatch_deadline must be DispatchDeadline when supplied")
         snapshot = self.world.snapshot()
         if not self._snapshot_is_current(snapshot):
-            return None
+            return CaptureAttempt("STALE", None, snapshot.version)
         actions = self.world.current_actions()
+        allowed_valid = (
+            allowed_handles is None
+            or (
+                isinstance(allowed_handles, tuple)
+                and bool(allowed_handles)
+                and all(isinstance(handle, ActionHandle) for handle in allowed_handles)
+                and len(set(allowed_handles)) == len(allowed_handles)
+            )
+        )
+        if not allowed_valid:
+            return CaptureAttempt("STALE", None, snapshot.version)
+        phase = snapshot.phase
+        assert phase is not None
+        deadline_valid = dispatch_deadline is None or (
+            (phase.day, phase.phase) == (dispatch_deadline.day, dispatch_deadline.phase)
+            and self._deadline_allows_dispatch(dispatch_deadline)
+        )
+        if not deadline_valid:
+            return CaptureAttempt("STALE", None, snapshot.version)
+        if (
+            report_network_ahead
+            and dispatch_deadline is not None
+            and allowed_handles is not None
+            and actions.world_version == snapshot.version
+            and actions.world_last_applied_seq == snapshot.last_applied_seq
+            and actions.network_last_seq > actions.world_last_applied_seq
+            and all(
+                (handle.phase, handle.day, handle.connection_generation,
+                 handle.action_generation)
+                == (dispatch_deadline.phase, dispatch_deadline.day,
+                    dispatch_deadline.connection_generation,
+                    dispatch_deadline.action_generation)
+                for handle in allowed_handles
+            )
+        ):
+            return CaptureAttempt("NETWORK_AHEAD", None, snapshot.version)
         if not (
             actions.is_caught_up
             and actions.world_version == snapshot.version
             and actions.world_last_applied_seq == snapshot.last_applied_seq
             and actions.network_last_seq == snapshot.last_applied_seq
         ):
-            return None
+            return CaptureAttempt("STALE", None, snapshot.version)
         if any(not isinstance(action, ActionHandle) for action in actions.actions):
-            return None
+            return CaptureAttempt("STALE", None, snapshot.version)
         captured_actions = tuple(actions.actions)
         if allowed_handles is not None:
             if (
@@ -299,19 +382,11 @@ class BrainController:
                 or len(set(allowed_handles)) != len(allowed_handles)
                 or any(handle not in captured_actions for handle in allowed_handles)
             ):
-                return None
+                return CaptureAttempt("STALE", None, snapshot.version)
             allowed = frozenset(allowed_handles)
             captured_actions = tuple(
                 handle for handle in captured_actions if handle in allowed
             )
-        phase = snapshot.phase
-        assert phase is not None
-        if dispatch_deadline is not None and (
-            (phase.day, phase.phase)
-            != (dispatch_deadline.day, dispatch_deadline.phase)
-            or not self._deadline_allows_dispatch(dispatch_deadline)
-        ):
-            return None
         history = self.world.history()
         co = self.world.co_for_day(phase.day)
         ability_results = self.world.ability_results()
@@ -354,7 +429,7 @@ class BrainController:
             request, dispatch_deadline
         ):
             raise RuntimeError("Phase 6 capture does not match its request")
-        return request
+        return CaptureAttempt("CAPTURED", request, snapshot.version)
 
     def dispatch_context_is_current(
         self,
