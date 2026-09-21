@@ -170,8 +170,8 @@ def candidate_schema(projection, choice):
     if allowed_refs:
         definitions["evidence_ref"] = {"oneOf": [_ref_branch(ref) for ref in allowed_refs]}
     else:
-        definitions["evidence_array"] = {"type": "array", "maxItems": 0}
-        definitions["claim_updates"] = {"type": "array", "maxItems": 0}
+        definitions["evidence_array"]["maxItems"] = 0
+        definitions["claim_updates"]["maxItems"] = 0
         if kind == "QUESTION":
             definitions["speech_act"]["properties"]["source"] = {"const": None}
 
@@ -185,7 +185,7 @@ def candidate_schema(projection, choice):
             branches.append(branch)
         definitions["claim"] = {"oneOf": branches}
     else:
-        definitions["claim_updates"] = {"type": "array", "maxItems": 0}
+        definitions["claim_updates"]["maxItems"] = 0
     Draft202012Validator.check_schema(schema)
     return schema
 

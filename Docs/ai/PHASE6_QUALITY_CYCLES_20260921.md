@@ -6,6 +6,20 @@
 
 開始時main5a5635f、専用branch8b322d1。既存CI35518262838は全9job PASS。I1実装/所有修正/審査/32測定は前回完了、不一致24のため不採用。今回それを再実行しない。
 
+## 比較概要
+
+HARD/SEMANTIC/STYLEは別軸。主分母32、質問回答は固定18件。非NONE率だけでは採用しない。
+
+| Cycle / 候補 | HARD fail | SEM pass | STYLE pass | act不一致 | 捏造 | 秘密/状態/能力 | 質問回答 | 判定 |
+|---|---:|---:|---:|---:|---:|---|---:|---|
+| 保存baseline | 14 | 7 | 15 | 23 | 0 | 5/3/0 | 9 | 比較基準 |
+| 1 S1 | 30 | 4 | 16 | 27 | 0 | 5/3/0 | 10 | 不採用・隔離 |
+| 2 P2 | 22 | 4 | 15 | 28 | 2 | 1/2/2 | 7 | 不採用・隔離 |
+| 3 IC2 | 30 | 1 | 22 | 4 | 6 | 3/2/2 | 4 | 不採用・隔離 |
+| 4 GC2 | 27 | 5 | 21 | 3 | 4 | 3/2/4 | 4 | 不採用・隔離 |
+| 5 compiler互換修正 | — | — | — | — | — | — | — | tool採用、生成0 |
+| 6 SC2 | 25 | 12 | 26 | 10 | 5 | 2/6/2 | 6 | 不採用・隔離 |
+
 ## Cycle 1: S1 single shape
 
 - 仮説: speech_act objectのoneOf分岐を除くと、本文との整合がHARDを増やさず改善する。
@@ -19,7 +33,7 @@
 
 ## Best known state
 
-現在の製品baselineを維持。S1/P2はtest-only隔離され、製品採用なし。独立承認済み検証基盤を保持。Cycle3 IC2も独立評価で不採用。Cycle4 GC2は設計中。
+会話生成の製品baselineを維持。S1/P2/IC2/GC2/SC2はtest-only隔離し製品採用なし。独立承認済み検証基盤、C5 compiler互換修正、CI capture同期修正を保持。会話品質候補の製品rollbackは不要（製品未採用）。
 
 ## Cycle 2: 2-call Plan→Message（不採用）
 
@@ -96,3 +110,42 @@ IC2不採用。kind選択はCLAIM27/QUESTION5でNONE固定を脱したが、意�
 
 
 GC2設計はT461独立承認、実装/focusedは完了してtool review中。保存choice32照合、grammar221PASS、参照不成立3種を生成前拒否、native32 fixture、新provider0。主な関心は25件のgrounding拒否を生成契約で防げるかであり、kind固定だけを会話改善と見なさない。旧IC2 choiceの合法NONE不成立は既知の残存制約で、GC2でも品質gateから除外しない。
+
+### Cycle 4 最終結果
+
+GC2は旧choice32を再利用し、新output32だけ測定した。candidate/旧validator28 PASS、HARD5 PASS/27 FAIL、SEMANTIC5 PASS、STYLE21 PASS。不一致3、捏造4、秘密3、状態2、能力4、UNKNOWN0、固定18質問回答4。参照制約で構造受理6→28まで改善したが、自由文の能力矛盾と捏造は残り不採用。独立判定は`handoffs/tasks/T461_GROUNDING_CLOSED_QUALITY.md`。260.894 REAL秒、output prompt56508/completion7095、GPU peak6536MiB/100%、所有process残存0。原本隔離、製品rollbackなし。
+
+### Cycle 5 compiler互換修正
+
+4件のschema不合格は、空配列の`items`を除去すると公式converterが`maxItems=0`を反映しない限定原因だった。元itemsを保持してmaxItemsだけを閉じる修正で受理集合を変えない。3.13関連194 PASS、3.10 focused41 PASS、独立7 PASS。旧32schemaの28件同一/4件のみ互換修正を確認。独立tool APPROVED、生成0/再採点0。品質改善とは判定せず、検証基盤として採用。
+
+### Cycle 6 SC2 scope
+
+既存stage controlがuntrusted user dataと同じroleにあるauthority衝突仮説だけを検証する。本文instructionとcanonical user bytesは変えず、制御部分をfirst systemへ配置する限定案。C5修正済みschema、choice32/output480、最大64call、全32主分母。実装開始前にT469独立設計承認、tool gate後だけ一回測定。6cycle枠の最後であり、結果保存後は別候補へ進まない。
+
+### 並行CI修正
+
+Linuxの10mock golden不一致はmock argvのWindows区切りをportable化し、全比較項目を維持した。completionのcapture raceは別worktreeで元deadline内のauthoritative catchup待機を修正。constructor受理契約の追加修正を含む最終4sourceを独立承認し、T473 offline completion1 PASS、0skip、66.117秒。専用CI branch commit b425cd1に保存後、SC2測定・意味評価完了時点で承認4fileをexact hash照合してrootへ統合した。新CIはpush承認待ちのため未実施。
+
+SC2詳細設計は独立APPROVED。実装/focusedはPython3.13/3.10各159件相当PASS（154＋fixture修正後5）、offline253 body/grammar/39 serialized native fixture、新provider0。9file exact hashをT474独立tool reviewへ提出。旧rendered bytes未保存をnull/NOT_CAPTUREDとして保存し、JSON digestとの混同を禁止した。
+
+SC2一回測定は339.305 REAL秒、32decision/64call、candidate32/legacy30（TEXT_BOUND2）、choice CLAIM25/QUESTION6/ANSWER1。新prompt112857/completion6998、GPU314samples/error0/peak6320MiB・100%。各callのwire/consumed/raw/rendered UTF8/output hash64/64一致、source78/config/plan不変、所有process/listener0。T471測定完了、T474独立意味評価も最終r3まで完了。
+
+
+### Cycle 6 最終結果と訂正範囲
+
+T474独立tool APPROVED（185 focused PASS）後に一回測定。最終r3はoverall HARD7 PASS/25 FAIL、SEMANTIC12 PASS、STYLE26 PASS、不一致10、捏造5/秘密2/状態6/能力2、UNKNOWN0、固定18質問回答6、合法NONE0/2。不採用。意味改善とHARD回帰を相殺せず、候補を隔離した。
+
+初版で表示省略されたG02-2だけ保存済みbytesの未読部分を読み、UNKNOWNを解消した（r2、他31件再採点0）。その後TEXT_BOUNDによる構造拒否2件がHARDに未合成と判明したため、意味判定を保全したまま全行のoverall HARDを`semantic_hard_pass AND structural_pass`へ機械的に合成した（r3）。新raw取得・再生成・意味再採点なし。Main照合は`frozen-sc2/final-hard-gate-audit.json`、独立最終判定は`handoffs/tasks/T474_STAGE_CONTROL_QUALITY_R3.md`。旧baseline/候補の再採点は0。
+
+### 終了時の統合検証
+
+CI同期修正の承認4fileはT473測定SHAとrootで一致。Python3.13 141 PASS＋56subtests（13.60秒）、Python3.10同件数（13.65秒）。既存の同bytes独立completion1 PASSを再利用し、同条件再実行は行わない。製品schema/prompt/model/ruleは変更しない。check_docsとdiff確認は最終handoffへ記録する。
+
+### 最も強い仮説と次の最小scope
+
+参照集合を生成schemaへ限定すると構造受理は改善したが、自由文の捏造・状態/能力矛盾は残った。actと本文の一致だけではauthoritative contextの正しい利用を保証できないことが今回の強い観測である。巨大structured outputやrole配置だけを唯一の根本原因と断定しない。
+
+次は自由文groundingを対象に、authoritative stateと発話内容の対応を分離して検証する最小test-only設計を行う。機械的構造判定と意味HARD判定の合成漏れを防ぐ検証も必要。モデル変更やgame runへは進めない。今回6cycle到達のため次候補は未着手。
+
+累計新provider252call。通常game/Master Run/Phase7は0。独立審査を通過したtoolは保持し、品質候補は全件不採用。外部pushだけが明示確認待ちで、新HEAD CI未実施・Phase6未達を維持する。

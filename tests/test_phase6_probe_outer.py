@@ -215,3 +215,34 @@ def test_outer_dispatches_only_fixed_gc2_runner(monkeypatch, tmp_path):
     assert outer.main() == 0
     assert calls == [[outer.sys.executable,str(outer.ROOT/'scripts/phase6_grounding_closed_runner.py'),
                       '--output',str(tmp_path.resolve()),'--run','qw9']]
+
+
+def test_outer_dispatches_only_fixed_sc2_runner(monkeypatch, tmp_path):
+    from tests.fixtures import phase6_evidence
+    (tmp_path/'plan.json').write_text(json.dumps({'experiment':'stage_control_v1','task_id':'T471',
+        'runner':'scripts/phase6_stage_control_runner.py'}))
+    monkeypatch.setattr(outer.sys,'argv',['outer','--output',str(tmp_path)])
+    monkeypatch.setattr(phase6_evidence,'create_private_evidence_container',lambda *a,**k:tmp_path)
+    calls=[]
+    def supervise(command,*a,**k):
+        calls.append(command)
+        return dict(exit_code=0,outer_timeout=False,ownership_complete=True,owned_alive_after=0)
+    monkeypatch.setattr(outer,'supervise',supervise)
+    assert outer.main() == 0
+    assert calls == [[outer.sys.executable,str(outer.ROOT/'scripts/phase6_stage_control_runner.py'),
+                      '--output',str(tmp_path.resolve()),'--run','qw9']]
+
+
+@pytest.mark.parametrize('key,value',[('task_id','T470'),('experiment','unknown'),
+    ('runner','scripts/phase6_intent_choice_runner.py'),('runner',None)])
+def test_sc2_outer_identity_rejected_before_private_or_process(monkeypatch,tmp_path,key,value):
+    from tests.fixtures import phase6_evidence
+    plan={'experiment':'stage_control_v1','task_id':'T471','runner':'scripts/phase6_stage_control_runner.py'}
+    plan[key]=value
+    (tmp_path/'plan.json').write_text(json.dumps(plan))
+    monkeypatch.setattr(outer.sys,'argv',['outer','--output',str(tmp_path)])
+    def forbidden(*args,**kwargs): raise AssertionError('private/process must not start')
+    monkeypatch.setattr(phase6_evidence,'create_private_evidence_container',forbidden)
+    monkeypatch.setattr(outer,'supervise',forbidden)
+    with pytest.raises(ValueError,match='OUTER_PLAN_INVALID'):
+        outer.main()

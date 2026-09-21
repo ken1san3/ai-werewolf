@@ -51,6 +51,8 @@ P2_CONTRACT = TwoStageContract('two_call_v1', 'T454', (
     StageContract('plan', 384, 120, True), StageContract('message', 128, 120, True)))
 IC2_CONTRACT = TwoStageContract('intent_choice_v1', 'T458', (
     StageContract('choice', 32, 240, False), StageContract('output', 480, 120, False)))
+SC2_CONTRACT = TwoStageContract('stage_control_v1', 'T471', (
+    StageContract('choice', 32, 240, False), StageContract('output', 480, 120, False)))
 
 
 @dataclass(frozen=True)
@@ -66,7 +68,7 @@ def validate_contract(contract):
     if (type(contract) not in (TwoStageContract, ReplayedChoiceContract) or type(contract.stages) is not tuple
             or any(type(stage) is not StageContract for stage in contract.stages)):
         raise base.StopComparison('STAGE_CONTRACT')
-    expected = {'two_call_v1': P2_CONTRACT, 'intent_choice_v1': IC2_CONTRACT, 'grounding_closed_v1': GC2_CONTRACT}.get(contract.experiment)
+    expected = {'two_call_v1': P2_CONTRACT, 'intent_choice_v1': IC2_CONTRACT, 'grounding_closed_v1': GC2_CONTRACT, 'stage_control_v1': SC2_CONTRACT}.get(contract.experiment)
     # Canonical bytes also reject int/bool coercion, wrong number types and reordered stages.
     if expected is None or type(contract) is not type(expected) or wire_bytes(asdict(contract)) != wire_bytes(asdict(expected)):
         raise base.StopComparison('STAGE_CONTRACT')
@@ -136,7 +138,37 @@ def stage(stage_name, body, row, private, rawfile, save, budget, *, contract):
         os.fsync(stream.fileno())
     if base.file_hash(path) != hashlib.sha256(payload).hexdigest():
         raise base.StopComparison('WIRE_SAVE_MISMATCH')
-    measured = base.count_prompt(body, wire_payload=payload)
+    if contract == SC2_CONTRACT:
+        # Keep native content private; legacy digest and byte digest are different domains.
+        rendered_metadata = {}
+        def private_sink(rendered):
+            from scripts.phase6_stage_control_probe import validate_native_rendered
+            validate_native_rendered(body, stage_name, rendered)
+            encoded = rendered.encode('utf-8')
+            rendered_path = private/(row['case_id']+'.'+stage_name+'.rendered.bin')
+            with rendered_path.open('xb') as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            saved = rendered_path.read_bytes()
+            expected = hashlib.sha256(encoded).hexdigest()
+            if saved != encoded or hashlib.sha256(saved).hexdigest() != expected:
+                raise base.StopComparison('TEMPLATE_INVALID')
+            rendered_metadata.update(rendered_prompt_utf8_sha256=expected,
+                rendered_prompt_utf8_bytes=len(encoded))
+        try:
+            measured = base.count_prompt(body, wire_payload=payload, private_sink=private_sink)
+            if set(rendered_metadata) != {'rendered_prompt_utf8_sha256', 'rendered_prompt_utf8_bytes'}:
+                raise base.StopComparison('TEMPLATE_INVALID')
+        except Exception as error:
+            reason = ('CONTEXT_OVERFLOW' if isinstance(error, base.StopComparison)
+                      and str(error) == 'CONTEXT_OVERFLOW' else 'TEMPLATE_INVALID')
+            row.update(status=stage_name.upper()+'_NOT_STARTED',
+                       generation_status='ERROR', error_kind=reason)
+            raise base.StopComparison(reason) from None
+        measured = {**measured, **rendered_metadata}
+    else:
+        measured = base.count_prompt(body, wire_payload=payload)
     data = {'input_sha256': base.digest(body), 'wire_sha256': hashlib.sha256(payload).hexdigest(),
             'wire_bytes': len(payload), 'messages_sha256': base.digest(body['messages']),
             'schema_sha256': base.digest(body['response_format']['json_schema']['schema']),
@@ -230,6 +262,9 @@ def _run_lifecycle(out, *, contract, callbacks):
               'plan_sha256': base.file_hash(out/'plan.json'), 'retry': 0, 'repair': 0,
               'max_provider_calls': contract.max_provider_calls, 'baseline_artifacts': plan['baseline']['artifacts'],
               'rows': [callbacks.initial_row(c, p) for c, p in projections]}
+    if contract == SC2_CONTRACT:
+        result.update(task_id='T471', runner='scripts/phase6_stage_control_runner.py',
+                      reused_choice_count=0, reused_provider_calls=0)
     if contract == GC2_CONTRACT:
         result.update(reused_choice_count=32, reused_provider_calls=32, replay_artifacts=plan['replay']['artifacts'])
     base.claim_run(out, 'qw9')

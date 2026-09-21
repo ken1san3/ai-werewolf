@@ -338,7 +338,7 @@ def port_free():
         return sock.connect_ex(('127.0.0.1', PORT)) != 0
 
 
-def count_prompt(body, *, wire_payload=None):
+def count_prompt(body, *, wire_payload=None, private_sink=None):
     wire_options = {} if wire_payload is None else {'wire_payload': wire_payload}
     rendered = request('/apply-template', body, **wire_options)['prompt']
     if not isinstance(rendered, str):
@@ -351,6 +351,10 @@ def count_prompt(body, *, wire_payload=None):
     bare = dict(body)
     bare.pop('response_format')
     bare_rendered = request('/apply-template', bare)['prompt']
+    if private_sink is not None:
+        if not isinstance(bare_rendered, str):
+            raise StopComparison('TEMPLATE_TYPE')
+        private_sink(rendered)
     return {'prompt_tokens_actual': len(tok), 'rendered_prompt_sha256': digest(rendered),
             'schema_changes_rendered_prompt': rendered != bare_rendered,
             'remaining_context_tokens': CONTEXT-len(tok)-body['max_tokens']-1}

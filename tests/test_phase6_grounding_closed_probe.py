@@ -94,8 +94,8 @@ def test_peer_trigger_excluded_from_intersection_has_no_legal_grounding():
 def test_empty_sets_close_arrays_and_nullable_question_without_false_schema():
     p = projection("chat")
     schema = probe.candidate_schema(p, choice("QUESTION"))
-    assert schema["$defs"]["evidence_array"] == {"type": "array", "maxItems": 0}
-    assert schema["$defs"]["claim_updates"] == {"type": "array", "maxItems": 0}
+    assert schema["$defs"]["evidence_array"] == {**p.decision_schema["$defs"]["evidence_array"], "maxItems": 0}
+    assert schema["$defs"]["claim_updates"] == {**p.decision_schema["$defs"]["claim_updates"], "maxItems": 0}
     assert schema["$defs"]["speech_act"]["properties"]["source"] == {"const": None}
     encoded = json.dumps(schema)
     assert '"not"' not in encoded and '"enum": []' not in encoded
@@ -123,7 +123,7 @@ def test_non_single_nonself_current_actor_does_not_create_claim_tuple(actors):
     refs, claims = probe.grounding_sets(changed)
     assert len(refs) == 1 and claims == ()
     schema = probe.candidate_schema(changed, choice())
-    assert schema["$defs"]["claim_updates"] == {"type": "array", "maxItems": 0}
+    assert schema["$defs"]["claim_updates"] == {**p.decision_schema["$defs"]["claim_updates"], "maxItems": 0}
 
 
 def test_output_body_changes_only_schema_from_ic2_and_preserves_messages():
@@ -245,3 +245,20 @@ def test_validate_final_passes_raw_unchanged_to_legacy_parser(monkeypatch):
                         lambda text, *, projection: seen.append(text))
     assert probe.validate_final(raw, choice(), p) == value
     assert seen == [raw]
+
+
+@pytest.mark.parametrize("name", ["evidence_array", "claim_updates"])
+def test_empty_array_preserves_items_for_constrained_decoder(name):
+    # The converter only applies min/maxItems in its items/prefixItems branch.
+    # JSON Schema alone would also accept the broken shape without items.
+    p = projection("chat", records=())
+    schema = probe.candidate_schema(p, choice("QUESTION"))
+    closed = schema["$defs"][name]
+    assert "items" in closed
+    assert closed["items"] == p.decision_schema["$defs"][name]["items"]
+    assert closed["maxItems"] == 0
+    root = {"$defs": schema["$defs"], **closed}
+    validator = Draft202012Validator(root)
+    assert validator.is_valid([])
+    for nonempty in ([None], [{}], ["x"], [0], [True], [[], []]):
+        assert not validator.is_valid(nonempty)
