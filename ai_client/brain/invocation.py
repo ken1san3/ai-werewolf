@@ -562,7 +562,7 @@ class BrainInvocationArbiter:
                 )
             self._finish(pending, self._cancelled_result())
             return
-        initial_capture = await self._capture_with_one_catchup(
+        initial_capture = await self._await_readiness_with_one_catchup(
             pending, allow_replacement=True
         )
         if isinstance(initial_capture, _ReplacementTransition):
@@ -770,21 +770,38 @@ class BrainInvocationArbiter:
             self._finish(pending, result)
         await self._run_attached_successor()
 
+    async def _await_readiness_with_one_catchup(
+        self,
+        pending: _PendingInvocation,
+        *,
+        allow_replacement: bool = False,
+    ) -> BrainDispatchResult | _ReplacementTransition | None:
+        result = await self._capture_with_one_catchup(
+            pending, allow_replacement=allow_replacement, readiness_only=True
+        )
+        assert not isinstance(result, BrainInput)
+        return result
+
     async def _capture_with_one_catchup(
         self,
         pending: _PendingInvocation,
         *,
         allow_replacement: bool = False,
-    ) -> BrainInput | BrainDispatchResult | _ReplacementTransition:
+        readiness_only: bool = False,
+    ) -> BrainInput | BrainDispatchResult | _ReplacementTransition | None:
         if pending.cancel_requested or self._stopped:
             return self._cancelled_result()
         remaining = pending.dispatch_deadline.not_after_monotonic - self._now()
         if remaining <= 0:
             return self._deadline_suppressed_result()
-        attempt = self.controller.capture_input_attempt(
+        capture = (self.controller.capture_readiness if readiness_only
+                   else self.controller.capture_input_attempt)
+        attempt = capture(
             allowed_handles=pending.allowed_handles,
             dispatch_deadline=pending.dispatch_deadline,
         )
+        if attempt.status == "READY":
+            return None
         if attempt.status == "CAPTURED":
             assert attempt.request is not None
             return attempt.request
@@ -834,10 +851,12 @@ class BrainInvocationArbiter:
             world_task.result()
         except Exception:
             return self._stale_result()
-        second = self.controller.capture_input_attempt(
+        second = capture(
             allowed_handles=pending.allowed_handles,
             dispatch_deadline=pending.dispatch_deadline,
         )
+        if second.status == "READY":
+            return None
         if second.status == "CAPTURED":
             assert second.request is not None
             return second.request

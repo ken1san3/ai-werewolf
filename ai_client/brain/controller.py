@@ -49,6 +49,7 @@ from ai_client.network import (
 from ai_client.world import (
     ChatRecord,
     CoDeclarationRecord,
+    CurrentActionsView,
     Freshness,
     WorldSnapshot,
     WorldState,
@@ -194,19 +195,35 @@ class _BrainFailure:
 class CaptureAttempt:
     status: Literal["CAPTURED", "NETWORK_AHEAD", "STALE"]
     request: BrainInput | None
-    after_world_version: int
+    after_world_version: int | None
 
     def __post_init__(self) -> None:
         if self.status not in {"CAPTURED", "NETWORK_AHEAD", "STALE"}:
             raise ValueError("invalid capture attempt status")
-        if isinstance(self.after_world_version, bool) or not isinstance(
-            self.after_world_version, int
-        ) or self.after_world_version < 0:
+        if self.status == "STALE":
+            if self.after_world_version is not None:
+                raise ValueError("STALE must omit the World cursor")
+        elif type(self.after_world_version) is not int or self.after_world_version < 0:
             raise ValueError("after_world_version must be a non-negative integer")
         if (self.status == "CAPTURED" and not isinstance(self.request, BrainInput)) or (
             self.status != "CAPTURED" and self.request is not None
         ):
             raise ValueError("only CAPTURED may contain a BrainInput")
+
+
+@dataclass(frozen=True)
+class CaptureReadiness:
+    status: Literal["READY", "NETWORK_AHEAD", "STALE"]
+    after_world_version: int | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"READY", "NETWORK_AHEAD", "STALE"}:
+            raise ValueError("invalid capture readiness status")
+        if self.status == "NETWORK_AHEAD":
+            if type(self.after_world_version) is not int or self.after_world_version < 0:
+                raise ValueError("NETWORK_AHEAD requires a non-negative World cursor")
+        elif self.after_world_version is not None:
+            raise ValueError("only NETWORK_AHEAD may contain a World cursor")
 
 
 @dataclass
@@ -315,18 +332,34 @@ class BrainController:
             report_network_ahead=True,
         )
 
-    def _capture_input(
+    def capture_readiness(
+        self,
+        *,
+        allowed_handles: tuple[ActionHandle, ...],
+        dispatch_deadline: DispatchDeadline,
+    ) -> CaptureReadiness:
+        """Check coherence before admission without capturing discussion state."""
+        if not isinstance(dispatch_deadline, DispatchDeadline):
+            raise TypeError("dispatch_deadline must be DispatchDeadline")
+        readiness, _, _, _ = self._capture_view(
+            allowed_handles=allowed_handles,
+            dispatch_deadline=dispatch_deadline,
+            report_network_ahead=True,
+        )
+        return readiness
+
+    def _capture_view(
         self,
         *,
         allowed_handles: tuple[ActionHandle, ...] | None,
         dispatch_deadline: DispatchDeadline | None,
         report_network_ahead: bool,
-    ) -> CaptureAttempt:
+    ) -> tuple[CaptureReadiness, WorldSnapshot | None, CurrentActionsView | None, tuple[ActionHandle, ...]]:
         if dispatch_deadline is not None and not isinstance(dispatch_deadline, DispatchDeadline):
             raise TypeError("dispatch_deadline must be DispatchDeadline when supplied")
         snapshot = self.world.snapshot()
         if not self._snapshot_is_current(snapshot):
-            return CaptureAttempt("STALE", None, snapshot.version)
+            return CaptureReadiness("STALE", None), None, None, ()
         actions = self.world.current_actions()
         allowed_valid = (
             allowed_handles is None
@@ -338,7 +371,7 @@ class BrainController:
             )
         )
         if not allowed_valid:
-            return CaptureAttempt("STALE", None, snapshot.version)
+            return CaptureReadiness("STALE", None), None, None, ()
         phase = snapshot.phase
         assert phase is not None
         deadline_valid = dispatch_deadline is None or (
@@ -346,7 +379,14 @@ class BrainController:
             and self._deadline_allows_dispatch(dispatch_deadline)
         )
         if not deadline_valid:
-            return CaptureAttempt("STALE", None, snapshot.version)
+            return CaptureReadiness("STALE", None), None, None, ()
+        if dispatch_deadline is not None and allowed_handles is not None and any(
+            (handle.phase, handle.day, handle.connection_generation, handle.action_generation)
+            != (dispatch_deadline.phase, dispatch_deadline.day,
+                dispatch_deadline.connection_generation, dispatch_deadline.action_generation)
+            for handle in allowed_handles
+        ):
+            return CaptureReadiness("STALE", None), None, None, ()
         if (
             report_network_ahead
             and dispatch_deadline is not None
@@ -363,16 +403,16 @@ class BrainController:
                 for handle in allowed_handles
             )
         ):
-            return CaptureAttempt("NETWORK_AHEAD", None, snapshot.version)
+            return CaptureReadiness("NETWORK_AHEAD", snapshot.version), None, None, ()
         if not (
             actions.is_caught_up
             and actions.world_version == snapshot.version
             and actions.world_last_applied_seq == snapshot.last_applied_seq
             and actions.network_last_seq == snapshot.last_applied_seq
         ):
-            return CaptureAttempt("STALE", None, snapshot.version)
+            return CaptureReadiness("STALE", None), None, None, ()
         if any(not isinstance(action, ActionHandle) for action in actions.actions):
-            return CaptureAttempt("STALE", None, snapshot.version)
+            return CaptureReadiness("STALE", None), None, None, ()
         captured_actions = tuple(actions.actions)
         if allowed_handles is not None:
             if (
@@ -382,11 +422,29 @@ class BrainController:
                 or len(set(allowed_handles)) != len(allowed_handles)
                 or any(handle not in captured_actions for handle in allowed_handles)
             ):
-                return CaptureAttempt("STALE", None, snapshot.version)
+                return CaptureReadiness("STALE", None), None, None, ()
             allowed = frozenset(allowed_handles)
             captured_actions = tuple(
                 handle for handle in captured_actions if handle in allowed
             )
+        return CaptureReadiness("READY", None), snapshot, actions, captured_actions
+
+    def _capture_input(
+        self,
+        *,
+        allowed_handles: tuple[ActionHandle, ...] | None,
+        dispatch_deadline: DispatchDeadline | None,
+        report_network_ahead: bool,
+    ) -> CaptureAttempt:
+        readiness, snapshot, actions, captured_actions = self._capture_view(
+            allowed_handles=allowed_handles,
+            dispatch_deadline=dispatch_deadline,
+            report_network_ahead=report_network_ahead,
+        )
+        if readiness.status != "READY":
+            return CaptureAttempt(readiness.status, None, readiness.after_world_version)
+        assert snapshot is not None and snapshot.phase is not None and actions is not None
+        phase = snapshot.phase
         history = self.world.history()
         co = self.world.co_for_day(phase.day)
         ability_results = self.world.ability_results()

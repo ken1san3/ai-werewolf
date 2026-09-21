@@ -1,6 +1,6 @@
 """Replaceable Brain boundary for client-side decision making."""
 
-from .controller import BrainController, CaptureAttempt
+from .controller import BrainController, CaptureAttempt, CaptureReadiness
 from .coordinator import PhaseBrainCoordinator
 from .dummy import DummyBrain
 from .interface import Brain
@@ -43,6 +43,7 @@ __all__ = [
     "BrainActionOption",
     "BrainController",
     "CaptureAttempt",
+    "CaptureReadiness",
     "BrainDecision",
     "BrainInput",
     "BrainOutput",

@@ -266,12 +266,12 @@ async def _admission_waits_before_request_then_uses_one_offer():
     world, brain, sender, admission, controller, arbiter, deadline = admission_stack()
     admission_network_ahead(world)
     attempts = 0
-    original = controller.capture_input_attempt
+    original = controller.capture_readiness
     def capture(**kwargs):
         nonlocal attempts
         attempts += 1
         return original(**kwargs)
-    controller.capture_input_attempt = capture  # type: ignore[method-assign]
+    controller.capture_readiness = capture  # type: ignore[method-assign]
     task = asyncio.create_task(arbiter.invoke(owner="reaction_chat",
         priority=BrainInvocationPriority.REACTION, allowed_handles=(_chat(),),
         timeout_seconds=1.0, dispatch_deadline=deadline))
