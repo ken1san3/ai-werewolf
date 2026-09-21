@@ -1,4 +1,4 @@
-"""Finite test-only P2 runner: locked plan followed by optional text, never a game."""
+"""Finite IC2 runner: choose one intent kind, then generate a locked full output."""
 from __future__ import annotations
 
 import argparse
@@ -16,22 +16,23 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import phase6_model_comparison as base
-from scripts import phase6_two_call_probe as probe
+from scripts import phase6_intent_choice_probe as probe
 from scripts import phase6_two_stage_probe_runtime as runtime
 from scripts.phase6_context_probe import wire_bytes
 
-P2 = 'two_call_v1'
-TASK = 'T454'
+IC2 = 'intent_choice_v1'
+TASK = 'T458'
 TOKENIZER = Path('C:/AIagent/llama-tokenize.exe')
 TOKENIZER_SHA = 'a0fbd34a8a3f25fc0f41cbac1ec67e8395a5ef940db33bd07307b5e3dc8cd6a1'
 CONFIG = Path('C:/AIagent/agent/config.toml')
 CONFIG_SHA = '43e509956d96492cace8393bdc3fd598ab2418315ccdfd82e144b876241f3bab'
-EXTRA = ('scripts/phase6_two_call_probe.py', 'tests/test_phase6_two_call_probe.py',
-         'scripts/phase6_two_call_runner.py', 'tests/test_phase6_two_call_runner.py',
+EXTRA = ('scripts/phase6_intent_choice_probe.py', 'tests/test_phase6_intent_choice_probe.py',
+         'scripts/phase6_intent_choice_runner.py', 'tests/test_phase6_intent_choice_runner.py',
+         'scripts/phase6_two_call_runner.py',
          'scripts/phase6_probe_outer.py', 'tests/test_phase6_probe_outer.py',
          'scripts/phase6_two_stage_probe_runtime.py', 'tests/test_phase6_two_stage_probe_runtime.py',
          'tests/fixtures/phase6_p2_runtime_golden.json')
-base.EXPERIMENT_SOURCE_DELTA[P2] = base.EXPERIMENT_SOURCE_DELTA[base.K1] | frozenset(EXTRA)
+base.EXPERIMENT_SOURCE_DELTA[IC2] = base.EXPERIMENT_SOURCE_DELTA[base.K1] | frozenset(EXTRA)
 
 
 def sources():
@@ -43,14 +44,15 @@ def stamp():
 
 
 def fixed_contract():
-    return {'schema': 1, 'experiment': P2, 'experiment_version': 1, 'task_id': TASK,
+    return {'schema': 1, 'experiment': IC2, 'experiment_version': 1, 'task_id': TASK,
             'sampling': base.SAMPLING, 'context': base.CONTEXT,
             'request_seconds': base.REQUEST_SECONDS, 'model_seconds': base.MODEL_SECONDS,
             'load_seconds': base.LOAD_SECONDS, 'max_generations_per_model': 32,
-            'max_provider_calls': 64, 'plan_tokens': probe.PLAN_TOKENS,
-            'message_tokens': probe.MESSAGE_TOKENS, 'retry': 0, 'repair': 0,
-            'plan_instruction_sha256': base.digest(probe.PLAN_INSTRUCTION),
-            'message_instruction_sha256': base.digest(probe.MESSAGE_INSTRUCTION),
+            'max_provider_calls': 64, 'choice_tokens': probe.CHOICE_TOKENS,
+            'output_tokens': probe.OUTPUT_TOKENS, 'retry': 0, 'repair': 0,
+            'choice_instruction_sha256': base.digest(probe.CHOICE_INSTRUCTION),
+            'output_instruction_sha256': base.digest(probe.OUTPUT_INSTRUCTION),
+            'stage_contract': runtime.asdict(runtime.IC2_CONTRACT),
             'config_sha256': CONFIG_SHA,
             'tokenizer_argv': [str(TOKENIZER), '-m', base.PROFILES['qw9'][0],
                                '--stdin', '--ids', '--no-bos', '--no-escape']}
@@ -59,19 +61,29 @@ def fixed_contract():
 write_json = runtime.write_json
 
 
+def output_identity(body):
+    schema = body['response_format']['json_schema']['schema']
+    return {'branch_sha256': base.digest(schema['$defs']['speech_act']),
+            'schema_sha256': base.digest(schema), 'input_sha256': base.digest(body),
+            'messages_sha256': base.digest(body['messages']),
+            'wire_sha256': hashlib.sha256(wire_bytes(body)).hexdigest()}
+
+
 def entry(case, projection):
     original = base.body_for(projection, base.PROFILES['qw9'][0])
-    body = probe.plan_body(original)
+    body = probe.choice_body(original)
     return {'case_id': case.case_id, 'category': case.category,
             'baseline_common_input_sha256': base.common_hash(original),
             'baseline_input_sha256': base.digest(original),
             'baseline_messages_sha256': base.digest(original['messages']),
             'projection_sha256': projection.prompt_sha256,
-            'plan_input_sha256': base.digest(body),
-            'plan_wire_sha256': hashlib.sha256(wire_bytes(body)).hexdigest(),
-            'plan_schema_sha256': base.digest(body['response_format']['json_schema']['schema']),
-            'plan_messages_sha256': base.digest(body['messages']),
-            'plan_wire_bytes': len(wire_bytes(body))}
+            'choice_input_sha256': base.digest(body),
+            'choice_wire_sha256': hashlib.sha256(wire_bytes(body)).hexdigest(),
+            'choice_schema_sha256': base.digest(body['response_format']['json_schema']['schema']),
+            'choice_messages_sha256': base.digest(body['messages']),
+            'choice_wire_bytes': len(wire_bytes(body)),
+            'locked_outputs': {kind: output_identity(probe.output_body(original, {'speech_act_kind': kind}, projection))
+                for kind in body['response_format']['json_schema']['schema']['properties']['speech_act_kind']['enum']}}
 
 
 def prepare(out, baseline_source):
@@ -115,75 +127,88 @@ def verify(plan):
     return profile, projections
 
 
-def plan_binding(case, projection, body, raw, value):
+def choice_binding(case, projection, baseline, body, raw, value):
+    output = probe.output_body(baseline, value, projection)
     return {'case_id': case.case_id, 'projection_sha256': projection.prompt_sha256,
-            'plan_wire_sha256': hashlib.sha256(wire_bytes(body)).hexdigest(),
-            'plan_raw_sha256': hashlib.sha256(raw.encode('utf-8')).hexdigest(),
-            'canonical_plan_sha256': base.digest(value)}
+            'baseline_input_sha256': base.digest(baseline),
+            'baseline_messages_sha256': base.digest(baseline['messages']),
+            'choice_wire_sha256': hashlib.sha256(wire_bytes(body)).hexdigest(),
+            'choice_raw_sha256': hashlib.sha256(raw.encode()).hexdigest(),
+            'canonical_choice_sha256': base.digest(value),
+            'selected_kind': value['speech_act_kind'], **output_identity(output)}
 
 
-def locked_message(case, projection, baseline, plan_body, raw, value, binding):
-    if plan_binding(case, projection, plan_body, raw, value) != binding:
-        raise base.StopComparison('PLAN_BINDING_MISMATCH')
-    # Revalidate the original raw and bind its exact parsed value, not a caller's replacement.
-    if probe.validate_plan(raw, projection) != value:
-        raise base.StopComparison('PLAN_BINDING_MISMATCH')
-    return probe.message_body(baseline, value, projection)
+def locked_output(case, projection, baseline, body, raw, value, binding):
+    if probe.validate_choice(raw, projection) != value:
+        raise base.StopComparison('CHOICE_BINDING_MISMATCH')
+    expected_first = probe.choice_body(baseline)
+    if wire_bytes(body) != wire_bytes(expected_first):
+        raise base.StopComparison('CHOICE_BINDING_MISMATCH')
+    if choice_binding(case, projection, baseline, body, raw, value) != binding:
+        raise base.StopComparison('CHOICE_BINDING_MISMATCH')
+    return probe.output_body(baseline, value, projection)
+
+
+def dispatch(context, name, body, row):
+    try:
+        return context.dispatch(name, body)
+    except base.StopComparison as error:
+        if str(error) == 'MODEL_TIME_BUDGET' and not row[name+'_provider_calls']:
+            row.update(status=name.upper()+'_NOT_STARTED', error_kind='MODEL_TIME_BUDGET')
+        raise
 
 
 def process_case(context, case, projection, row):
+    from jsonschema import Draft202012Validator
     baseline = base.body_for(projection, base.PROFILES['qw9'][0])
-    body = probe.plan_body(baseline)
-    raw = context.dispatch('plan', body)
+    body = probe.choice_body(baseline)
+    raw = dispatch(context, 'choice', body, row)
     if raw is None:
-        row.update(status='PLAN_ERROR', generation_status='ERROR')
+        row.update(status='CHOICE_ERROR', generation_status='ERROR')
         return
     try:
-        value = probe.validate_plan(raw, projection)
+        value = probe.validate_choice(raw, projection)
     except (ValueError, base.DecisionValidationError):
-        row.update(status='PLAN_INVALID', generation_status='INVALID')
+        row.update(status='CHOICE_INVALID', generation_status='INVALID', choice_schema_pass=False)
         return
-    row['status'] = 'PLAN_VALID'
-    binding = plan_binding(case, projection, body, raw, value)
+    row.update(status='CHOICE_VALID', choice_schema_pass=True, selected_kind=value['speech_act_kind'])
+    binding = choice_binding(case, projection, baseline, body, raw, value)
     row['binding'] = binding
-    text = None
-    if value['decision']['kind'] in ('chat', 'co_declare'):
-        next_body = locked_message(case, projection, baseline, body, raw, value, binding)
-        text = context.dispatch('message', next_body)
-        if text is None:
-            row.update(status='MESSAGE_ERROR', generation_status='ERROR')
-            return
-    try:
-        final = probe.validate_final(value, text, projection)
-    except (ValueError, base.DecisionValidationError):
-        row.update(status='MESSAGE_INVALID' if text is not None else 'PLAN_INVALID', generation_status='INVALID')
+    next_body = locked_output(case, projection, baseline, body, raw, value, binding)
+    text = dispatch(context, 'output', next_body, row)
+    if text is None:
+        row.update(status='OUTPUT_ERROR', generation_status='ERROR')
         return
-    final_raw = wire_bytes(final).decode('utf-8')
-    return runtime.CaseOutcome(final_raw, binding,
-        'COMPLETE' if text is not None else 'COMPLETE_NO_MESSAGE')
-
-
-def stage(stage_name, body, row, private, rawfile, save, budget):
-    return runtime.stage(stage_name, body, row, private, rawfile, save, budget,
-                         contract=runtime.P2_CONTRACT)
-
-
-def run_case(case, projection, row, private, rawfile, save, budget):
-    # Compatibility entry for focused tests; the production runner uses process_case.
-    context = runtime.CaseContext(lambda name, body: stage(name, body, row, private, rawfile, save, budget))
-    outcome = process_case(context, case, projection, row)
-    if outcome is not None:
-        runtime.record_final(case, projection, row, rawfile, outcome)
+    row.update(candidate_schema_pass=False, kind_match_pass=False)
+    try:
+        final = probe.strict_json(text)
+        discussion = final.get('discussion')
+        act = discussion.get('speech_act') if type(discussion) is dict else None
+        row['kind_match_pass'] = type(act) is dict and act.get('kind') == value['speech_act_kind']
+        row['candidate_schema_pass'] = Draft202012Validator(
+            next_body['response_format']['json_schema']['schema']).is_valid(final)
+        if not row['candidate_schema_pass'] or not row['kind_match_pass']:
+            raise ValueError('OUTPUT_SCHEMA')
+        probe.validate_final(text, value, projection)
+        row['legacy_validator_pass'] = True
+    except (ValueError, base.DecisionValidationError):
+        if row['candidate_schema_pass'] and row['kind_match_pass']:
+            row['legacy_validator_pass'] = False
+        row.update(status='OUTPUT_INVALID', generation_status='INVALID')
+        return
+    # Keep the exact stage2 raw; no serialization or metadata repair.
+    return runtime.CaseOutcome(text, binding)
 
 
 def initial_row(case, projection):
     return {'case_id': case.case_id, 'category': case.category,
         'baseline_input_sha256': base.digest(base.body_for(projection, base.PROFILES['qw9'][0])),
-        'projection_sha256': projection.prompt_sha256, 'status': 'PLAN_NOT_STARTED',
-        'generation_status': 'NOT_STARTED', 'plan_provider_calls': 0, 'message_provider_calls': 0,
+        'projection_sha256': projection.prompt_sha256, 'status': 'CHOICE_NOT_STARTED',
+        'generation_status': 'NOT_STARTED', 'choice_provider_calls': 0, 'output_provider_calls': 0,
         'new_provider_calls': 0, 'retry_count': 0, 'repair_count': 0,
         'completion_tokens': 0, 'provider_prompt_tokens': 0,
-        'hard_pass': None, 'semantic_pass': None, 'style_pass': None}
+        'choice_schema_pass': None, 'candidate_schema_pass': None, 'kind_match_pass': None,
+        'legacy_validator_pass': None, 'hard_pass': None, 'semantic_pass': None, 'style_pass': None}
 
 
 def final_source(plan):
@@ -192,7 +217,7 @@ def final_source(plan):
 
 
 def run(out):
-    return runtime.run_two_stage_probe(out, contract=runtime.P2_CONTRACT,
+    return runtime.run_two_stage_probe(out, contract=runtime.IC2_CONTRACT,
         callbacks=runtime.TwoStageCallbacks(verify, initial_row, process_case, final_source))
 
 

@@ -19,9 +19,9 @@
 
 ## Best known state
 
-現在の製品baselineを維持。S1/P2はtest-only隔離され、製品採用なし。独立承認済み検証基盤を保持。Cycle3 IC2は設計中・未実装。
+現在の製品baselineを維持。S1/P2はtest-only隔離され、製品採用なし。独立承認済み検証基盤を保持。Cycle3 IC2は設計承認・offline PASS、tool審査中・未生成。
 
-## Cycle 2: 2-call Plan→Message（設計中）
+## Cycle 2: 2-call Plan→Message（不採用）
 
 S1では自由なnullable単一shapeがkindごとの制約を満たせず、strict adapterは30件を受理しなかった。validatorを緩めず、次は旧grounded planを厳密schemaで先に生成し、その確定planから本文を別callで生成する仮説へ進む。S1は再実行せず、独立意味評価と並行してT452詳細設計を行う。モデル/製品境界は不変。新予算/呼出回数/失敗原子性を設計し、T453独立承認後だけ実装する。
 
@@ -72,3 +72,7 @@ P2は本文を別callへ分離したが、intent kind選択時にgrounding/state
 G14無発話controlは2件とも発話を選択。JSON-valid29件の実17key順は全件設計どおり、3件はJSON不正で順評価不能。tool初期falseを順序違反と数えない。候補schema29/32→strict2/29で拒否しており、受理境界は守られたが生成品質は悪化した。
 
 独立判定 `handoffs/tasks/T450_SINGLE_SHAPE_QUALITY.md`、annotation SHA `383fa99eada92e769397c7a88c7d2c6a76661ad8e0e6016e0e6248cb5e797a4f`。全体採否は不採用。候補隔離、製品rollbackなし。次scopeは2-call詳細設計で、人間判断待ちにしない。
+
+### Cycle 3 実装gate
+
+T456設計はT457独立APPROVED。kind-only choice32tokens→元kind枝locked full480tokens、全valid choiceで必ず2call。Main/T459がtest-only実装。Python3.13合同310＋freeze7 PASS、3.10 181 PASS。P2既存10mock条件の抽出前後hash一致、converter224/native263fixture合格。製品境界不変、tool審査中、実生成なし。

@@ -1,0 +1,197 @@
+{
+  "source_sha256": "b92a70de01f1432c771369c1e929ca7b1cf197e2f4b56321b6a17167a0cd9312",
+  "scenarios": {
+    "chat": {
+      "exit": 0,
+      "result_sha256": "a16385826704c539049d6af60f65ccb327ec723fe18d9bfc518361446acba83c",
+      "private_sha256": {
+        "G01-1.message.consumed.json": "9a9a3ed0ea71402b422f7acf9f94ec4354f25a3f9ec5add51e2ae8a955acd6c8",
+        "G01-1.message.request.bin": "0f8b35e0758fe56fd6ecfbabb60b973f40a959f26ead281f6a3c5d8a32b29a57",
+        "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
+        "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
+        "raw.jsonl": "96cfeda0c83682aaad97f775a67d264b616394bbe66cf17cf54cc36d65d86aa2",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "fba8122ab8d40f05dc196c26cddccbe8e1cc02655a65b1de76c5fa4a1cd1eb99",
+      "calls": 2,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "COMPLETE",
+      "stop_reason": null
+    },
+    "co_declare": {
+      "exit": 0,
+      "result_sha256": "a7748569e39c216aea12864501154eb6d913738e23d76cb769a9a0fa0ec2a60f",
+      "private_sha256": {
+        "G01-1.message.consumed.json": "6e908715e853df69cea6bd8898d79d53bb69b0e8e633b372145e0e30004434a4",
+        "G01-1.message.request.bin": "15adf4ceac40f264582f590e3723b76e6ca580391e97f05c62f9ede3f350b55d",
+        "G01-1.plan.consumed.json": "314c25ed6d2b6dde31c6843afa731c42d5545ddc1e53cb044678e59b72bddeb7",
+        "G01-1.plan.request.bin": "309c583dd0c9fde6bb463f1f8eaff480b9e0a6205161937a3148023698bdd680",
+        "raw.jsonl": "01cb73717e49e3943d56c2f0b54723471d91c45352b999be1d24ea6b795f0cec",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "e2f64c1e6d834adddb244518018b168aee3c341f2a9353d288214f866fa4fdb9",
+      "calls": 2,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "COMPLETE",
+      "stop_reason": null
+    },
+    "none": {
+      "exit": 0,
+      "result_sha256": "a8bbe702092824a5566b32043586657dce9dc48fa7b07c4a6e247ee92c0833ff",
+      "private_sha256": {
+        "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
+        "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
+        "raw.jsonl": "c6936dc86a334b0948571eb69fe55582a3c4fdf77836489e57dff3c8b7f2413b",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "610a90c06579d1600480541c4e912ea3d28d231d3a8d80ec3a2f1623ffc0ae8a",
+      "calls": 1,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "COMPLETE_NO_MESSAGE",
+      "stop_reason": null
+    },
+    "vote": {
+      "exit": 0,
+      "result_sha256": "37d8ceee85d3dde82fd9bccd4437eb0734512bcdde18936519387c104bd1e9b8",
+      "private_sha256": {
+        "G01-1.plan.consumed.json": "d18af14024883b0979f8a645c6b535f5cad3fbe3f6df5df6de1940bb82e49d75",
+        "G01-1.plan.request.bin": "96eb1bdc287323bd2f6e3150f860f5628403c21095862c20b9a6a4f2c78dfd4e",
+        "raw.jsonl": "fdd859732428b0f9f5e2e2bebeaa4dd7d62decb9fe09243e9654b1348adba570",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "268b1cb11ffbd90bc8c6272b4b4e8a8befe4cf7e3ea22d284915aab33b9a761f",
+      "calls": 1,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "COMPLETE_NO_MESSAGE",
+      "stop_reason": null
+    },
+    "ability": {
+      "exit": 0,
+      "result_sha256": "81e67d16502af43f6eb891b5462fbeecfe7b4a251ab3945b3fb5ef533efa5b88",
+      "private_sha256": {
+        "G01-1.plan.consumed.json": "252dce6e6cca588b5b1fee1c82c94b0924e5867e00ee607ffb9c7c88a3b26a86",
+        "G01-1.plan.request.bin": "260649bc6e39ee8f50a7d7d6b0d1983238ac52f3398bdb6cf9908540c2a1fe11",
+        "raw.jsonl": "6a48f48b0e98ff88e4f24a17f741021878ad16d6440223ddb307426de133bbb9",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "134adfe72d8f6b7669bf43ab88dc2b023bdeb0475ce1cb9f653e2bca5a761935",
+      "calls": 1,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "COMPLETE_NO_MESSAGE",
+      "stop_reason": null
+    },
+    "bad_plan": {
+      "exit": 0,
+      "result_sha256": "bb727d53dceab51c464623e83eb06aca5aa38d6b298886f9ade4b647e517e3da",
+      "private_sha256": {
+        "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
+        "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
+        "raw.jsonl": "517b1cb4a211a3387015e4e22ec8b08eeb0ec6115134b96e9d02ec1f36ee895e",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "610a90c06579d1600480541c4e912ea3d28d231d3a8d80ec3a2f1623ffc0ae8a",
+      "calls": 1,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "PLAN_INVALID",
+      "stop_reason": null
+    },
+    "bad_message": {
+      "exit": 0,
+      "result_sha256": "593bc26443debcb5e26c21e708ff5d8bd86c033ea71c71ed2e5754936246089a",
+      "private_sha256": {
+        "G01-1.message.consumed.json": "9a9a3ed0ea71402b422f7acf9f94ec4354f25a3f9ec5add51e2ae8a955acd6c8",
+        "G01-1.message.request.bin": "0f8b35e0758fe56fd6ecfbabb60b973f40a959f26ead281f6a3c5d8a32b29a57",
+        "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
+        "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
+        "raw.jsonl": "b231cd1124e69ea51c9961a2c8ce65d7941b9e5eb7fd07153fc1fcaecbde8639",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "fba8122ab8d40f05dc196c26cddccbe8e1cc02655a65b1de76c5fa4a1cd1eb99",
+      "calls": 2,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "MESSAGE_INVALID",
+      "stop_reason": null
+    },
+    "load_exit": {
+      "exit": 2,
+      "result_sha256": "2faf296bfd20a9ab05b5f2e6bfeb5c85f7b1c36b4a09571e7993e089c1a0411a",
+      "private_sha256": {},
+      "transport_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "calls": 0,
+      "child_exits": [
+        3
+      ],
+      "status": "STOPPED",
+      "row_status": "PLAN_NOT_STARTED",
+      "stop_reason": "LOAD_EXIT"
+    },
+    "transport": {
+      "exit": 0,
+      "result_sha256": "a033314b84f5b28681c25214f4b8147c6fb5d103017e45e6d592dac48e2407ce",
+      "private_sha256": {
+        "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
+        "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
+        "raw.jsonl": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "0f1e08e59c9b188285b65003c493765d0e50635b9cb6a0411dc9f9249da0ab04",
+      "calls": 0,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "COMPLETE",
+      "row_status": "PLAN_ERROR",
+      "stop_reason": null
+    },
+    "cleanup": {
+      "exit": 2,
+      "result_sha256": "17e39abfd208fcab92662d8607c21c2a80a554c078aa4f33485c5d6d35a3c9a5",
+      "private_sha256": {
+        "G01-1.message.consumed.json": "9a9a3ed0ea71402b422f7acf9f94ec4354f25a3f9ec5add51e2ae8a955acd6c8",
+        "G01-1.message.request.bin": "0f8b35e0758fe56fd6ecfbabb60b973f40a959f26ead281f6a3c5d8a32b29a57",
+        "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
+        "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
+        "raw.jsonl": "96cfeda0c83682aaad97f775a67d264b616394bbe66cf17cf54cc36d65d86aa2",
+        "runtime.json": "33232974f97a8072ca43757123954cab9e3107c86810e67f6b7064bc54600911"
+      },
+      "transport_sha256": "fba8122ab8d40f05dc196c26cddccbe8e1cc02655a65b1de76c5fa4a1cd1eb99",
+      "calls": 2,
+      "child_exits": [
+        0,
+        0
+      ],
+      "status": "STOPPED",
+      "row_status": "COMPLETE",
+      "stop_reason": "CLEANUP_FAILED"
+    }
+  }
+}
