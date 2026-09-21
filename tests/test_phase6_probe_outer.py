@@ -200,3 +200,18 @@ def test_native_supervisor_cleans_only_observed_owned_child(tmp_path, root_delay
         assert outsider.pid not in {p['pid'] for p in result['owned_processes']}
     finally:
         if outsider.poll() is None: outsider.kill(); outsider.wait(timeout=5)
+
+
+def test_outer_dispatches_only_fixed_gc2_runner(monkeypatch, tmp_path):
+    from tests.fixtures import phase6_evidence
+    (tmp_path/'plan.json').write_text(json.dumps({'experiment':'grounding_closed_v1','task_id':'T462'}))
+    monkeypatch.setattr(outer.sys,'argv',['outer','--output',str(tmp_path)])
+    monkeypatch.setattr(phase6_evidence,'create_private_evidence_container',lambda *a,**k:tmp_path)
+    calls=[]
+    def supervise(command,*a,**k):
+        calls.append(command)
+        return dict(exit_code=0,outer_timeout=False,ownership_complete=True,owned_alive_after=0)
+    monkeypatch.setattr(outer,'supervise',supervise)
+    assert outer.main() == 0
+    assert calls == [[outer.sys.executable,str(outer.ROOT/'scripts/phase6_grounding_closed_runner.py'),
+                      '--output',str(tmp_path.resolve()),'--run','qw9']]

@@ -19,7 +19,7 @@
 
 ## Best known state
 
-現在の製品baselineを維持。S1/P2はtest-only隔離され、製品採用なし。独立承認済み検証基盤を保持。Cycle3 IC2は設計承認・offline PASS、tool審査中・未生成。
+現在の製品baselineを維持。S1/P2はtest-only隔離され、製品採用なし。独立承認済み検証基盤を保持。Cycle3 IC2も独立評価で不採用。Cycle4 GC2は設計中。
 
 ## Cycle 2: 2-call Plan→Message（不採用）
 
@@ -76,3 +76,23 @@ G14無発話controlは2件とも発話を選択。JSON-valid29件の実17key順�
 ### Cycle 3 実装gate
 
 T456設計はT457独立APPROVED。kind-only choice32tokens→元kind枝locked full480tokens、全valid choiceで必ず2call。Main/T459がtest-only実装。Python3.13合同310＋freeze7 PASS、3.10 181 PASS。P2既存10mock条件の抽出前後hash一致、converter224/native263fixture合格。製品境界不変、tool審査中、実生成なし。
+
+### Cycle 3 最終結果
+
+| 指標 | baseline | IC2 |
+|---|---:|---:|
+| HARD FAIL | 14 | 30 |
+| SEMANTIC PASS | 7 | 1 |
+| STYLE PASS | 15 | 22 |
+| act/text不一致 | 23 | 4 |
+| 捏造 / 秘密 / 状態 / 能力 | 0 / 5 / 3 / 0 | 6 / 3 / 2 / 2 |
+| 固定18質問回答 | 9 | 4 |
+
+IC2不採用。kind選択はCLAIM27/QUESTION5でNONE固定を脱したが、意味・安全性は回帰した。旧validator拒否26はCLAIM_ACTOR16/参照9/option1。これは訂正済みexact診断で、初版PRIOR_STATE分類は使わない。原本保存、製品rollbackなし。
+
+### Cycle 4 GC2
+
+生成時の参照集合とclaim/actor対応を既存authority受理制約へ閉じる限定仮説。IC2 choiceは厳密hashで再利用し、変わったoutput schemaだけ新生成する設計をT460へ割当。旧候補は再生成しない。未承認実装・製品変更なし。
+
+
+GC2設計はT461独立承認、実装/focusedは完了してtool review中。保存choice32照合、grammar221PASS、参照不成立3種を生成前拒否、native32 fixture、新provider0。主な関心は25件のgrounding拒否を生成契約で防げるかであり、kind固定だけを会話改善と見なさない。旧IC2 choiceの合法NONE不成立は既知の残存制約で、GC2でも品質gateから除外しない。

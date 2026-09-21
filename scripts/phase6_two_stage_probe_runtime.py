@@ -1,4 +1,4 @@
-"""Synchronous ownership lifecycle for exactly two fixed, test-only probes."""
+"""Synchronous ownership lifecycle for fixed, test-only probes."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -53,13 +53,22 @@ IC2_CONTRACT = TwoStageContract('intent_choice_v1', 'T458', (
     StageContract('choice', 32, 240, False), StageContract('output', 480, 120, False)))
 
 
+@dataclass(frozen=True)
+class ReplayedChoiceContract(TwoStageContract):
+    stages: tuple[StageContract, ...] = (StageContract('output', 480, 120, False),)
+    max_provider_calls: int = 32
+
+
+GC2_CONTRACT = ReplayedChoiceContract('grounding_closed_v1', 'T462')
+
+
 def validate_contract(contract):
-    if (type(contract) is not TwoStageContract or type(contract.stages) is not tuple
+    if (type(contract) not in (TwoStageContract, ReplayedChoiceContract) or type(contract.stages) is not tuple
             or any(type(stage) is not StageContract for stage in contract.stages)):
         raise base.StopComparison('STAGE_CONTRACT')
-    expected = {'two_call_v1': P2_CONTRACT, 'intent_choice_v1': IC2_CONTRACT}.get(contract.experiment)
+    expected = {'two_call_v1': P2_CONTRACT, 'intent_choice_v1': IC2_CONTRACT, 'grounding_closed_v1': GC2_CONTRACT}.get(contract.experiment)
     # Canonical bytes also reject int/bool coercion, wrong number types and reordered stages.
-    if expected is None or wire_bytes(asdict(contract)) != wire_bytes(asdict(expected)):
+    if expected is None or type(contract) is not type(expected) or wire_bytes(asdict(contract)) != wire_bytes(asdict(expected)):
         raise base.StopComparison('STAGE_CONTRACT')
     if (base.REQUEST_SECONDS, base.LOAD_SECONDS, base.MODEL_SECONDS) != (60, 180, 1200):
         raise base.StopComparison('STAGE_CONTRACT')
@@ -113,8 +122,8 @@ def stage(stage_name, body, row, private, rawfile, save, budget, *, contract):
     if (remaining is None or remaining < spec.reserve_seconds
             or (spec.reject_when_remaining_equal and remaining == spec.reserve_seconds)):
         raise base.StopComparison('MODEL_TIME_BUDGET')
-    first, second = (item.name for item in contract.stages)
-    if stage_name == second and (row[first+'_provider_calls'] != 1
+    first, second = contract.stages[0].name, contract.stages[-1].name
+    if len(contract.stages) == 2 and stage_name == second and (row[first+'_provider_calls'] != 1
             or row.get(first, {}).get('status') != 'GENERATED'):
         raise base.StopComparison('STAGE_ORDER')
     if row[stage_name+'_provider_calls'] or budget['calls'] >= contract.max_provider_calls:
@@ -197,7 +206,21 @@ def record_final(case, projection, row, rawfile, outcome):
 
 def run_two_stage_probe(out, *, contract, callbacks):
     validate_contract(contract)
-    first, second = (item.name for item in contract.stages)
+    if type(contract) is not TwoStageContract:
+        raise base.StopComparison('STAGE_CONTRACT')
+    return _run_lifecycle(out, contract=contract, callbacks=callbacks)
+
+
+def run_replayed_choice_output_probe(out, *, contract, callbacks):
+    validate_contract(contract)
+    if type(contract) is not ReplayedChoiceContract:
+        raise base.StopComparison('STAGE_CONTRACT')
+    return _run_lifecycle(out, contract=contract, callbacks=callbacks)
+
+
+def _run_lifecycle(out, *, contract, callbacks):
+    validate_contract(contract)
+    first, second = contract.stages[0].name, contract.stages[-1].name
     plan = json.loads((out/'plan.json').read_text(encoding='utf-8'))
     profile, projections = callbacks.verify_source_and_inputs(plan)
     if (out/'qw9-results.json').exists():
@@ -205,8 +228,10 @@ def run_two_stage_probe(out, *, contract, callbacks):
     private = None
     result = {'experiment': contract.experiment, 'model_key': 'qw9', 'status': 'STARTING', 'clock_domain': 'REAL',
               'plan_sha256': base.file_hash(out/'plan.json'), 'retry': 0, 'repair': 0,
-              'max_provider_calls': 64, 'baseline_artifacts': plan['baseline']['artifacts'],
+              'max_provider_calls': contract.max_provider_calls, 'baseline_artifacts': plan['baseline']['artifacts'],
               'rows': [callbacks.initial_row(c, p) for c, p in projections]}
+    if contract == GC2_CONTRACT:
+        result.update(reused_choice_count=32, reused_provider_calls=32, replay_artifacts=plan['replay']['artifacts'])
     base.claim_run(out, 'qw9')
     started = time.monotonic()
     base._RUN_DEADLINE = started+base.MODEL_SECONDS
@@ -214,6 +239,8 @@ def run_two_stage_probe(out, *, contract, callbacks):
     budget = {'calls': 0}
     def save():
         result.update(real_duration_sec=time.monotonic()-started, new_provider_calls=budget['calls'])
+        if contract == GC2_CONTRACT:
+            result['new_output_calls'] = budget['calls']
         write_json(out/'qw9-results.json', result)
     try:
         save()
@@ -260,7 +287,7 @@ def run_two_stage_probe(out, *, contract, callbacks):
                         rawfile, save, budget, contract=contract))
                     outcome = callbacks.process_case(context, case, projection, row)
                     if outcome is not None:
-                        record_final(case, projection, row, rawfile, outcome)
+                        record_final(case, projection.original if contract == GC2_CONTRACT else projection, row, rawfile, outcome)
                 except (base.httpx.HTTPError, TimeoutError):
                     row.update(status=(second if row[second+'_provider_calls'] else first).upper()+'_ERROR',
                                generation_status='ERROR', error_kind='TRANSPORT_ERROR')

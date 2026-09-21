@@ -1,9 +1,10 @@
 {
   "source_sha256": "b92a70de01f1432c771369c1e929ca7b1cf197e2f4b56321b6a17167a0cd9312",
+  "fixture_argv": "POSIX_SEPARATOR_MOCK_ONLY",
   "scenarios": {
     "chat": {
       "exit": 0,
-      "result_sha256": "a16385826704c539049d6af60f65ccb327ec723fe18d9bfc518361446acba83c",
+      "result_sha256": "ce920ee37e49b5a41b5cb7401745944f246e5cf695a61b5baab8d48586057ac9",
       "private_sha256": {
         "G01-1.message.consumed.json": "9a9a3ed0ea71402b422f7acf9f94ec4354f25a3f9ec5add51e2ae8a955acd6c8",
         "G01-1.message.request.bin": "0f8b35e0758fe56fd6ecfbabb60b973f40a959f26ead281f6a3c5d8a32b29a57",
@@ -24,7 +25,7 @@
     },
     "co_declare": {
       "exit": 0,
-      "result_sha256": "a7748569e39c216aea12864501154eb6d913738e23d76cb769a9a0fa0ec2a60f",
+      "result_sha256": "c2d97fa4c30fe76d3f82bf918216bc10b969b043409fe3e56f9dcf7e2e3d220b",
       "private_sha256": {
         "G01-1.message.consumed.json": "6e908715e853df69cea6bd8898d79d53bb69b0e8e633b372145e0e30004434a4",
         "G01-1.message.request.bin": "15adf4ceac40f264582f590e3723b76e6ca580391e97f05c62f9ede3f350b55d",
@@ -45,7 +46,7 @@
     },
     "none": {
       "exit": 0,
-      "result_sha256": "a8bbe702092824a5566b32043586657dce9dc48fa7b07c4a6e247ee92c0833ff",
+      "result_sha256": "825f6cdcfd912f79fb3eb209c2c107694525362e03ed0d28113b061c4738ef89",
       "private_sha256": {
         "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
         "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
@@ -64,7 +65,7 @@
     },
     "vote": {
       "exit": 0,
-      "result_sha256": "37d8ceee85d3dde82fd9bccd4437eb0734512bcdde18936519387c104bd1e9b8",
+      "result_sha256": "5de446076e968912d24c30d7bcc3c5c4907905f58725fe158a322dd2e1fc69a5",
       "private_sha256": {
         "G01-1.plan.consumed.json": "d18af14024883b0979f8a645c6b535f5cad3fbe3f6df5df6de1940bb82e49d75",
         "G01-1.plan.request.bin": "96eb1bdc287323bd2f6e3150f860f5628403c21095862c20b9a6a4f2c78dfd4e",
@@ -83,7 +84,7 @@
     },
     "ability": {
       "exit": 0,
-      "result_sha256": "81e67d16502af43f6eb891b5462fbeecfe7b4a251ab3945b3fb5ef533efa5b88",
+      "result_sha256": "6dc0ee9ad548018708f0d17ec19c303c762e8b9ea75c68234553d2a34399fc7f",
       "private_sha256": {
         "G01-1.plan.consumed.json": "252dce6e6cca588b5b1fee1c82c94b0924e5867e00ee607ffb9c7c88a3b26a86",
         "G01-1.plan.request.bin": "260649bc6e39ee8f50a7d7d6b0d1983238ac52f3398bdb6cf9908540c2a1fe11",
@@ -102,7 +103,7 @@
     },
     "bad_plan": {
       "exit": 0,
-      "result_sha256": "bb727d53dceab51c464623e83eb06aca5aa38d6b298886f9ade4b647e517e3da",
+      "result_sha256": "f962a8c5a9105cb66a06d5a99fe44296e8cbb5be636185254a5ac661546a68fb",
       "private_sha256": {
         "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
         "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
@@ -121,7 +122,7 @@
     },
     "bad_message": {
       "exit": 0,
-      "result_sha256": "593bc26443debcb5e26c21e708ff5d8bd86c033ea71c71ed2e5754936246089a",
+      "result_sha256": "7c2e8676a28ae3fd283f6240df35e3206f72266b82f79535a6cc2238518276e6",
       "private_sha256": {
         "G01-1.message.consumed.json": "9a9a3ed0ea71402b422f7acf9f94ec4354f25a3f9ec5add51e2ae8a955acd6c8",
         "G01-1.message.request.bin": "0f8b35e0758fe56fd6ecfbabb60b973f40a959f26ead281f6a3c5d8a32b29a57",
@@ -142,7 +143,7 @@
     },
     "load_exit": {
       "exit": 2,
-      "result_sha256": "2faf296bfd20a9ab05b5f2e6bfeb5c85f7b1c36b4a09571e7993e089c1a0411a",
+      "result_sha256": "4174ffea9f230804cd831f79f40e8d8a1b58c8a45d2969643015616dc1e4c912",
       "private_sha256": {},
       "transport_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "calls": 0,
@@ -155,7 +156,7 @@
     },
     "transport": {
       "exit": 0,
-      "result_sha256": "a033314b84f5b28681c25214f4b8147c6fb5d103017e45e6d592dac48e2407ce",
+      "result_sha256": "4bb8a2ac954b837667286f6b98f816172bc4381c486f2fc8f1e4c9197d3690f2",
       "private_sha256": {
         "G01-1.plan.consumed.json": "0c9d62dc61d5f10cf1a555719f009b388853c48d1936ba8ed0559c67e8e87053",
         "G01-1.plan.request.bin": "28bcaaa8f3d2143da33c6cfa139d735986e33f6e224bdf2cd568f25f4c7fecc3",
@@ -174,7 +175,7 @@
     },
     "cleanup": {
       "exit": 2,
-      "result_sha256": "17e39abfd208fcab92662d8607c21c2a80a554c078aa4f33485c5d6d35a3c9a5",
+      "result_sha256": "b425d2e85ae235a4b8eea2289a6dd986c811a6d45283ccf5872d34b055fe53e4",
       "private_sha256": {
         "G01-1.message.consumed.json": "9a9a3ed0ea71402b422f7acf9f94ec4354f25a3f9ec5add51e2ae8a955acd6c8",
         "G01-1.message.request.bin": "0f8b35e0758fe56fd6ecfbabb60b973f40a959f26ead281f6a3c5d8a32b29a57",

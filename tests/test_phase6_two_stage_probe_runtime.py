@@ -31,6 +31,11 @@ def digest(value):
 
 
 def observation(monkeypatch, path, scenario):
+    # This is a mocked process argv. Use the same fixture bytes on Windows and Linux;
+    # keep the entire result, request, consumption and raw comparison unchanged.
+    launch_args = runner.base.launch_args
+    monkeypatch.setattr(runner.base, 'launch_args',
+        lambda *args: [part.replace('\\', '/') for part in launch_args(*args)])
     kind = scenario if scenario in SCENARIOS[:5] else 'chat'
     calls, children, payloads, private = ready_run(monkeypatch, path, kind=kind,
         plan_failure=scenario == 'bad_plan', text_failure=scenario == 'bad_message')
@@ -177,3 +182,34 @@ def test_case_callbacks_only_use_dispatch_capability():
         assert not (names|attributes)&forbidden
     context = runtime.CaseContext(lambda *args: args)
     assert [name for name in dir(context) if not name.startswith('_')] == ['dispatch']
+
+@pytest.mark.parametrize('remaining,allowed', [(120,True),(119.999,False)])
+def test_gc2_real_reserve_is_output_only(monkeypatch,tmp_path,remaining,allowed):
+    import io
+    monkeypatch.setattr(runtime.time,'monotonic',lambda:100.0)
+    monkeypatch.setattr(runtime.base,'_RUN_DEADLINE',100.0+remaining)
+    row={'case_id':'G01-1','output_provider_calls':0,'new_provider_calls':0,'completion_tokens':0,'provider_prompt_tokens':0}
+    body={'max_tokens':480,'messages':[],'response_format':{'json_schema':{'schema':{}}}}
+    calls=[]
+    monkeypatch.setattr(runtime.base,'count_prompt',lambda *a,**k:{'prompt_tokens_actual':10})
+    def request(*a,**k):
+        calls.append(1)
+        return {'choices':[{'message':{'content':'{}'},'finish_reason':'stop'}],
+                'usage':{'prompt_tokens':10,'completion_tokens':2}}
+    monkeypatch.setattr(runtime.base,'request',request)
+    budget={'calls':0}
+    with (tmp_path/'raw.jsonl').open('w') as raw:
+        if allowed:
+            assert runtime.stage('output',body,row,tmp_path,raw,lambda:None,budget,contract=runtime.GC2_CONTRACT)=='{}'
+            assert len(calls)==budget['calls']==1
+        else:
+            with pytest.raises(runtime.base.StopComparison,match='MODEL_TIME_BUDGET'):
+                runtime.stage('output',body,row,tmp_path,raw,lambda:None,budget,contract=runtime.GC2_CONTRACT)
+            assert calls==[] and not list(tmp_path.glob('*.request.bin'))
+
+
+def test_gc2_cannot_dispatch_reused_choice(monkeypatch,tmp_path):
+    monkeypatch.setattr(runtime.base,'_RUN_DEADLINE',runtime.time.monotonic()+1200)
+    with pytest.raises(runtime.base.StopComparison,match='STAGE_CONTRACT'):
+        runtime.stage('choice',{'max_tokens':32},{},tmp_path,None,lambda:None,{'calls':0},contract=runtime.GC2_CONTRACT)
+    assert not list(tmp_path.iterdir())
