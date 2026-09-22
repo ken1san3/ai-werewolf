@@ -3,7 +3,7 @@
 ## 今回の位置づけ
 
 23時以降の作成対象は公開syntheticによるoffline検査であり、LLM品質の測定ではない。
-テストは実行しない。今夜の設計・作成・static reviewと、後日の実行結果を区別する。
+9月22日は作成・static reviewのみ。9月23日の明示指示でT495が初回offline検査を実施した。
 通常game、Master Run、provider、モデル操作、Actionsは対象外。
 
 ## 一コマンド入口
@@ -15,11 +15,19 @@ python -m pytest tests/test_phase6_minimal_output_applicability.py -q
 ```
 
 この文書にコマンドがあることは、実行済みやPASSの証拠ではない。
-今回の実装範囲・独立review・未実行項目はT493 handoffに記録する。
+作成範囲・独立reviewはT493 handoff、初回実行結果はT495 handoffを参照する。
 
 作成物はpure helper、手作りの公開13ケース、パラメータ化した負例である。
 ケース構築とhelper呼出しはtest関数から行う。テストには通信・プロセス起動・provider・
-state store構築/commitを拒否するガードを付けた。ガード自体を含め実行結果は未確認。
+state store構築/commitを拒否するガードを付けた。T495ではPython3.13/3.10とも154 PASS。
+
+Python3.10は依存関係を導入済みの既存環境を使用する。
+
+```powershell
+.\.venv-ci310\Scripts\python.exe -m pytest tests/test_phase6_minimal_output_applicability.py -q
+```
+
+標準の `py -3.10` 環境ではhttpx不足によりcollection errorとなった。コード不良として扱わない。
 
 ## 結果を読むときの境界
 
