@@ -163,14 +163,15 @@ Actionsの有効化/実行/再実行はローカル同等検証と理由説明�
 
 ## End of task
 
-Before handing work back:
+終了前にfocused test・関連回帰・`python scripts/check_docs.py`・diff検査を行い、対象差分全体を確認する。
+実測handoffを残し、Integratorが検証済み証拠からTASKS/CURRENT_STATEを更新する。
+新判断はdecisions/、反復可能な失敗はfailures/へ保存する。
+workerは割当境界で終了。Mainは完了・明示hold・安全な次手なしまでユーザー許可内で続行する。
+未解決の重要な製品選択、解消不能な権限衝突、破壊操作、外部許可不足は該当部分だけ保留し、
+独立した許可済み作業を進める。
 
-- Run focused tests, relevant regressions, `python scripts/check_docs.py`, and diff checks.
-- Review the complete scoped diff.
-- Write the task handoff with measured evidence.
-- Let the Integrator update `TASKS.md` and `CURRENT_STATE.md` from verified evidence.
-- Record new decisions in `decisions/` and repeatable failures in `failures/`.
-- Workers stop at their assignment boundary. Main continues within user-authorized scope until
-  completion, an explicit hold, or no safe work remains. Pause affected work for an unresolved
-  material product choice, irreconcilable authority, destructive operation, or missing external
-  authorization; keep independent authorized work moving.
+まとまった作業の最後にContext Size Auditを原則1回行う（ユーザー解除まで常設）。
+metadataとscoped read-setを優先し、本文全読や途中の反復監査を避ける。
+終了監査は専用Context Maintainerへ委任し、完了と対象HEAD/差分を照合して結果を報告する。
+自身との二重整理はしない。同じ対象の監査済み結果は照合して再利用する。
+手順・必須測定・報告形式は`Docs/ai/OPERATIONS.md`の「Context Size Audit」。

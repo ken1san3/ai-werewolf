@@ -90,6 +90,83 @@ DONE/CANCELLEDの旧状態・証拠は保持し、archiveの指示から再割�
 割当前の広い状態確認には`--all-live`、必要な証拠/RUNBOOK詳細には`--details`を明示する。
 packetは `tasks/TEMPLATE.md`、出力は短いhandoff templateに従い、path/hashで再利用する。
 
+## Context Size Audit
+
+2026-09-23ユーザー指示。解除されるまで常設。設計、実装＋review、測定、candidate採否等の
+まとまった本作業を終えた最後に原則1回行い、通常報告へ監査結果を付ける。
+途中の頻繁な監査や、監査のための全履歴読込みは行わない。
+
+1. 最新HEAD/branch/差分と次active taskを確認する。
+2. AGENTS、CURRENT_STATE、TASKS、ROADMAP、MODEL_ASSIGNMENTS、active packet/design/handoffの
+   bytes・改行正規化chars・lines・変更有無を測る。未作成は未作成と記し、継承元を混同しない。
+3. 次taskのMANDATORYをpath＋heading/section＋目的で確定し、重複を除いた通常read-set合計charsを算出する。
+   CONDITIONALとDO NOT READ BY DEFAULTも分離する。`ai_status`経由の入口確認を省略しない。
+4. 必要な最小整理だけ行う。優先順はread-set narrowing→section scope→完了task archive→
+   CURRENT_STATE current-only→TASKSの完了詳細退避→canonical pointer→巨大design全文の通常対象除外。
+5. `python scripts/check_docs.py`とdiffを確認し、整理後metadata/合計を再測定して次read-setを固定する。
+
+保存上限は最新`check_docs.py`を正本とし引き上げない。通常read-setは20,000 chars以下HEALTHY、
+20,000超〜30,000以下WATCH、30,000超〜50,000以下は原則縮小、50,000超は特別な理由がなければ必ず縮小。
+縮小した場合の最終判定はREDUCED、なお縮小が必要ならNEEDS_FURTHER_REDUCTIONとする。
+
+サイズだけのために本文をモデルへ表示しない。変更のない巨大文書を再読しない。
+本文参照は肥大原因・archive対象・重複・scoped pointer確認に必要なsectionだけ。
+history全文、旧candidate/raw/annotation、完了handoff全文、巨大design全文、旧measurement全文は
+通常DO NOT READ BY DEFAULT。必要ならpath・section・読む目的・発動条件を指定する。
+CURRENT_STATEは現phase/task/blocker/evidence/test/next action/branch・Git/有効な禁止事項だけ、
+TASKSはactive boardと完了range/state/archive path/hashだけを原則とする。
+
+証拠は削除しない。measurement、approval/rejection、hash、decision、failure、privacy/authority契約、
+review結果を保全する。監査ではproduct/algorithm/candidate設計/regression変更、provider/game実行、
+model変更、Actions有効化、main直接変更、force pushを行わない。
+
+専用Context Maintainerの完了結果は、対象HEAD・read-set・関連差分が一致する範囲で再利用する。
+同じ整理を二重に行わず、終了報告へ取り込む。新しい内容や差分は今回値として測定する。
+専用チャットの過去全文や旧監査会話を常設read-setにせず、repository最新状態を正本とする。
+監査報告のためだけの新summary文書や、変更不要時の無意味なcommitは作らない。
+
+### 専用チャットへの委任
+
+2026-09-23追加ユーザー指示により、Mainは本作業終了時に専用Context Maintainerへ監査を委任する。
+委任先thread: `<chat-thread-id>`（`C:\AIwolf`）。
+既存threadへfollow-upを送り、同じ目的の新agent/threadを毎回作らない。
+本文は対象branch/最新HEAD/次task packet/今回変更path/許可された文書整理scopeだけに絞る。
+履歴全文、private原文、旧audit全文を渡さない。
+
+Mainは本作業と必要なcommit/pushを先に完了し、監査中は対象文書を並行編集しない。
+専用担当は最新Git/metadata/変更差分から1回監査し、必要な文書整理、check_docs/diff検査、
+Before/After/read-set/Verdictを返す。文書変更があれば専用branchへcommitしてMainへHEADを通知する。
+Mainは完了・対象HEAD・関連差分を照合して監査結果を通常報告へ取り込み、未push分は通常pushする。
+監査commit自体を新サイクルと数えて再委任する無限再帰は禁止。既存taskが実行中なら重複dispatchしない。
+専用threadが利用不能ならその事実を記録し、勝手に完了扱いしない。安全な本作業は継続する。
+
+### 終了報告形式
+
+通常報告の後に次を付ける。Before/Afterは同じ項目・単位・read-set算出規則で比較する。
+
+```text
+Context Size Audit
+HEAD: <sha>
+Next active task: <task>
+Before:
+- AGENTS / CURRENT_STATE / TASKS / ROADMAP / MODEL_ASSIGNMENTS: <各chars>
+- active packet / active design / active handoff: <各chars、未作成は明記>
+- mandatory read-set total: <chars>
+Actions:
+- archived / shortened / scoped / pointerized / unchanged: <各内容>
+After:
+- AGENTS / CURRENT_STATE / TASKS / ROADMAP / MODEL_ASSIGNMENTS: <各chars>
+- active packet / active design / active handoff: <各chars、未作成は明記>
+- mandatory read-set total: <chars>
+Next agent read-set:
+MANDATORY: <path＋section＋目的>
+CONDITIONAL: <path＋section＋条件>
+DO NOT READ BY DEFAULT: <対象>
+Verdict: HEALTHY / WATCH / REDUCED / NEEDS_FURTHER_REDUCTION
+```
+
+整理不要なら`Verdict: HEALTHY`、`Action: NO CHANGE REQUIRED`。この形式のためだけに再監査しない。
+
 ## agent/thread上限時の継続（2026-09-16ユーザー指示）
 
 `agent thread limit reached` だけで全体作業を停止しない。まず現在のagent/threadを一覧し、
