@@ -37,6 +37,7 @@ HOST_KEYS = frozenset({
     "base_revision", "context_sha256", "max_text", "max_text_utf8_bytes",
     "max_candidate_utf8_bytes", "requires_private_update",
 })
+SUITE_HOST_KEYS = HOST_KEYS - {"requires_private_update"}
 CASE_IDS = tuple(f"G{group:02}-{variant}" for group in range(1, 17) for variant in (1, 2))
 
 
@@ -142,6 +143,22 @@ class HostBinding:
         object.__setattr__(self, "authority", _freeze(self.authority))
 
 
+@dataclass(frozen=True)
+class SuiteBindingV1:
+    binding_version: str
+    authority_without_update: Mapping
+    authority_bytes: bytes
+    authority_sha256: str
+    canonical_user_bytes: bytes
+    canonical_user_sha256: str
+    private_bytes: bytes
+    private_sha256: str
+    update_requirement: bool | None
+
+    def __post_init__(self):
+        object.__setattr__(self, "authority_without_update", _freeze(self.authority_without_update))
+
+
 def bind(authority: Mapping) -> HostBinding:
     """Seal trusted public fixture values. Hashes do not authenticate a sender."""
     data = plain(authority)
@@ -151,15 +168,29 @@ def bind(authority: Mapping) -> HostBinding:
     return HostBinding(data, raw, sha256(raw), private, sha256(private))
 
 
+def bind_suite(authority_without_update: Mapping, canonical_user_bytes: bytes,
+               private_bytes: bytes, *, update_requirement: bool | None) -> SuiteBindingV1:
+    """Seal suite-only authority without inventing a private-update answer."""
+    authority = plain(authority_without_update)
+    _host_shape_core(authority)
+    if update_requirement is not None and type(update_requirement) is not bool:
+        _fail("BINDING_INVALID")
+    if type(canonical_user_bytes) is not bytes or type(private_bytes) is not bytes:
+        _fail("BINDING_INVALID")
+    authority_raw = canonical_bytes(authority)
+    return SuiteBindingV1(
+        "minimal-suite-binding.v1", authority, authority_raw, sha256(authority_raw),
+        canonical_user_bytes, sha256(canonical_user_bytes), private_bytes, sha256(private_bytes),
+        update_requirement,
+    )
+
+
 def _closed(properties):
     return {"type": "object", "properties": properties,
             "required": list(properties), "additionalProperties": False}
 
 
-def output_schema(authority: Mapping) -> dict:
-    """Close decisions over trusted offers; schema PASS does not judge meaning."""
-    host = plain(authority)
-    _host_shape(host)
+def _output_schema_core(host: dict) -> dict:
     trigger = host["trigger"]
     ident = {"type": "string", "minLength": 1, "maxLength": dm.MAX_ID_SCALARS}
     ref = {"$ref": "#/$defs/evidence_ref"}
@@ -216,6 +247,19 @@ def output_schema(authority: Mapping) -> dict:
     return schema
 
 
+def output_schema(authority: Mapping) -> dict:
+    """Close decisions over trusted offers; schema PASS does not judge meaning."""
+    host = plain(authority)
+    _host_shape(host)
+    return _output_schema_core(host)
+
+
+def output_schema_suite(authority_without_update: Mapping) -> dict:
+    host = plain(authority_without_update)
+    _host_shape_core(host)
+    return _output_schema_core(host)
+
+
 def _ref(value):
     if not isinstance(value, dict) or set(value) != {"record_kind", "order", "visibility"}:
         raise ValueError("reference shape")
@@ -253,8 +297,8 @@ def _speech(value):
         dm.RelationKind(value["relation"]), value["confidence"], _refs(value["evidence"]))
 
 
-def _local_shapes(value, host):
-    if not Draft202012Validator(output_schema(host)).is_valid(value):
+def _local_shapes(value, host, schema=None):
+    if not Draft202012Validator(schema if schema is not None else output_schema(host)).is_valid(value):
         _fail("SHAPE_INVALID")
     trigger = host["trigger"]
     try:
@@ -282,9 +326,9 @@ def _hash(value):
     return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 
 
-def _host_shape(host):
+def _host_shape_core(host):
     try:
-        if type(host) is not dict or set(host) != HOST_KEYS or host["trigger"] not in TRIGGER_ACTIONS:
+        if type(host) is not dict or set(host) != SUITE_HOST_KEYS or host["trigger"] not in TRIGGER_ACTIONS:
             raise ValueError
         players = host["current_player_ids"]
         if (type(players) is not list or not players or len(players) > dm.MAX_EVENT_PLAYERS
@@ -295,8 +339,6 @@ def _host_shape(host):
             raise ValueError
         if any(type(host[key]) is not int or host[key] <= 0 for key in
                ("max_text", "max_text_utf8_bytes", "max_candidate_utf8_bytes")):
-            raise ValueError
-        if type(host["requires_private_update"]) is not bool:
             raise ValueError
         options = host["offered_options"]
         if (type(options) is not list or any(type(o) is not dict for o in options)
@@ -375,6 +417,18 @@ def _host_shape(host):
         _fail("BINDING_INVALID")
 
 
+def _host_shape(host):
+    try:
+        if type(host) is not dict or set(host) != HOST_KEYS:
+            raise ValueError
+        if type(host["requires_private_update"]) is not bool:
+            raise ValueError
+        common = {key: value for key, value in host.items() if key != "requires_private_update"}
+        _host_shape_core(common)
+    except (ProbeError, ValueError, TypeError, KeyError):
+        _fail("BINDING_INVALID")
+
+
 def _offered(value, host):
     decision, speech, detail = value["decision"], value["speech_act"], value["trigger_detail"]
     kind, trigger = decision["kind"], host["trigger"]
@@ -448,7 +502,10 @@ def expected_grounding(value) -> list[dict]:
 
 
 def _bindings(value, binding, host, option):
-    _host_shape(host)
+    if set(host) == HOST_KEYS:
+        _host_shape(host)
+    else:
+        _host_shape_core(host)
     try:
         input_value = _strict_json(binding.canonical_input_bytes)
         private_value = _strict_json(binding.canonical_private_view_bytes)
@@ -545,6 +602,47 @@ def validate(raw: bytes, binding: HostBinding) -> ProbeResult:
         _fail("BINDING_INVALID")
     status = "APPLICABILITY_UNRESOLVED" if host["requires_private_update"] else "APPLICABILITY_COVERED"
     return ProbeResult(status, sha256(raw), binding.input_sha256, before, after)
+
+
+def validate_suite(raw: bytes, binding: SuiteBindingV1) -> ProbeResult:
+    """Validate one suite candidate while preserving unknown applicability."""
+    if not isinstance(binding, SuiteBindingV1) or binding.binding_version != "minimal-suite-binding.v1":
+        _fail("BINDING_INVALID")
+    host = plain(binding.authority_without_update)
+    _host_shape_core(host)
+    if binding.update_requirement is not None and type(binding.update_requirement) is not bool:
+        _fail("BINDING_INVALID")
+    if any(type(value) is not bytes for value in
+           (binding.authority_bytes, binding.canonical_user_bytes, binding.private_bytes)):
+        _fail("BINDING_INVALID")
+    if (canonical_bytes(host) != binding.authority_bytes
+            or sha256(binding.authority_bytes) != binding.authority_sha256
+            or sha256(binding.canonical_user_bytes) != binding.canonical_user_sha256
+            or sha256(binding.private_bytes) != binding.private_sha256):
+        _fail("BINDING_INVALID")
+    cap = host.get("max_candidate_utf8_bytes")
+    if type(cap) is not int or cap <= 0:
+        _fail("BINDING_INVALID")
+    if type(raw) is bytes and len(raw) > cap:
+        _fail("TEXT_INVALID")
+    value = _strict_json(raw)
+    if _forbidden_key(value):
+        _fail("PRIVATE_UPDATE_FORBIDDEN")
+    _local_shapes(value, host, output_schema_suite(host))
+    option = _offered(value, host)
+    before = sha256(binding.private_bytes)
+    # Reuse authority checks with a suite-local view of immutable private state.
+    shim = HostBinding(host, binding.authority_bytes, binding.authority_sha256,
+                       binding.private_bytes, binding.private_sha256)
+    _bindings(value, shim, host, option)
+    _text(value, host)
+    after = sha256(binding.private_bytes)
+    if before != after:
+        _fail("BINDING_INVALID")
+    status = ("APPLICABILITY_UNRESOLVED" if binding.update_requirement is None
+              else "APPLICABILITY_UNRESOLVED" if binding.update_requirement
+              else "APPLICABILITY_COVERED")
+    return ProbeResult(status, sha256(raw), binding.canonical_user_sha256, before, after)
 
 
 def metadata_coverage(rows) -> dict:

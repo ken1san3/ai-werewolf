@@ -402,6 +402,45 @@ def test_sidecar_is_deeply_read_only():
         binding.authority["current_player_ids"][0] = "other"
 
 
+def test_suite_schema_bytes_match_legacy_schema_for_same_common_authority():
+    host = probe.plain(case(1).binding.authority)
+    suite_host = {key: value for key, value in host.items() if key != "requires_private_update"}
+    assert probe.canonical_bytes(probe.output_schema(host)) == probe.canonical_bytes(
+        probe.output_schema_suite(suite_host))
+
+
+def test_suite_and_legacy_bindings_are_not_interchangeable_and_legacy_bool_stays_exact():
+    item = case(1)
+    host = probe.plain(item.binding.authority)
+    suite_host = {key: value for key, value in host.items() if key != "requires_private_update"}
+    suite = probe.bind_suite(suite_host, b"{}", item.binding.canonical_private_view_bytes,
+                             update_requirement=None)
+    with pytest.raises(probe.ProbeError, match="BINDING_INVALID"):
+        probe.validate(probe.canonical_bytes(item.candidate), suite)
+    with pytest.raises(probe.ProbeError, match="BINDING_INVALID"):
+        probe.validate_suite(probe.canonical_bytes(item.candidate), item.binding)
+    for value in (None, 0, 1, "false"):
+        changed = deepcopy(host)
+        changed["requires_private_update"] = value
+        with pytest.raises(probe.ProbeError, match="BINDING_INVALID"):
+            probe.bind(changed)
+
+
+@pytest.mark.parametrize("requirement,expected", [
+    (None, "APPLICABILITY_UNRESOLVED"),
+    (True, "APPLICABILITY_UNRESOLVED"),
+    (False, "APPLICABILITY_COVERED"),
+])
+def test_suite_tristate_is_isolated_from_candidate_validation(requirement, expected):
+    item = case(1)
+    host = probe.plain(item.binding.authority)
+    suite_host = {key: value for key, value in host.items() if key != "requires_private_update"}
+    binding = probe.bind_suite(suite_host, b"{}", item.binding.canonical_private_view_bytes,
+                               update_requirement=requirement)
+    result = probe.validate_suite(probe.canonical_bytes(item.candidate), binding)
+    assert result.applicability == expected
+
+
 def test_grounding_exact_set_order_independent_not_silently_repaired():
     item = case(4)
     value = deepcopy(item.candidate)
