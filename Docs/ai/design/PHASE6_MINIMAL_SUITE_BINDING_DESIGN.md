@@ -2,8 +2,7 @@
 
 Status: APPROVED
 
-T497独立承認対象SHA: `c40e2dc91fcc2bc1051d82866e0ea2b81376198807aa9a39c5219de876453bf7`。
-承認後は本status/参照だけ更新、契約本文不変。
+承認元: T497がSHA-256 `c40e2dc91fcc2bc1051d82866e0ea2b81376198807aa9a39c5219de876453bf7`を独立承認した。その後のT499 frozen-v1はprovider generation=0、row claim=0のまま`TEMPLATE_INVALID`で停止した。本改訂は、その未生成停止で確定したnative template互換性だけを直すdelta。T497が改訂本文SHA-256 `bfdd37e661b3ec2bef94071886fdf56ab753b466dd65bb4fc243ad3fb8bc92ca`を独立APPROVEDとした。実装後のtool delta reviewは別gateである。
 
 ## 1. 目的と許可境界
 
@@ -40,7 +39,7 @@ probe内部は`_host_shape_core(authority_without_update)`と`_validate_core(...
 adapter.bind_case(case, projection) -> SuiteCase[SuiteBindingV1]
 adapter.candidate_body(suite_case, model_name) -> dict
 adapter.candidate_wire(body) -> bytes
-adapter.shadow_without_grounding(body) -> dict       # tokenize-only、生成禁止
+adapter.shadow_without_grounding(body) -> dict       # schemaのgrounding field/requiredとappended instructionのgrounding句だけ削除。tokenize-only、生成禁止
 probe.bind_suite(authority_without_update, canonical_user_bytes, private_bytes, *, update_requirement) -> SuiteBindingV1
 probe.output_schema_suite(authority_without_update) -> dict
 probe.validate_suite(raw, suite_binding) -> ProbeResult
@@ -118,7 +117,7 @@ response schemaは各`SuiteBindingV1`に対してsuite専用`output_schema_suite
 
 - 一回測定schemaでは削除・自動補完・別variant生成をしない。
 - 各rowへ`grounding_item_count`, `distinct_grounding_ref_count`, `duplicate_ref_occurrences`, candidate schema bytes/hashを保存する。
-- provider前に、同じbodyからgrounding fieldとそのinstructionだけを除いた`shadow_without_grounding`を`/apply-template`と`/tokenize`へ渡し、`full_prompt_tokens`, `shadow_prompt_tokens`, `grounding_prompt_token_delta`を測る。shadowは`/v1/chat/completions`へ送らない。
+- provider前に、同じbodyからresponse schemaのtop-level `grounding` propertyと`required`内の`grounding`、およびfirst systemへ連結した`MINIMAL_V1_INSTRUCTION`のgrounding説明句だけを除いた`shadow_without_grounding`を`/apply-template`と`/tokenize`へ渡し、`full_prompt_tokens`, `shadow_prompt_tokens`, `grounding_prompt_token_delta`を測る。schemaの他部分、original system、user、その他instruction、body parameterはcandidateとbyte同一に保つ。shadowは`/v1/chat/completions`へ送らない。
 - token差は表現負荷の記述値で、品質差やH61因果の証明にしない。baselineとの品質差をprivate更新除去だけへ帰因しない。
 
 grounding順序非意味、aggregate上限なし、元fieldごとの既存上限を維持する。
@@ -127,11 +126,12 @@ grounding順序非意味、aggregate上限なし、元fieldごとの既存上限
 
 ### 5.1 messages
 
-各caseのprovider bodyは3 messagesで固定する。
+各caseのprovider bodyは2 messagesで固定する。model template SHA-256 `c17a933c26907f0982a96e5cb3b6a5ef393f1722f13558ebda7be039649cb4cd`はsystem roleを先頭messageにだけ許し、後続systemを`System message must be at the beginning.`で拒否するためである。
 
-1. `projection.messages[0]`の既存system contentをbyte不変で置く。
-2. `projection.messages[1]`のcanonical user contentをbyte不変で置く。
-3. role=`system`の固定`MINIMAL_V1_INSTRUCTION`を置く。
+1. role=`system`、content=`projection.messages[0].content + "\n\n" + MINIMAL_V1_INSTRUCTION`。original system bytesはprefixとしてexactに一回保持し、delimiterはUTF-8のLF×2で固定する。instructionもexactに一回だけ連結する。
+2. `projection.messages[1]`のrole=`user`とcanonical user contentをbyte不変で置く。
+
+第三message、後続system、original systemの置換・要約・削除を禁止する。adapterは`build_messages(projection, instruction_bytes) -> tuple[dict, dict]`を純粋関数として一度だけ用い、candidate body、message hash、native検査は同じ戻り値を使う。
 
 固定instructionは次の意味だけを持つ。完全な文字列bytes/hashは実装reviewでfreezeする。
 
@@ -142,13 +142,13 @@ grounding順序非意味、aggregate上限なし、元fieldごとの既存上限
 - `grounding`はspeech/trigger内refのpurpose別mirrorで、真偽や公開妥当性を保証しない。
 - JSON以外を出さない。
 
-元systemのlegacy完全出力指示との競合は既知交絡としてplanに`legacy_instruction_present=true`を固定する。文字列置換で除去せず、別prompt variantを生成しない。
+元systemのlegacy完全出力指示との競合は既知交絡としてplanに`legacy_instruction_present=true`を固定する。original systemを文字列置換で除去せず、first system内のprefixとして保つ。candidateの別prompt variantを生成しない。
 
 ### 5.2 body
 
 ```text
 model = fixed Qwen profile basename
-messages = 上記3件
+messages = 上記2件
 response_format = json_schema(strict=true, name="phase6_minimal_output_v0", schema=bound schema)
 temperature=0.2, top_k=40, top_p=0.95, min_p=0.05
 repeat_penalty=1.0, presence_penalty=0.0, frequency_penalty=0.0
@@ -156,6 +156,14 @@ seed=4242026, max_tokens=512, cache_prompt=false
 ```
 
 serializerは`wire_bytes`（UTF-8、canonical separators、allow_nan false）を一度だけ使う。candidate request bytes/hash、schema bytes/hash、messages bytes/hash、common input hashをplanでfreezeし、run時に再計算一致を必須とする。
+
+### 5.3 native template preflight
+
+prepare/verifyはofflineで全32 bodyのmessage数=2、role順=`system,user`、original system prefix + LF×2 + instruction、user bytes、candidate/shadow request hashと構造だけを検査し、serverへ通信しない。
+
+run claimのdurable取得後、runnerがowned providerを起動してruntime/listener ownershipを確認する。従来の各row順序を維持し、そのrowのgeneration claim取得前にcandidate/shadowを`/apply-template`と`/tokenize`へ渡す。成功、rendered prompt内のoriginal system prefix・該当instruction・canonical user bytesが各exact 1回、token/context gateを検査してからrow claimへ進む。後続system、欠落、重複、順序差、template errorは`TEMPLATE_INVALID`として当該row generation=0・row claim=0でrunを停止する。全32キャッシュpreflight、plan後書き、新artifactは追加しない。
+
+frozen-v1の停止はcall許可を消費していない。同一bytesでretryせず、本deltaを反映した新request/message/rendered hashes、新commit、新freezeに対するdesign reviewとtool delta review承認後だけ初回32 generationへ進める。instruction内容、model、schema、32case、sampling、token上限は変更しない。
 
 ## 6. provider上限・token/context gate
 
@@ -166,7 +174,7 @@ serializerは`wire_bytes`（UTF-8、canonical separators、allow_nan false）を
 - context: 8,192。`actual_prompt_tokens + 512 + 1 <= 8192`を全rowで満たす。
 - request 60秒、model run 1,200秒、load 180秒。run deadlineで未開始rowは`MODEL_TIME_BUDGET/NOT_STARTED`だが分母32に残す。
 - `/apply-template`, `/tokenize`, health/runtime確認はgeneration callに数えない。endpoint allowlistを固定する。
-- native rendered prompt bytes/hashとactual token countをprivate保存し、usage prompt/completion tokensと照合する。token mismatchはrow FAIL、retryなし。
+- 各rowのnative rendered prompt bytes/hashとactual token countを既存private evidenceへ保存し、usage prompt/completion tokensと照合する。token mismatchはrow FAIL、retryなし。
 
 ### 6.1 排他的run/row claim
 
@@ -273,8 +281,9 @@ baseline copy row=4は`Docs/ai/PHASE6_MODEL_COMPARISON_20260918.md`のQwen3.5-9B
 |---|---|
 | adapter totality | 32 IDs/order、trigger count、NONE/question cohort、no drop、SuiteBindingV1 null→UNRESOLVED、既存HostBinding null拒否 |
 | mapping | authority bytesとcanonical user bytesの別identity、user decode↔canonical input、full action options↔allowed decisions↔schema、chat/vote/ability/CO descriptor正負、player/ref intersection、actor/channel、prior、limits、input非変更 |
-| schema/prompt | MinimalOutputV0 exact keys、7 speech、5 trigger contracts、3 message順、fixed instruction hash |
-| grounding confound | duplicate counts、order independence、shadow tokenize only、generation endpoint禁止 |
+| schema/prompt | MinimalOutputV0 exact keys、7 speech、5 trigger contracts、2 message `system,user`、original system prefix + LF×2 + fixed instruction、user byte不変、各要素exact 1回、後続system拒否 |
+| native template | prepare/verify通信0、全32の2-message構造offline検査、run claim後owned serverで各row claim前にcandidate/shadow apply-template/tokenize、rendered要素exact 1回、template error時当該row generation 0・row claim 0、全32 cache/artifactなし |
+| grounding confound | duplicate counts、order independence、shadowはschemaのgrounding property/requiredと連結instructionのgrounding句だけ削除、schema他部分・original system prefix・user・他body parameter byte不変、tokenize only、generation endpoint禁止 |
 | freeze | source/config/model/server/DLL/tokenizer/design/review/baseline hashes、wire/schema/message hashes |
 | lifecycle | exclusive run/row create-new claim、fsync/readback、二process race最大1 dispatch、port/process ownership、call consume before dispatch、32 max、retry/repair 0、deadline/partial rows |
 | token | full/shadow template+tokenize、8192 gate、512 cap、usage一致 |
@@ -286,8 +295,8 @@ focused後のtool reviewは、runner source/hash、fake transportでgeneration�
 
 ## 13. 独立review範囲と未解決
 
-独立Reviewerは、三値sidecar拡張、32 mapping、prompt競合、grounding重複shadow、one-call/token上限、freeze/process/private境界、baseline gate、評価interface、failure consumeを確認する。
+独立Reviewerは、本deltaの2-message native互換、original system prefix/user byte不変、shadow差分限定、pre-claim停止、三値sidecar拡張、32 mapping、prompt競合、grounding重複shadow、one-call/token上限、freeze/process/private境界、baseline gate、評価interface、failure consumeを確認する。
 
 未解決は、公開metadataだけではprivate update不要を証明できない32 rowのapplicabilityである。これはUNRESOLVEDのまま測定可能だが、製品採用判断には使えない。詳細reviewが別の公開・決定的分類規則を承認しない限りfalseへ補完しない。
 
-本設計の承認は実装開始だけを許し、provider実行はfocused testと独立tool review後に限る。
+設計承認だけではprovider実行を許可しない。改訂SHAの独立design review後に限定実装し、focused testと独立tool delta reviewが新source/request/freeze SHAを承認した後だけ、未消費の初回provider 32件を実行できる。

@@ -82,12 +82,13 @@ def test_full_request_descriptor_and_allowed_decision_mismatch_fail_closed():
         adapter.bind_case(case, changed)
 
 
-def test_candidate_body_is_exact_three_messages_and_fixed_generation_contract():
+def test_candidate_body_is_exact_two_messages_and_fixed_generation_contract():
     row = suite()[0]
     body = adapter.candidate_body(row, "model.gguf")
-    assert len(body["messages"]) == 3
-    assert body["messages"][:2] == [{"role": x.role, "content": x.content} for x in row.projection.messages]
-    assert body["messages"][2] == {"role": "system", "content": adapter.MINIMAL_V1_INSTRUCTION}
+    assert body["messages"] == [
+        {"role": "system", "content": row.projection.messages[0].content + "\n\n" + adapter.MINIMAL_V1_INSTRUCTION},
+        {"role": "user", "content": row.projection.messages[1].content},
+    ]
     assert adapter.MINIMAL_V1_INSTRUCTION_SHA256 == "f2c53c05b509d667c1dfe13dab2e4374585f7d000b53c76f0fa517394100aab3"
     assert body["response_format"]["json_schema"]["schema"] == probe.plain(row.schema)
     assert (body["temperature"], body["top_k"], body["top_p"], body["min_p"]) == (0.2, 40, 0.95, 0.05)
@@ -102,7 +103,12 @@ def test_shadow_only_removes_grounding_contract_and_does_not_mutate_body():
     schema = shadow["response_format"]["json_schema"]["schema"]
     assert "grounding" not in schema["properties"]
     assert "grounding" not in schema["required"]
-    assert "Grounding mirrors" not in shadow["messages"][-1]["content"]
+    expected = deepcopy(body)
+    del expected["response_format"]["json_schema"]["schema"]["properties"]["grounding"]
+    expected["response_format"]["json_schema"]["schema"]["required"].remove("grounding")
+    original = suite()[0].projection.messages[0].content
+    expected["messages"][0]["content"] = original + "\n\n" + adapter.MINIMAL_V1_INSTRUCTION.replace(adapter.GROUNDING_INSTRUCTION, "")
+    assert shadow == expected
     assert adapter.candidate_wire(body) == before
     assert set(shadow) == set(body)
 
@@ -246,3 +252,27 @@ def test_suite_core_rejects_invalid_ability_descriptor(change):
     else: authority["offered_options"][0]["valid_targets"] = ["unknown-player"]
     with pytest.raises(probe.ProbeError, match="BINDING_INVALID"):
         probe.output_schema_suite(authority)
+
+
+def test_all32_preserve_native_roles_exact_prefix_and_user_bytes():
+    for row in suite():
+        messages = adapter.build_messages(row.projection, adapter.MINIMAL_V1_INSTRUCTION.encode())
+        original, user = row.projection.messages
+        assert messages[0]["content"] == original.content + "\n\n" + adapter.MINIMAL_V1_INSTRUCTION
+        assert messages[0]["content"].count(adapter.MINIMAL_V1_INSTRUCTION) == 1
+        assert messages[1] == {"role": "user", "content": user.content}
+        assert messages[1]["content"].encode() == row.binding.canonical_user_bytes
+
+
+@pytest.mark.parametrize("change", ["third", "role", "invalid_utf8", "duplicate_instruction"])
+def test_native_message_builder_rejects_incompatible_input(change):
+    projection = copy(suite()[0].projection)
+    messages = list(projection.messages)
+    instruction = adapter.MINIMAL_V1_INSTRUCTION.encode()
+    if change == "third": messages.append(LLMMessage("system", "extra"))
+    elif change == "role": messages[1] = LLMMessage("system", messages[1].content)
+    elif change == "invalid_utf8": instruction = bytes([255])
+    else: messages[0] = LLMMessage("system", messages[0].content + adapter.MINIMAL_V1_INSTRUCTION)
+    object.__setattr__(projection, "messages", tuple(messages))
+    with pytest.raises(probe.ProbeError, match="BINDING_INVALID"):
+        adapter.build_messages(projection, instruction)

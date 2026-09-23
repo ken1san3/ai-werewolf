@@ -13,7 +13,7 @@ from scripts import phase6_minimal_suite_adapter as a
 
 
 def setup_stage(monkeypatch, tmp_path):
-    body = dict(model='Qwen.gguf', max_tokens=512, messages=[{'role':'system','content':'minimal'}],
+    body = dict(model='Qwen.gguf', max_tokens=512, messages=native_messages(),
                 response_format={'json_schema':{'schema':{'properties':{'grounding':{}}}}})
     suite = NS(case=NS(case_id='G01-1', category='direct_question', request=None), binding=object())
     monkeypatch.setattr(a, 'candidate_body', lambda *args:deepcopy(body))
@@ -21,6 +21,7 @@ def setup_stage(monkeypatch, tmp_path):
     def shadow(value):
         value = deepcopy(value)
         del value['response_format']['json_schema']['schema']['properties']['grounding']
+        value['messages'][0]['content'] = value['messages'][0]['content'].replace(a.GROUNDING_INSTRUCTION, '')
         return value
     monkeypatch.setattr(a, 'shadow_without_grounding', shadow)
     monkeypatch.setattr(r.base, '_RUN_DEADLINE', time.monotonic()+1200)
@@ -28,7 +29,7 @@ def setup_stage(monkeypatch, tmp_path):
     def count(value, *, wire_payload, private_sink):
         assert r.wire_bytes(value) == wire_payload
         prompts.append(value)
-        private_sink('minimal')
+        private_sink('\n'.join(m['content'] for m in value['messages']))
         return dict(prompt_tokens_actual=10, schema_changes_rendered_prompt=False)
     monkeypatch.setattr(r.base, 'count_prompt', count)
     monkeypatch.setattr(r.probe, 'validate_suite', lambda raw,binding:NS(
@@ -227,7 +228,7 @@ def test_native_context_overflow_keeps_safe_enum(monkeypatch,tmp_path):
     def overflow(*args,**kw): raise r.base.StopComparison('CONTEXT_OVERFLOW')
     monkeypatch.setattr(r.base,'count_prompt',overflow)
     with pytest.raises(r.RunError,match='CONTEXT_OVERFLOW'):
-        r.measure_prompt({'messages':[]},tmp_path,'G01-1','full')
+        r.measure_prompt({'messages':native_messages()},tmp_path,'G01-1','full')
 
 
 def fake_lifecycle(monkeypatch,tmp_path):
@@ -308,3 +309,32 @@ def test_freeze_mutation_rejected_before_dispatch(monkeypatch,field):
     assert r.verify(plan)==()
     plan[field]='changed'
     with pytest.raises(r.RunError): r.verify(plan)
+
+
+def native_messages():
+    return [{'role':'system','content':'ORIGINAL_SYSTEM_PREFIX'+'\n\n'+a.MINIMAL_V1_INSTRUCTION},
+            {'role':'user','content':'CANONICAL_USER_BYTES'}]
+
+
+@pytest.mark.parametrize('failure',['duplicate','reverse','missing','third_system'])
+def test_native_template_exact_once_and_order_before_any_generation(monkeypatch,tmp_path,failure):
+    suite,row,budget,save,_,calls,_,_=setup_stage(monkeypatch,tmp_path)
+    def bad_template(body,*,wire_payload,private_sink):
+        system,user=(m['content'] for m in body['messages'])
+        rendered=system+'\n'+user
+        if failure=='duplicate': rendered+='\n'+user
+        elif failure=='reverse': rendered=user+'\n'+system
+        elif failure=='missing': rendered=system
+        else: body['messages'].append({'role':'system','content':'late'})
+        private_sink(rendered)
+        return dict(prompt_tokens_actual=10,schema_changes_rendered_prompt=False)
+    monkeypatch.setattr(r.base,'count_prompt',bad_template)
+    if failure=='third_system':
+        body=a.candidate_body(suite,'model')
+        body['messages'].append({'role':'system','content':'late'})
+        monkeypatch.setattr(a,'candidate_body',lambda *args:body)
+        row.update(r.frozen_case(suite))
+    with pytest.raises(r.RunError,match='TEMPLATE_INVALID'):
+        r.stage(suite,row,tmp_path,{},save,budget)
+    assert budget['calls']==0 and not calls
+    assert not (tmp_path/'G01-1.generation.claim').exists()

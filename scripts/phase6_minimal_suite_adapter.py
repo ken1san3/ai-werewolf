@@ -192,11 +192,27 @@ def bind_case(case, projection, *, ordinal: int | None = None) -> SuiteCaseV1:
     return SuiteCaseV1(case, projection, binding, schema, metadata)
 
 
+def build_messages(projection, instruction_bytes: bytes) -> tuple[dict, dict]:
+    """Preserve the original system prefix and user bytes in native two-role order."""
+    messages = projection.messages
+    if (len(messages) != 2 or [item.role for item in messages] != ["system", "user"]
+            or type(instruction_bytes) is not bytes):
+        raise probe.ProbeError("BINDING_INVALID")
+    try:
+        instruction = instruction_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        raise probe.ProbeError("BINDING_INVALID") from None
+    if (not instruction or any(type(item.content) is not str or not item.content for item in messages)
+            or any(instruction in item.content for item in messages)):
+        raise probe.ProbeError("BINDING_INVALID")
+    return ({"role": "system", "content": messages[0].content + "\n\n" + instruction},
+            {"role": "user", "content": messages[1].content})
+
+
 def candidate_body(suite_case: SuiteCaseV1, model_name: str) -> dict:
     if not isinstance(suite_case, SuiteCaseV1) or type(model_name) is not str or not model_name:
         raise ValueError("invalid candidate body input")
-    messages = [{"role": item.role, "content": item.content} for item in suite_case.projection.messages]
-    messages.append({"role": "system", "content": MINIMAL_V1_INSTRUCTION})
+    messages = list(build_messages(suite_case.projection, MINIMAL_V1_INSTRUCTION.encode("utf-8")))
     return {
         "model": model_name,
         "messages": messages,
@@ -218,5 +234,11 @@ def shadow_without_grounding(body: Mapping) -> dict:
     schema = result["response_format"]["json_schema"]["schema"]
     schema["properties"].pop("grounding")
     schema["required"].remove("grounding")
-    result["messages"][-1]["content"] = MINIMAL_V1_INSTRUCTION.replace(GROUNDING_INSTRUCTION, "")
+    suffix = "\n\n" + MINIMAL_V1_INSTRUCTION
+    messages = result["messages"]
+    if (len(messages) != 2 or [item["role"] for item in messages] != ["system", "user"]
+            or not messages[0]["content"].endswith(suffix)):
+        raise probe.ProbeError("BINDING_INVALID")
+    prefix = messages[0]["content"][:-len(suffix)]
+    messages[0]["content"] = prefix + "\n\n" + MINIMAL_V1_INSTRUCTION.replace(GROUNDING_INSTRUCTION, "")
     return result

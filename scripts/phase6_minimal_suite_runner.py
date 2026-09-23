@@ -268,10 +268,27 @@ def initial_row(suite, frozen):
 
 
 def measure_prompt(body, private, case_id, label):
+    from scripts import phase6_minimal_suite_adapter as adapter
+    require(label in ('full', 'shadow'), 'TEMPLATE_INVALID')
+    instruction = adapter.MINIMAL_V1_INSTRUCTION
+    if label == 'shadow':
+        instruction = instruction.replace(adapter.GROUNDING_INSTRUCTION, '')
+    messages = body.get('messages')
+    require(type(messages) is list and len(messages) == 2, 'TEMPLATE_INVALID')
+    require(all(type(m) is dict and set(m) == {'role','content'} and type(m['content']) is str
+                and m['content'] for m in messages), 'TEMPLATE_INVALID')
+    require([m['role'] for m in messages] == ['system','user'], 'TEMPLATE_INVALID')
+    system, user = (m['content'] for m in messages)
+    suffix = '\n\n'+instruction
+    require(system.endswith(suffix) and system.count(instruction) == 1, 'TEMPLATE_INVALID')
+    prefix = system[:-len(suffix)]
+    require(bool(prefix), 'TEMPLATE_INVALID')
     raw = wire_bytes(body)
     durable(private/(case_id+'.'+label+'.request.bin'), raw, exclusive=True)
     def sink(rendered):
-        require(type(rendered) is str and all(m['content'] in rendered for m in body['messages']), 'TEMPLATE_INVALID')
+        require(type(rendered) is str and all(rendered.count(part) == 1
+                    for part in (system, prefix, instruction, user)), 'TEMPLATE_INVALID')
+        require(rendered.index(prefix) < rendered.index(instruction) < rendered.index(user), 'TEMPLATE_INVALID')
         durable(private/(case_id+'.'+label+'.rendered.bin'), rendered.encode('utf-8'), exclusive=True)
     try:
         measured = base.count_prompt(body, wire_payload=raw, private_sink=sink)
