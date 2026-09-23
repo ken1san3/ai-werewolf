@@ -120,3 +120,65 @@ def test_legal_none_does_not_accept_non_none_structure():
     result, notes = fixture()
     next(r for r in result['rows'] if r['case_id'] in q.NONE_IDS)['speech_act'] = 'ANSWER'
     with pytest.raises(ValueError): combine(result, notes)
+
+
+def combine_derived(result, annotation):
+    result = deepcopy(result)
+    result.update(experiment='minimal_derived_grounding_v1', task_id='T504')
+    for row in result['rows']:
+        row.update(derived_grounding_item_count=0,
+                   derived_grounding_purpose_counts={'UTTERANCE':0, 'OPINION_CURRENT':0,
+                                                     'REACTION':0, 'PRE_VOTE':0})
+    result_bytes = canonical_bytes(result)
+    annotation = deepcopy(annotation)
+    annotation.update(version='minimal-derived-grounding-quality.v1', result_sha256=sha256(result_bytes))
+    raw = canonical_bytes(annotation)
+    baseline = q.baseline_bytes()
+    return q.combine_derived(result_bytes, raw, baseline, exact_hashes={
+        'result':sha256(result_bytes), 'annotation':sha256(raw), 'baseline':sha256(baseline)})
+
+
+def test_derived_quality_has_separate_identity_and_unchanged_thresholds():
+    result, notes = fixture()
+    report = combine_derived(result, notes)
+    assert report['version'] == 'minimal-derived-grounding-quality.v1'
+    assert report['baseline'] == q.BASELINE and report['decision'] == 'TEST_ONLY_CANDIDATE'
+    assert report['product_adoption'] is False and report['causal_attribution'] == 'CONFOUNDED'
+
+
+def test_derived_mechanical_reject_keeps_denominator_without_invented_view():
+    result, notes = fixture()
+    result['rows'][0]['mechanical_status'] = 'FAIL'
+    result['rows'][1].update(raw_sha256=None, mechanical_status='UNKNOWN',
+                            peer_long_exact_copy=None, call_consumed=0)
+    notes['rows'][1].update(raw_sha256=None, hard='UNKNOWN', semantic='UNKNOWN', style='UNKNOWN',
+                           act_text_mismatch=None, question_answer=None, legal_none=None,
+                           copy=None, grounding_supported=None)
+    report_input = deepcopy(result)
+    report_input.update(experiment='minimal_derived_grounding_v1', task_id='T504')
+    for row in report_input['rows'][1:]:
+        row.update(derived_grounding_item_count=0,
+                   derived_grounding_purpose_counts={'UTTERANCE':0, 'OPINION_CURRENT':0,
+                                                     'REACTION':0, 'PRE_VOTE':0})
+    report_input['rows'][0].update(derived_grounding_item_count=None,
+                                   derived_grounding_purpose_counts=None)
+    report_input['rows'][1].update(derived_grounding_item_count=None,
+                                   derived_grounding_purpose_counts=None)
+    raw = canonical_bytes(report_input)
+    notes = deepcopy(notes)
+    notes.update(version='minimal-derived-grounding-quality.v1', result_sha256=sha256(raw))
+    annotation = canonical_bytes(notes)
+    baseline = q.baseline_bytes()
+    report = q.combine_derived(raw, annotation, baseline, exact_hashes={
+        'result':sha256(raw), 'annotation':sha256(annotation), 'baseline':sha256(baseline)})
+    assert report['candidate']['denominator'] == 32 and report['candidate']['hard_fail'] == 1
+    assert report['candidate']['hard_unknown'] == 1 and report['candidate']['unknown'] == 1
+
+
+@pytest.mark.parametrize('key', ['derived_grounding', 'derived_grounding_sha256', 'canonical_ref_value',
+                                 'ref_key', 'snapshot', 'snapshot_sha256', 'snapshot_content_sha256'])
+def test_derived_quality_rejects_private_dict_or_hash_leak(key):
+    result, notes = fixture()
+    result['rows'][0][key] = {} if key in ('derived_grounding', 'canonical_ref_value', 'ref_key', 'snapshot') else '0'*64
+    with pytest.raises(ValueError, match='QUALITY_BINDING_INVALID'):
+        combine_derived(result, notes)

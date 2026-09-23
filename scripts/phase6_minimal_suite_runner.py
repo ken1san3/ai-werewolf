@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -63,6 +65,25 @@ ERRORS = frozenset(("PLAN_EXISTS", "SOURCE_CHANGED", "CONFIG_CHANGED", "MODEL_CH
     "MODEL_TIME_BUDGET", "HTTP_ERROR", "RESPONSE_TOO_LARGE", "OUTPUT_INVALID", "PRIVATE_EVIDENCE_ERROR", "CLEANUP_ERROR"))
 
 
+@dataclass(frozen=True)
+class RunnerProfile:
+    experiment: str
+    task: str
+    runner: str
+    design: str
+    tool_approval: str
+    doc_refs: tuple[str, ...]
+    extra_sources: tuple[str, ...]
+    claim_name: str
+    outer_task: str
+    without_grounding: bool = False
+
+
+LEGACY_PROFILE = RunnerProfile(
+    EXPERIMENT, TASK, RUNNER, DESIGN, TOOL_APPROVAL, DOC_REFS, EXTRA_SOURCES,
+    "minimal-output-v1.run.claim", "T499OUTER")
+
+
 class RunError(ValueError):
     def __init__(self, code):
         if code not in ERRORS:
@@ -109,19 +130,19 @@ def baseline_plan():
     return probe._strict_json((BASELINE_DIR/'plan.json').read_bytes())
 
 
-def source_identity():
+def source_identity(profile=LEGACY_PROFILE):
     # The old plan's exact hashed list is reused, never expanded by a wildcard.
-    paths = tuple(baseline_plan()['source']) + EXTRA_SOURCES
+    paths = tuple(baseline_plan()['source']) + profile.extra_sources
     return {p: base.file_hash(ROOT/p) for p in dict.fromkeys(paths)}
 
 
-def git_head(*, clean=False):
+def git_head(*, clean=False, profile=LEGACY_PROFILE):
     def git(*args):
         item = subprocess.run(['git', *args], cwd=ROOT, capture_output=True, check=True)
         return item.stdout.decode('utf-8').strip()
     require(git('branch', '--show-current') == 'experiment/speech-act-kind-first-20260919', 'SOURCE_CHANGED')
     if clean:
-        require(not git('status', '--porcelain', '--', *source_identity()), 'SOURCE_CHANGED')
+        require(not git('status', '--porcelain', '--', *source_identity(profile)), 'SOURCE_CHANGED')
     return git('rev-parse', 'HEAD')
 
 
@@ -151,58 +172,105 @@ def suite_cases():
     return rows
 
 
-def frozen_case(suite):
+def derived_delta_contract():
     from scripts import phase6_minimal_suite_adapter as adapter
-    body = adapter.candidate_body(suite, Path(base.PROFILES['qw9'][0]).name)
+    old = adapter.MINIMAL_V1_INSTRUCTION
+    new = old.replace(adapter.GROUNDING_INSTRUCTION, '')
+    require(old.count(adapter.GROUNDING_INSTRUCTION) == 1 and new != old, 'CASE_BINDING_CHANGED')
+    return {
+        'removed_schema_json_pointers':['/properties/grounding', '/required/3'],
+        'legacy_instruction_sha256':probe.sha256(old.encode('utf-8')),
+        'candidate_instruction_sha256':probe.sha256(new.encode('utf-8')),
+        'grounding_instruction_clause_sha256':probe.sha256(adapter.GROUNDING_INSTRUCTION.encode('utf-8')),
+    }
+
+
+def frozen_case(suite, profile=LEGACY_PROFILE):
+    from scripts import phase6_minimal_suite_adapter as adapter
+    builder = adapter.candidate_body_without_grounding if profile.without_grounding else adapter.candidate_body
+    body = builder(suite, Path(base.PROFILES['qw9'][0]).name)
     raw = adapter.candidate_wire(body)
     require(raw == wire_bytes(body) and body['max_tokens'] == 512, 'CASE_BINDING_CHANGED')
-    return dict(case_id=suite.case.case_id, input_sha256=base.digest(body), wire_sha256=probe.sha256(raw),
-                schema_sha256=base.digest(body['response_format']['json_schema']['schema']),
-                messages_sha256=base.digest(body['messages']), wire_bytes=len(raw),
-                schema_bytes=len(wire_bytes(body['response_format']['json_schema']['schema'])))
+    frozen = dict(case_id=suite.case.case_id, input_sha256=base.digest(body), wire_sha256=probe.sha256(raw),
+                  schema_sha256=base.digest(body['response_format']['json_schema']['schema']),
+                  messages_sha256=base.digest(body['messages']), wire_bytes=len(raw),
+                  schema_bytes=len(wire_bytes(body['response_format']['json_schema']['schema'])))
+    if profile.without_grounding:
+        legacy_body = adapter.candidate_body(suite, Path(base.PROFILES['qw9'][0]).name)
+        expected = deepcopy(legacy_body)
+        schema = expected['response_format']['json_schema']['schema']
+        require(schema['required'][3] == 'grounding', 'CASE_BINDING_CHANGED')
+        del schema['properties']['grounding']
+        del schema['required'][3]
+        suffix = '\n\n' + adapter.MINIMAL_V1_INSTRUCTION
+        system = expected['messages'][0]['content']
+        require(system.endswith(suffix), 'CASE_BINDING_CHANGED')
+        expected['messages'][0]['content'] = system[:-len(suffix)] + '\n\n' + \
+            adapter.MINIMAL_V1_INSTRUCTION.replace(adapter.GROUNDING_INSTRUCTION, '')
+        require(expected == body, 'CASE_BINDING_CHANGED')
+        frozen.update(legacy_schema_sha256=base.digest(
+                          legacy_body['response_format']['json_schema']['schema']),
+                      legacy_messages_sha256=base.digest(legacy_body['messages']))
+    return frozen
 
 
-def approval_identity():
-    approval = probe._strict_json((ROOT/TOOL_APPROVAL).read_bytes())
-    require(approval.get('verdict') == 'APPROVED' and approval.get('source') == source_identity()
-            and approval.get('design_sha256') == base.file_hash(ROOT/DESIGN), 'SOURCE_CHANGED')
-    return {p:base.file_hash(ROOT/p) for p in DOC_REFS}
+def approval_identity(profile=LEGACY_PROFILE):
+    approval = probe._strict_json((ROOT/profile.tool_approval).read_bytes())
+    require(approval.get('verdict') == 'APPROVED' and approval.get('source') == source_identity(profile)
+            and approval.get('design_sha256') == base.file_hash(ROOT/profile.design), 'SOURCE_CHANGED')
+    if profile.without_grounding:
+        require(approval.get('report') == profile.doc_refs[-2]
+                and approval.get('report_sha256') == base.file_hash(ROOT/approval['report']), 'SOURCE_CHANGED')
+    return {p:base.file_hash(ROOT/p) for p in profile.doc_refs}
 
 
-def prepare(out, baseline_aggregate_path=None):
+def prepare(out, baseline_aggregate_path=None, profile=LEGACY_PROFILE):
     out = Path(out)
     baseline = quality.baseline_bytes()
     if baseline_aggregate_path is not None:
         require(Path(baseline_aggregate_path).read_bytes() == baseline, 'SOURCE_CHANGED')
-    head = git_head(clean=True)
-    sources, approvals, external = source_identity(), approval_identity(), external_identity()
+    head = git_head(clean=True, profile=profile)
+    sources = source_identity() if profile is LEGACY_PROFILE else source_identity(profile)
+    approvals = approval_identity() if profile is LEGACY_PROFILE else approval_identity(profile)
+    external = external_identity()
     prepared = suite_cases()
-    plan = dict(version=1, experiment=EXPERIMENT, task_id=TASK, runner=RUNNER,
+    plan = dict(version=1, experiment=profile.experiment, task_id=profile.task, runner=profile.runner,
                 run_id=uuid.uuid4().hex, head=head, source=sources, approvals=approvals, external=external,
                 argv=base.launch_args('qw9'), sampling=base.SAMPLING, context=8192,
                 request_seconds=60, model_seconds=1200, load_seconds=180, outer_seconds=1320,
                 max_provider_calls=32, retry=0, repair=0, fallback=0,
                 baseline_sha256=probe.sha256(baseline), baseline_artifacts=BASELINE_HASHES,
-                legacy_instruction_present=True, cases=[frozen_case(s) for s in prepared])
+                legacy_instruction_present=True,
+                cases=[frozen_case(s, profile) for s in prepared])
+    if profile.without_grounding:
+        plan['derived_delta_contract'] = derived_delta_contract()
     out.mkdir(parents=True, exist_ok=False)
     durable(out/'baseline-aggregate.json', baseline, exclusive=True)
     durable(out/'plan.json', plan, exclusive=True)
     return plan
 
 
-def verify(plan):
-    require(plan.get('experiment') == EXPERIMENT and plan.get('task_id') == TASK and plan.get('runner') == RUNNER
+def verify(plan, profile=LEGACY_PROFILE):
+    require(plan.get('experiment') == profile.experiment and plan.get('task_id') == profile.task
+            and plan.get('runner') == profile.runner
             and plan.get('version') == 1 and type(plan.get('run_id')) is str and len(plan['run_id']) == 32, 'SOURCE_CHANGED')
     expected = dict(sampling=base.SAMPLING, context=8192, request_seconds=60, model_seconds=1200,
                     load_seconds=180, outer_seconds=1320, max_provider_calls=32, retry=0, repair=0, fallback=0)
     require(all(wire_bytes(plan.get(k)) == wire_bytes(v) for k,v in expected.items()), 'SOURCE_CHANGED')
-    require(plan['head'] == git_head(clean=True) and plan['source'] == source_identity()
-            and plan['approvals'] == approval_identity(), 'SOURCE_CHANGED')
+    sources = source_identity() if profile is LEGACY_PROFILE else source_identity(profile)
+    approvals = approval_identity() if profile is LEGACY_PROFILE else approval_identity(profile)
+    require(plan['head'] == git_head(clean=True, profile=profile) and plan['source'] == sources
+            and plan['approvals'] == approvals, 'SOURCE_CHANGED')
     require(plan['external'] == external_identity() and plan['argv'] == base.launch_args('qw9'), 'RUNTIME_CHANGED')
     require(plan['baseline_sha256'] == probe.sha256(quality.baseline_bytes())
-            and plan['baseline_artifacts'] == BASELINE_HASHES and plan['legacy_instruction_present'] is True, 'SOURCE_CHANGED')
+            and plan['baseline_artifacts'] == BASELINE_HASHES
+            and plan['legacy_instruction_present'] is True, 'SOURCE_CHANGED')
+    if profile.without_grounding:
+        require(plan.get('derived_delta_contract') == derived_delta_contract(), 'SOURCE_CHANGED')
+    else:
+        require('derived_delta_contract' not in plan, 'SOURCE_CHANGED')
     suites = suite_cases()
-    require(plan['cases'] == [frozen_case(s) for s in suites], 'CASE_BINDING_CHANGED')
+    require(plan['cases'] == [frozen_case(s, profile) for s in suites], 'CASE_BINDING_CHANGED')
     return suites
 
 
@@ -260,19 +328,22 @@ def runtime_matches(identity):
             and Path(identity['model_path']).resolve() == Path(base.PROFILES['qw9'][0]).resolve())
 
 
-def initial_row(suite, frozen):
-    return {**frozen, 'category':suite.case.category, 'trigger':suite.binding.authority_without_update['trigger'],
-            'status':'NOT_STARTED', 'error':None, 'call_consumed':0, 'raw_sha256':None,
-            'mechanical_status':'UNKNOWN', 'applicability':'UNRESOLVED', 'speech_act':None,
-            'peer_long_exact_copy':None, 'semantic':None, 'hard':None, 'style':None}
+def initial_row(suite, frozen, profile=LEGACY_PROFILE):
+    row = {**frozen, 'category':suite.case.category, 'trigger':suite.binding.authority_without_update['trigger'],
+           'status':'NOT_STARTED', 'error':None, 'call_consumed':0, 'raw_sha256':None,
+           'mechanical_status':'UNKNOWN', 'applicability':'UNRESOLVED', 'speech_act':None,
+           'peer_long_exact_copy':None, 'semantic':None, 'hard':None, 'style':None}
+    if profile.without_grounding:
+        row.update(derived_grounding_item_count=None, derived_grounding_purpose_counts=None)
+    return row
 
 
-def measure_prompt(body, private, case_id, label):
+def measure_prompt(body, private, case_id, label, profile=LEGACY_PROFILE):
     from scripts import phase6_minimal_suite_adapter as adapter
-    require(label in ('full', 'shadow'), 'TEMPLATE_INVALID')
-    instruction = adapter.MINIMAL_V1_INSTRUCTION
-    if label == 'shadow':
-        instruction = instruction.replace(adapter.GROUNDING_INSTRUCTION, '')
+    allowed = ('candidate',) if profile.without_grounding else ('full', 'shadow')
+    require(label in allowed, 'TEMPLATE_INVALID')
+    instruction = adapter.MINIMAL_V1_INSTRUCTION.replace(adapter.GROUNDING_INSTRUCTION, '') \
+        if profile.without_grounding or label == 'shadow' else adapter.MINIMAL_V1_INSTRUCTION
     messages = body.get('messages')
     require(type(messages) is list and len(messages) == 2, 'TEMPLATE_INVALID')
     require(all(type(m) is dict and set(m) == {'role','content'} and type(m['content']) is str
@@ -299,24 +370,33 @@ def measure_prompt(body, private, case_id, label):
     return measured
 
 
-def stage(suite, row, private, identity, save, budget):
+def stage(suite, row, private, identity, save, budget, profile=LEGACY_PROFILE):
     from scripts import phase6_minimal_suite_adapter as adapter
     from ai_client.brain.controller import _cross_player_public_copy
     require(row['call_consumed'] == 0 and budget['calls'] < 32, 'PLAN_EXISTS')
     require(base._RUN_DEADLINE is not None and base._RUN_DEADLINE-time.monotonic() >= 60, 'MODEL_TIME_BUDGET')
-    body = adapter.candidate_body(suite, Path(base.PROFILES['qw9'][0]).name)
+    builder = adapter.candidate_body_without_grounding if profile.without_grounding else adapter.candidate_body
+    body = builder(suite, Path(base.PROFILES['qw9'][0]).name)
     payload = adapter.candidate_wire(body)
-    require(frozen_case(suite) == {k:row[k] for k in frozen_case(suite)}, 'CASE_BINDING_CHANGED')
-    full = measure_prompt(body, private, row['case_id'], 'full')
+    frozen = frozen_case(suite, profile)
+    require(frozen == {k:row[k] for k in frozen}, 'CASE_BINDING_CHANGED')
+    label = 'candidate' if profile.without_grounding else 'full'
+    full = (measure_prompt(body, private, row['case_id'], label) if profile is LEGACY_PROFILE
+            else measure_prompt(body, private, row['case_id'], label, profile))
     # Keep this dispatch contract explicit in addition to the native helper's gate.
     require(type(full['prompt_tokens_actual']) is int and full['prompt_tokens_actual'] >= 0, 'TOKEN_MISMATCH')
     require(full['prompt_tokens_actual']+512+1 <= 8192, 'CONTEXT_OVERFLOW')
-    shadow = measure_prompt(adapter.shadow_without_grounding(body), private, row['case_id'], 'shadow')
-    require(type(shadow['prompt_tokens_actual']) is int and shadow['prompt_tokens_actual'] >= 0, 'TOKEN_MISMATCH')
-    row.update(full_prompt_tokens=full['prompt_tokens_actual'], shadow_prompt_tokens=shadow['prompt_tokens_actual'],
-               grounding_prompt_token_delta=full['prompt_tokens_actual']-shadow['prompt_tokens_actual'],
-               full_rendered_sha256=full['rendered_bytes_sha256'], shadow_rendered_sha256=shadow['rendered_bytes_sha256'],
-               schema_changes_rendered_prompt=full['schema_changes_rendered_prompt'])
+    if profile.without_grounding:
+        row.update(candidate_prompt_tokens=full['prompt_tokens_actual'],
+                   candidate_rendered_sha256=full['rendered_bytes_sha256'],
+                   schema_changes_rendered_prompt=full['schema_changes_rendered_prompt'])
+    else:
+        shadow = measure_prompt(adapter.shadow_without_grounding(body), private, row['case_id'], 'shadow')
+        require(type(shadow['prompt_tokens_actual']) is int and shadow['prompt_tokens_actual'] >= 0, 'TOKEN_MISMATCH')
+        row.update(full_prompt_tokens=full['prompt_tokens_actual'], shadow_prompt_tokens=shadow['prompt_tokens_actual'],
+                   grounding_prompt_token_delta=full['prompt_tokens_actual']-shadow['prompt_tokens_actual'],
+                   full_rendered_sha256=full['rendered_bytes_sha256'], shadow_rendered_sha256=shadow['rendered_bytes_sha256'],
+                   schema_changes_rendered_prompt=full['schema_changes_rendered_prompt'])
     marker = {**identity, 'case_id':row['case_id'], 'ordinal':probe.CASE_IDS.index(row['case_id']),
               'request_sha256':row['input_sha256'], 'wire_sha256':row['wire_sha256'], 'schema_sha256':row['schema_sha256']}
     claim(private/(row['case_id']+'.generation.claim'), marker)
@@ -341,14 +421,41 @@ def stage(suite, row, private, identity, save, budget):
                 'TOKEN_MISMATCH')
         require(type(row['completion_tokens']) is int and 0 <= row['completion_tokens'] <= 512, 'TOKEN_MISMATCH')
         require(not choice['message'].get('reasoning_content') and row['finish_reason'] == 'stop', 'OUTPUT_INVALID')
-        checked = probe.validate_suite(raw, suite.binding)
+        if profile.without_grounding:
+            from scripts import phase6_derived_grounding_snapshot as snapshot
+            validation = probe.validate_without_grounding(raw, suite.binding)
+            checked = validation.probe_result
+        else:
+            checked = probe.validate_suite(raw, suite.binding)
+        # Read candidate fields only after the profile validator has established
+        # the closed top-level shape and required fields.
         value = probe._strict_json(raw)
-        refs = [probe._ref_key(g['ref']) for g in value['grounding']]
         text = value['utterance']
+        if profile.without_grounding:
+            counts = Counter(item.purpose for item in validation.derived_grounding)
+            try:
+                snapshot.write_validation_snapshot(
+                    private, case_id=row['case_id'], raw_sha256=row['raw_sha256'],
+                    input_sha256=row['input_sha256'], schema_sha256=row['schema_sha256'],
+                    validation=validation)
+                # Exercise the process-boundary contract now; semantic evaluation uses this helper later.
+                restored = snapshot.read_validation_snapshot(
+                    private, case_id=row['case_id'], raw_sha256=row['raw_sha256'],
+                    input_sha256=row['input_sha256'], schema_sha256=row['schema_sha256'],
+                    expected_probe_result=checked)
+            except snapshot.SnapshotError:
+                raise RunError('PRIVATE_EVIDENCE_ERROR') from None
+            require(restored == validation, 'PRIVATE_EVIDENCE_ERROR')
+            row.update(derived_grounding_item_count=len(validation.derived_grounding),
+                       derived_grounding_purpose_counts={key:counts.get(key, 0) for key in
+                           ('UTTERANCE', 'OPINION_CURRENT', 'REACTION', 'PRE_VOTE')})
+        else:
+            refs = [probe._ref_key(g['ref']) for g in value['grounding']]
+            row.update(grounding_item_count=len(refs), distinct_grounding_ref_count=len(set(refs)),
+                       duplicate_ref_occurrences=len(refs)-len(set(refs)))
         row.update(status='COMPLETE', mechanical_status='PASS', applicability=checked.applicability.removeprefix('APPLICABILITY_'),
-                   speech_act=value['speech_act']['kind'], grounding_item_count=len(refs),
-                   distinct_grounding_ref_count=len(set(refs)), duplicate_ref_occurrences=len(refs)-len(set(refs)),
-                   private_before_sha256=checked.private_before_sha256, private_after_sha256=checked.private_after_sha256,
+                   speech_act=value['speech_act']['kind'], private_before_sha256=checked.private_before_sha256,
+                   private_after_sha256=checked.private_after_sha256,
                    peer_long_exact_copy=False if text is None else _cross_player_public_copy(suite.case.request, ' '.join(text.casefold().split())))
     except probe.ProbeError as error:
         row.update(status='OUTPUT_INVALID', error='OUTPUT_INVALID', validation_code=error.code,
@@ -362,17 +469,19 @@ def stage(suite, row, private, identity, save, budget):
         save()
 
 
-def run(out):
+def run(out, profile=LEGACY_PROFILE):
     out = Path(out)
     plan = probe._strict_json((out/'plan.json').read_bytes())
-    suites = verify(plan)
+    suites = verify(plan) if profile is LEGACY_PROFILE else verify(plan, profile)
     require((out/'baseline-aggregate.json').read_bytes() == quality.baseline_bytes(), 'SOURCE_CHANGED')
     host_idle()
-    identity = dict(task_id=TASK, experiment=EXPERIMENT, runner=RUNNER,
+    identity = dict(task_id=profile.task, experiment=profile.experiment, runner=profile.runner,
                     plan_sha256=base.file_hash(out/'plan.json'), run_id=plan['run_id'])
-    claim(out/'minimal-output-v1.run.claim', identity)
+    claim(out/profile.claim_name, identity)
     result = {**identity, 'status':'STARTING', 'clock_domain':'REAL', 'retry':0, 'repair':0,
-              'provider_calls':0, 'rows':[initial_row(s,f) for s,f in zip(suites, plan['cases'])]}
+              'provider_calls':0, 'rows':[initial_row(s, f) if profile is LEGACY_PROFILE
+                                          else initial_row(s, f, profile)
+                                          for s,f in zip(suites, plan['cases'])]}
     start = time.monotonic()
     budget = {'calls':0}
     proc = monitor = private = None
@@ -383,7 +492,7 @@ def run(out):
     base._RUN_DEADLINE = start+1200
     try:
         private = create_private_evidence_container(ROOT/'logs/phase6-private-evidence', evidence_kind='synthetic',
-                                                    task_id=TASK, created_at_utc=datetime.now(timezone.utc))
+                                                    task_id=profile.task, created_at_utc=datetime.now(timezone.utc))
         durable(out/'private-locator.json', {'path':str(private)}, exclusive=True)
         for suite in suites:
             binding = suite.binding
@@ -412,7 +521,10 @@ def run(out):
                 stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         for suite, row in zip(suites, result['rows']):
             require(owned_listener(proc) and base.runtime() == runtime, 'RUNTIME_CHANGED')
-            stage(suite, row, private, identity, save, budget)
+            if profile is LEGACY_PROFILE:
+                stage(suite, row, private, identity, save, budget)
+            else:
+                stage(suite, row, private, identity, save, budget, profile)
         result['status'] = 'COMPLETE'
     except RunError as error:
         result.update(status='STOPPED', error=error.code)
@@ -425,7 +537,7 @@ def run(out):
         if result['owned_processes_remaining'] != 0 or not result['listener_free'] or any(k.endswith('_cleanup_error') for k in result):
             result.update(status='STOPPED', error='CLEANUP_ERROR')
         try:
-            verify(plan)
+            verify(plan) if profile is LEGACY_PROFILE else verify(plan, profile)
             result['source_unchanged'] = True
         except Exception:
             result.update(source_unchanged=False, status='STOPPED', error='SOURCE_CHANGED')
@@ -442,20 +554,20 @@ def run(out):
     return result
 
 
-def supervise(out):
+def supervise(out, profile=LEGACY_PROFILE):
     from scripts.phase6_probe_outer import supervise as outer
     out = Path(out)
     plan = probe._strict_json((out/'plan.json').read_bytes())
-    verify(plan)
+    verify(plan) if profile is LEGACY_PROFILE else verify(plan, profile)
     claim(out/'outer.claim', {'plan_sha256':base.file_hash(out/'plan.json'), 'run_id':plan['run_id']})
     private = create_private_evidence_container(ROOT/'logs/phase6-private-evidence', evidence_kind='synthetic',
-                                                task_id='T499OUTER', created_at_utc=datetime.now(timezone.utc))
+                                                task_id=profile.outer_task, created_at_utc=datetime.now(timezone.utc))
     durable(out/'outer-private-locator.json', {'path':str(private)}, exclusive=True)
-    return outer([sys.executable, str(ROOT/RUNNER), '--output', str(out.resolve()), '--run'],
+    return outer([sys.executable, str(ROOT/profile.runner), '--output', str(out.resolve()), '--run'],
                  out/'outer', raw_directory=private, limit_seconds=1320)
 
 
-def main():
+def cli(profile=LEGACY_PROFILE):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     group = parser.add_mutually_exclusive_group(required=True)
@@ -465,10 +577,10 @@ def main():
     args = parser.parse_args()
     try:
         if args.prepare:
-            prepare(args.output)
+            prepare(args.output, profile=profile)
             print('PREPARED')
             return 0
-        result = supervise(args.output) if args.supervise else run(args.output)
+        result = supervise(args.output, profile) if args.supervise else run(args.output, profile)
         ok = result.get('status') == 'COMPLETE' if args.run else (
             result.get('exit_code') == 0 and result.get('ownership_complete') is True and result.get('owned_alive_after') == 0)
         print('COMPLETE' if ok else 'STOPPED')
@@ -476,6 +588,10 @@ def main():
     except Exception as error:
         print(error.code if isinstance(error, RunError) else 'PRIVATE_EVIDENCE_ERROR')
         return 2
+
+
+def main():
+    return cli()
 
 
 if __name__ == '__main__':

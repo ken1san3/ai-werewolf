@@ -41,7 +41,7 @@ derive_grounding_view(candidate_without_grounding) -> DerivedGroundingV1
 validate_without_grounding(raw, binding) -> ValidationResultV1
 ```
 
-`derive_grounding_view`は本文を読まず、次の位置だけを走査する。順序は表の順、各arrayはcandidate順とする。同じ`(purpose, EvidenceRefKey)`が複数位置に現れた場合、現行`expected_grounding`と同じく最初の一件だけを保持する。異なるpurposeの同じrefは別itemである。同じkeyのrefはschema上の三fieldが同じなのでcanonical bytes/valueも同一でなければならず、異なる場合は`BINDING_INVALID`とする。actor等のconsumerはJSON object identityではなく、このcanonical key/value identityで照合する。このdedupe規則により、現行expected側が表現する情報をlosslessに保つ。
+`derive_grounding_view`は本文を読まず、既存closed schemaとdataclass shapeを通過した明示refだけを次の位置から走査する。順序は表の順、各arrayはcandidate順とする。既存evidence arrayの`uniqueItems:true`とmodel shapeを維持し、同一array内の重複は導出前に`SHAPE_INVALID`とする。同じ`(purpose, EvidenceRefKey)`がcross-fieldで複数位置に現れた場合だけ、現行`expected_grounding`と同じく最初の一件を保持する。異なるpurposeの同じrefは別itemである。同じkeyのrefはschema上の三fieldが同じなのでcanonical bytes/valueも同一でなければならず、異なる場合は`BINDING_INVALID`とする。actor等のconsumerはJSON object identityではなく、このcanonical key/value identityで照合する。このcross-field/cross-purpose整理により、現行expected側が表現する情報をlosslessに保つ。
 
 | source位置 | purpose | 損失と除外 |
 |---|---|---|
@@ -54,7 +54,7 @@ validate_without_grounding(raw, binding) -> ValidationResultV1
 
 CO_OPPORTUNITYは現行trigger detailにEvidenceRef fieldがないためderived itemは0件であり、DECLARE/SILENCE/DEFER、option、claimed role検査を変更しない。INITIAL_CHAT/ABILITYもtrigger固有refを新設しない。NONEはspeech fieldにrefがなければ0件であり、合法NONEを拒否せず、本文や履歴からrefを作らない。
 
-`EvidenceRef`の三fieldを変更・補完しない。異なるJSON位置の同keyは別objectでもよいが、canonical valueはexact一致し、全consumerは`(record_kind, order, visibility)`とcanonical valueで照合する。rawはcanonicalize・書換えせず、同key重複を許す既存受理集合を狭めない。
+`EvidenceRef`の三fieldを変更・補完しない。異なるcross-field JSON位置の同keyは別objectでもよいが、canonical valueはexact一致し、全consumerは`(record_kind, order, visibility)`とcanonical valueで照合する。rawはcanonicalize・書換えず、合法なcross-field同keyを許す既存受理集合を狭めない。同一array内重複はこの規則の対象外である。
 
 raw candidateとderived viewは別identityである。UTF-8 byte cap、raw SHA、strict JSON、unknown/duplicate key検査は受信したgroundingなしrawだけに適用する。derived viewはrawへserialize・連結せず、raw byte数/hashやprovider output identityを変更しない。
 
@@ -101,7 +101,7 @@ test-only response schemaからtop-level `grounding` propertyとrequired entry�
 3. PEER_CHATでdetail.triggerがreaction sourceと一致し、captured channelがoffered chat channelと一致。derivedは`REACTION`一件となる。
 4. PRE_VOTE evidence二件、合法option/rank/preferred target。derivedは`PRE_VOTE`二件となる。
 5. CO DECLAREまたは合法NONEにref fieldがない。derived空でも既存CO/decision検査で判定する。
-6. ANSWER/REBUTTALの`evidence[]`と`in_reply_to`に同じkeyの別JSON objectがある。同じcanonical valueとして一件へdedupeし、reply actor検査はそのkey/valueで行う。PEER triggerとspeech refが同じkeyでもpurposeが異なるため双方を保持する。array内の同purpose同key重複は一件へdedupeする。
+6. ANSWER/REBUTTALの`evidence[0]`と`in_reply_to`に同じkeyの別JSON objectがある。このcross-field重複は合法で、同じcanonical valueとして一件へ整理し、reply actor検査はそのkey/valueで行う。PEER triggerとspeech refが同じkeyでもpurposeが異なるため双方を保持する。
 
 負例:
 
@@ -112,6 +112,7 @@ test-only response schemaからtop-level `grounding` propertyとrequired entry�
 5. OPINION_CHANGE causesが全てprior evidence、PRE_VOTE targetが非合法、CO roleが非offer。既存固定errorで拒否。
 6. candidateがtop-level groundingを送る、未知purposeを送る、旧full proposal fieldを送る。closed schemaで拒否し、adapter補正しない。
 7. 重複に見えてもvisibility等の一fieldが違えば別keyでありdedupeしない。各keyをauthorityへ独立照合し、catalogにない方を`BINDING_INVALID`とする。private snapshotのraw/input/result binding違いも拒否し、再導出や修復をしない。
+8. `speech_act.evidence[]`、`causes[]`、PRE_VOTE `evidence[]`など同一array内に同じrefを二回置く。既存`uniqueItems:true`/model shapeにより導出前に`SHAPE_INVALID`とし、dedupeして受理しない。
 
 ## 7. acceptanceとfocused test設計
 
@@ -121,7 +122,7 @@ test-only response schemaからtop-level `grounding` propertyとrequired entry�
 - 全speech kind・全5 trigger・全action branch・合法NONEについてderive totalityと上表の写像が成立する。
 - OPINION_CHANGE/PRE_VOTE/PEER_CHAT/COの情報損失が上記の通りで、後段検査が失われない。
 - validator processでは一個の`ValidationResultV1`/derived viewを全consumerとsnapshot writerが使い、consumer別再導出がない。後続processはbinding検証済みprivate snapshotだけをrehydrateする。
-- ANSWER/REBUTTALのevidenceとin_reply_to、PEER triggerとのpurpose違い、array内重複についてcanonical key/value dedupeの正負fixtureを持つ。
+- ANSWER/REBUTTALのevidenceとin_reply_toの合法cross-field重複、PEER triggerとのcross-purpose保持を正例にする。同一array内重複は既存shapeどおり`SHAPE_INVALID`となる負例にし、validatorを緩めない。
 - raw byte cap/hashとderived view identityを分離し、projected/captured exact descriptor、visibility、actor、trigger/channel、option/target negative matrixが旧validatorと同じ固定errorになる。
 - mirror一致済み旧fixture↔grounding除去新fixtureの受理同値を全branchで確認する。mirror不一致fixtureを新schemaで通す試験は責務削除の確認に限定し、意味PASSとは記録しない。
 - candidate rawを修復・materialize・再採点する関数、regex、source/subjective補完が存在しない。

@@ -94,6 +94,27 @@ def test_consumed_failures_never_retry_and_no_private_error_text(monkeypatch,tmp
     assert (tmp_path/'G01-1.generation.claim').exists()
 
 
+@pytest.mark.parametrize('invalid', ['null', 'list', 'missing_utterance'])
+def test_legacy_shape_validation_precedes_candidate_field_access(monkeypatch, tmp_path, invalid):
+    from tests.test_phase6_derived_grounding_probe import fixture
+    validator = r.probe.validate_suite
+    suite,row,budget,save,_,_,_,_ = setup_stage(monkeypatch,tmp_path)
+    value, suite.binding = fixture(4)
+    value['grounding'] = r.probe.expected_grounding(value)
+    if invalid == 'null': candidate = None
+    elif invalid == 'list': candidate = []
+    else:
+        candidate = deepcopy(value)
+        del candidate['utterance']
+    monkeypatch.setattr(r.probe, 'validate_suite', validator)
+    monkeypatch.setattr(r.base, 'request', lambda *args, **kwargs: {
+        'choices':[{'message':{'content':json.dumps(candidate)}, 'finish_reason':'stop'}],
+        'usage':{'prompt_tokens':10, 'completion_tokens':20}})
+    r.stage(suite,row,tmp_path,{},save,budget)
+    assert row['status'] == 'OUTPUT_INVALID' and row['error'] == 'OUTPUT_INVALID'
+    assert row['validation_code'] == 'SHAPE_INVALID' and row['mechanical_status'] == 'FAIL'
+
+
 def test_marker_fsync_failure_prevents_dispatch_and_preserves_marker(monkeypatch,tmp_path):
     suite,row,budget,save,_,calls,_,_ = setup_stage(monkeypatch,tmp_path)
     original = r.claim

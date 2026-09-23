@@ -242,3 +242,8 @@ def shadow_without_grounding(body: Mapping) -> dict:
     prefix = messages[0]["content"][:-len(suffix)]
     messages[0]["content"] = prefix + "\n\n" + MINIMAL_V1_INSTRUCTION.replace(GROUNDING_INSTRUCTION, "")
     return result
+
+
+def candidate_body_without_grounding(suite_case: SuiteCaseV1, model_name: str) -> dict:
+    """T500 candidate: promote the exact frozen removal, changing no other field."""
+    return shadow_without_grounding(candidate_body(suite_case, model_name))

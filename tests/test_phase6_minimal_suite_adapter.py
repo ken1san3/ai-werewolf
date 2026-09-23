@@ -276,3 +276,20 @@ def test_native_message_builder_rejects_incompatible_input(change):
     object.__setattr__(projection, "messages", tuple(messages))
     with pytest.raises(probe.ProbeError, match="BINDING_INVALID"):
         adapter.build_messages(projection, instruction)
+
+
+def test_fixed32_body_delta_preserves_every_other_byte_and_legacy_instruction():
+    for case in suite():
+        old = adapter.candidate_body(case, 'model.gguf')
+        new = adapter.candidate_body_without_grounding(case, 'model.gguf')
+        expected = deepcopy(old)
+        schema = expected['response_format']['json_schema']['schema']
+        del schema['properties']['grounding']
+        schema['required'].remove('grounding')
+        original = case.projection.messages[0].content
+        expected['messages'][0]['content'] = original + '\n\n' + adapter.MINIMAL_V1_INSTRUCTION.replace(
+            adapter.GROUNDING_INSTRUCTION, '')
+        assert adapter.candidate_wire(new) == adapter.candidate_wire(expected)
+        assert new['messages'][1]['content'].encode() == case.binding.canonical_user_bytes
+        assert new['response_format']['json_schema']['schema'] == probe.output_schema_without_grounding(
+            case.binding.authority_without_update)

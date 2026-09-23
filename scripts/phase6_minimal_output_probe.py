@@ -260,6 +260,14 @@ def output_schema_suite(authority_without_update: Mapping) -> dict:
     return _output_schema_core(host)
 
 
+def output_schema_without_grounding(authority_without_update: Mapping) -> dict:
+    """T500's only schema delta: remove the generated mirror, retain typed refs."""
+    schema = output_schema_suite(authority_without_update)
+    del schema["properties"]["grounding"]
+    schema["required"].remove("grounding")
+    return schema
+
+
 def _ref(value):
     if not isinstance(value, dict) or set(value) != {"record_kind", "order", "visibility"}:
         raise ValueError("reference shape")
@@ -303,7 +311,7 @@ def _local_shapes(value, host, schema=None):
     trigger = host["trigger"]
     try:
         _speech(value["speech_act"])
-        for item in value["grounding"]:
+        for item in value.get("grounding", ()):
             _ref(item["ref"])
         detail = value["trigger_detail"]
         if trigger == "PEER_CHAT":
@@ -501,7 +509,44 @@ def expected_grounding(value) -> list[dict]:
     return list(result.values())
 
 
-def _bindings(value, binding, host, option):
+@dataclass(frozen=True)
+class DerivedGroundingItemV1:
+    purpose: str
+    ref_key: tuple[str, int, str]
+    canonical_ref_value: bytes
+
+
+DerivedGroundingV1 = tuple[DerivedGroundingItemV1, ...]
+
+
+def derive_grounding_view(value) -> DerivedGroundingV1:
+    """Select only explicit typed fields; no text access, repair, or state fill."""
+    result = {}
+
+    def add(purpose, ref):
+        if ref is not None:
+            _ref(ref)
+            key = _ref_key(ref)
+            item = DerivedGroundingItemV1(purpose, key, canonical_bytes(ref))
+            old = result.setdefault((purpose, key), item)
+            if old.canonical_ref_value != item.canonical_ref_value:
+                _fail("BINDING_INVALID")
+
+    speech, detail = value["speech_act"], value["trigger_detail"]
+    for ref in speech.get("evidence", ()):
+        add("UTTERANCE", ref)
+    add("UTTERANCE", speech.get("source"))
+    add("UTTERANCE", speech.get("in_reply_to"))
+    for ref in speech.get("causes", ()):
+        add("OPINION_CURRENT", ref)
+    if isinstance(detail, dict):
+        add("REACTION", detail.get("trigger"))
+        for ref in detail.get("evidence", ()):
+            add("PRE_VOTE", ref)
+    return tuple(result.values())
+
+
+def _bindings(value, binding, host, option, *, derived_grounding=None):
     if set(host) == HOST_KEYS:
         _host_shape(host)
     else:
@@ -524,13 +569,19 @@ def _bindings(value, binding, host, option):
     for identity in projected_identity.keys() & captured_identity.keys():
         if projected_identity[identity] != captured_identity[identity]:
             _fail("BINDING_INVALID")
-    expected = Counter((g["purpose"], *_ref_key(g["ref"])) for g in expected_grounding(value))
-    actual = Counter((g["purpose"], *_ref_key(g["ref"])) for g in value["grounding"])
-    if expected != actual:
-        _fail("BINDING_INVALID")
-    for item in value["grounding"]:
-        key = _ref_key(item["ref"])
+    if derived_grounding is None:
+        expected = Counter((g["purpose"], *_ref_key(g["ref"])) for g in expected_grounding(value))
+        actual = Counter((g["purpose"], *_ref_key(g["ref"])) for g in value["grounding"])
+        if expected != actual:
+            _fail("BINDING_INVALID")
+        selected = ((_ref_key(item["ref"]), canonical_bytes(item["ref"]))
+                    for item in value["grounding"])
+    else:
+        selected = ((item.ref_key, item.canonical_ref_value) for item in derived_grounding)
+    for key, canonical_ref in selected:
         if key not in projected or key not in captured or projected[key] != captured[key]:
+            _fail("BINDING_INVALID")
+        if canonical_bytes(captured[key]["ref"]) != canonical_ref:
             _fail("BINDING_INVALID")
     speech, detail = value["speech_act"], value["trigger_detail"]
     if speech["kind"] in ("ANSWER", "REBUTTAL"):
@@ -575,6 +626,12 @@ class ProbeResult:
     semantic_status: str = "NOT_EVALUATED"
 
 
+@dataclass(frozen=True)
+class ValidationResultV1:
+    probe_result: ProbeResult
+    derived_grounding: DerivedGroundingV1
+
+
 def validate(raw: bytes, binding: HostBinding) -> ProbeResult:
     """Validate one manual candidate. No I/O, model calls, repairs or updates."""
     if not isinstance(binding, HostBinding) or not isinstance(binding.authority, Mapping):
@@ -606,6 +663,15 @@ def validate(raw: bytes, binding: HostBinding) -> ProbeResult:
 
 def validate_suite(raw: bytes, binding: SuiteBindingV1) -> ProbeResult:
     """Validate one suite candidate while preserving unknown applicability."""
+    return _validate_suite(raw, binding, without_grounding=False)
+
+
+def validate_without_grounding(raw: bytes, binding: SuiteBindingV1) -> ValidationResultV1:
+    """Validate T500 raw bytes without materializing an old candidate or updates."""
+    return _validate_suite(raw, binding, without_grounding=True)
+
+
+def _validate_suite(raw: bytes, binding: SuiteBindingV1, *, without_grounding: bool):
     if not isinstance(binding, SuiteBindingV1) or binding.binding_version != "minimal-suite-binding.v1":
         _fail("BINDING_INVALID")
     host = plain(binding.authority_without_update)
@@ -628,13 +694,15 @@ def validate_suite(raw: bytes, binding: SuiteBindingV1) -> ProbeResult:
     value = _strict_json(raw)
     if _forbidden_key(value):
         _fail("PRIVATE_UPDATE_FORBIDDEN")
-    _local_shapes(value, host, output_schema_suite(host))
+    schema = output_schema_without_grounding(host) if without_grounding else output_schema_suite(host)
+    _local_shapes(value, host, schema)
     option = _offered(value, host)
     before = sha256(binding.private_bytes)
     # Reuse authority checks with a suite-local view of immutable private state.
     shim = HostBinding(host, binding.authority_bytes, binding.authority_sha256,
                        binding.private_bytes, binding.private_sha256)
-    _bindings(value, shim, host, option)
+    derived = derive_grounding_view(value) if without_grounding else None
+    _bindings(value, shim, host, option, derived_grounding=derived)
     _text(value, host)
     after = sha256(binding.private_bytes)
     if before != after:
@@ -642,7 +710,8 @@ def validate_suite(raw: bytes, binding: SuiteBindingV1) -> ProbeResult:
     status = ("APPLICABILITY_UNRESOLVED" if binding.update_requirement is None
               else "APPLICABILITY_UNRESOLVED" if binding.update_requirement
               else "APPLICABILITY_COVERED")
-    return ProbeResult(status, sha256(raw), binding.canonical_user_sha256, before, after)
+    result = ProbeResult(status, sha256(raw), binding.canonical_user_sha256, before, after)
+    return ValidationResultV1(result, derived) if without_grounding else result
 
 
 def metadata_coverage(rows) -> dict:

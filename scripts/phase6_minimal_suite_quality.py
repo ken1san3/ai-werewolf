@@ -36,7 +36,8 @@ def _digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
+def _combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes,
+             experiment, task_id, annotation_version, report_version, derived=False):
     """No private text, model calls, semantic inference or old annotation reads."""
     _require(set(exact_hashes) == {"result", "annotation", "baseline"})
     for name, raw in (("result", result_bytes), ("annotation", annotation_bytes), ("baseline", baseline_bytes)):
@@ -44,8 +45,8 @@ def combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
     result, annotation, baseline = map(_strict_json, (result_bytes, annotation_bytes, baseline_bytes))
     _require(baseline == BASELINE and canonical_bytes(baseline) == baseline_bytes)
     _require(type(annotation) is dict and set(annotation) == {"version", "result_sha256", "rows"})
-    _require(annotation["version"] == "minimal-quality.v1" and annotation["result_sha256"] == exact_hashes["result"])
-    _require(result.get("experiment") == "minimal_output_v1" and result.get("task_id") == "T499")
+    _require(annotation["version"] == annotation_version and annotation["result_sha256"] == exact_hashes["result"])
+    _require(result.get("experiment") == experiment and result.get("task_id") == task_id)
     rows, notes = result.get("rows"), annotation["rows"]
     _require(type(rows) is list and type(notes) is list and len(rows) == len(notes) == 32)
     _require([r.get("case_id") for r in rows] == list(CASE_IDS))
@@ -60,6 +61,22 @@ def combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
                   copy=0, peer_long_exact_copy=0, screen_executed_count=0,
                   applicability_unresolved=0, applicability_invalid=0, applicability_covered=0)
     for row, note in zip(rows, notes):
+        mechanical = row.get("mechanical_status")
+        _require(mechanical in STATES)
+        if derived:
+            forbidden = {"derived_grounding", "derived_grounding_sha256", "canonical_ref_value",
+                         "ref_key", "snapshot", "snapshot_sha256", "snapshot_content_sha256"}
+            _require(not (set(row) & forbidden))
+            counts_by_purpose = row.get("derived_grounding_purpose_counts")
+            if mechanical == "PASS":
+                _require(type(row.get("derived_grounding_item_count")) is int
+                         and type(counts_by_purpose) is dict
+                         and set(counts_by_purpose) == {"UTTERANCE", "OPINION_CURRENT", "REACTION", "PRE_VOTE"}
+                         and all(type(value) is int and value >= 0 for value in counts_by_purpose.values())
+                         and sum(counts_by_purpose.values()) == row["derived_grounding_item_count"])
+            else:
+                _require(row.get("derived_grounding_item_count") is None
+                         and counts_by_purpose is None)
         _require(type(note) is dict and set(note) == ANNOTATION_KEYS)
         _require(note["input_sha256"] == row["input_sha256"] and note["raw_sha256"] == row.get("raw_sha256"))
         _require(all(note[k] in STATES for k in ("hard", "semantic", "style")))
@@ -71,8 +88,6 @@ def combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
         _require(note["legal_none"] is None if row["case_id"] not in NONE_IDS else True)
         _require(not reasons or note["hard"] == "FAIL")
         _require(("COPY" in reasons) == (note["copy"] is True))
-        mechanical = row.get("mechanical_status")
-        _require(mechanical in STATES)
         # A known failure dominates unknown, while missing evidence never becomes PASS.
         hard = "FAIL" if "FAIL" in (mechanical, note["hard"]) else (
             "UNKNOWN" if "UNKNOWN" in (mechanical, note["hard"]) else "PASS")
@@ -117,7 +132,22 @@ def combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
             and result.get("owned_processes_remaining") == 0 and result.get("listener_free") is True
             and result.get("provider_calls") == 32 and all(r.get("call_consumed") == 1 for r in rows),
     }
-    return {"version": "minimal-quality.v1", "hashes": dict(exact_hashes), "baseline": dict(BASELINE),
+    return {"version": report_version, "hashes": dict(exact_hashes), "baseline": dict(BASELINE),
             "candidate": counts, "gates": gates, "rows": safe_rows,
             "decision": "TEST_ONLY_CANDIDATE" if all(gates.values()) else "REJECTED",
             "product_adoption": False, "causal_attribution": "CONFOUNDED"}
+
+
+def combine(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
+    """Preserve the exact T499 quality identity and evaluation contract."""
+    return _combine(result_bytes, annotation_bytes, baseline_bytes, exact_hashes=exact_hashes,
+                    experiment="minimal_output_v1", task_id="T499",
+                    annotation_version="minimal-quality.v1", report_version="minimal-quality.v1")
+
+
+def combine_derived(result_bytes, annotation_bytes, baseline_bytes, *, exact_hashes):
+    """Apply unchanged thresholds under the separate T504 evidence identity."""
+    return _combine(result_bytes, annotation_bytes, baseline_bytes, exact_hashes=exact_hashes,
+                    experiment="minimal_derived_grounding_v1", task_id="T504",
+                    annotation_version="minimal-derived-grounding-quality.v1",
+                    report_version="minimal-derived-grounding-quality.v1", derived=True)
