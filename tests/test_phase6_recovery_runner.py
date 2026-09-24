@@ -64,6 +64,23 @@ def test_filter_exhaustion_does_not_accept_last_value(fixture):
     assert final == '{}'
 
 
+@pytest.mark.parametrize('rejected_count', [1, 2])
+def test_filter_error_after_readable_rejection_never_retains_acceptance(fixture, rejected_count):
+    _, p, _ = fixture
+    case = r.base.cases()[22]
+    raw = json.dumps(payload(p, text=case.request.history.records[-1].message))
+    calls = []
+    row, final = r.process_case(case, p, 'qw9', 'filter', r.SEEDS[0],
+        dispatcher(iter([CHOICE, *([raw]*rejected_count), None]), calls))
+    assert row['status'] == 'OUTPUT_ERROR'
+    assert row['structural_pass'] is False and row['filter_pass'] is False
+    assert row['accepted_attempt'] is None
+    assert row['provider_calls'] == len(calls) == rejected_count+2
+    assert row['attempts'][1]['structural_pass'] is True
+    assert row['attempts'][1]['reject_code'] == 'EXACT_TEXT_GUARD'
+    assert final == raw and row['final_output_sha256'] == r.sha(raw.encode('utf-8'))
+
+
 @pytest.mark.parametrize('raw', [None, '{}', 'null', '{"speech_act_kind":"NONE","authoritative_fact_ids":["f999"]}'])
 def test_choice_failure_never_resampled(fixture, raw):
     case, p, _ = fixture

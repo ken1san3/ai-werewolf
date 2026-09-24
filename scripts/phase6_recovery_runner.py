@@ -226,7 +226,8 @@ def process_case(case, p, model, arm, seed, dispatch, *, replay=None):
         body['seed'] = seed + attempt*1009
         raw = call('output'+str(attempt), body)
         if raw is None:
-            row['status'] = 'OUTPUT_ERROR'
+            # Keep the last rejected raw for diagnosis, never its acceptance flags.
+            row.update(status='OUTPUT_ERROR', structural_pass=False, filter_pass=False)
             return row, final
         final = raw
         checked = mechanical(case, p, raw, choice)

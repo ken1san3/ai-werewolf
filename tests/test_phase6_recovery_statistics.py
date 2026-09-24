@@ -155,7 +155,7 @@ def test_closed_status_and_sha_contract_reject_arbitrary_public_text():
         stats.summarize(data)
 
 
-def test_absolute_safety_gate_requires_known_diagnostics_and_legal_none():
+def test_absolute_safety_gate_keeps_known_none_diagnostics_without_forcing_kind():
     data = rows()
     assert stats.summarize(data)["product_absolute_safety_eligible"]
     find(data)["act_text_mismatch"] = None
@@ -164,7 +164,31 @@ def test_absolute_safety_gate_requires_known_diagnostics_and_legal_none():
     find(data, "G14-1")["legal_none"] = False
     summary = stats.summarize(data)
     assert summary["legal_none"] == {"pass": 5, "fail": 1, "unknown": 0}
+    assert summary["product_absolute_safety_eligible"]
+    find(data, "G14-1")["legal_none"] = None
+    summary = stats.summarize(data)
     assert not summary["product_absolute_safety_eligible"]
+
+
+@pytest.mark.parametrize('status', sorted(stats.STATUSES-{'ACCEPTED'}))
+def test_failed_status_with_stale_structural_flag_cannot_pass_outcome(status):
+    data = rows()
+    find(data)['status'] = status
+    summary = stats.summarize(data)
+    assert summary['metrics']['semantic']['passes'] == 95
+    assert summary['metrics']['hard']['passes'] == 95
+    assert summary['structural_failures'] == 1
+    assert summary['content_only_annotation_counts']['semantic_annotation']['PASS'] == 96
+    assert not summary['product_absolute_safety_eligible']
+
+
+def test_accepted_flag_without_output_hash_cannot_pass_outcome():
+    data = rows()
+    find(data)['final_output_sha256'] = None
+    summary = stats.summarize(data)
+    assert summary['metrics']['semantic']['passes'] == 95
+    assert summary['structural_failures'] == 1
+    assert not summary['product_absolute_safety_eligible']
 
 
 def test_semantic_failure_does_not_relabel_absolute_safety_gate():
