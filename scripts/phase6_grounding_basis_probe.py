@@ -176,7 +176,7 @@ def catalog_identity(projection):
         'catalog_count': len(resolved)}
 
 
-def validate_native_rendered(body, stage_name, rendered):
+def validate_native_rendered(body, stage_name, rendered, *, budget_variant='legacy'):
     value = sc2._baseline(body)
     if stage_name not in ('choice', 'output') or not isinstance(rendered, str):
         raise ValueError('NATIVE_RENDERED_INVALID')
@@ -198,7 +198,10 @@ def validate_native_rendered(body, stage_name, rendered):
                 or len(set(plan['authoritative_fact_ids'])) != len(plan['authoritative_fact_ids'])):
             raise ValueError('NATIVE_BODY_INVALID')
         suffix = marker+canonical_json_bytes(plan).decode('utf-8')
-    expected = CHOICE_TOKENS if stage_name == 'choice' else OUTPUT_TOKENS
+    if budget_variant not in ('legacy', 'choice64_output448'):
+        raise ValueError('NATIVE_BODY_INVALID')
+    budgets = (CHOICE_TOKENS, OUTPUT_TOKENS) if budget_variant == 'legacy' else (64, 448)
+    expected = budgets[0 if stage_name == 'choice' else 1]
     if value.get('max_tokens') != expected or not system.endswith(suffix) or system.count(instruction) != 1:
         raise ValueError('NATIVE_BODY_INVALID')
     encoded = rendered.encode('utf-8')

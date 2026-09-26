@@ -150,10 +150,13 @@ def lease(out):
         path.unlink()
 
 
-def reserve(out, key, body):
+def reserve(out, key, body, *, call_cap=None):
     """Single lease serializes calls. Exclusive markers survive uncertain dispatch."""
     existing = list((out/'calls').glob('*.json'))
-    if len(existing) >= MAX_CALLS:
+    limit = MAX_CALLS if call_cap is None else call_cap
+    if type(limit) is not int or not 1 <= limit <= MAX_CALLS:
+        raise Stop('CALL_CAP')
+    if len(existing) >= limit:
         raise Stop('CALL_CAP')
     digest = sha(wire_bytes(body))
     if any(read(p)['wire_sha256'] == digest for p in existing):
@@ -280,7 +283,8 @@ def replay_for(out, seed, case):
     return replay, seal['result_sha256']
 
 
-def execute_call(out, private, key, stage, body, *, remaining, verify_now):
+def execute_call(out, private, key, stage, body, *, remaining, verify_now,
+                 budget_variant='legacy', call_cap=None):
     if remaining() < base.REQUEST_SECONDS:
         raise Stop('DEADLINE')
     verify_now()
@@ -288,12 +292,13 @@ def execute_call(out, private, key, stage, body, *, remaining, verify_now):
     write_bytes(private/(key+'.'+stage+'.request.bin'), payload)
     def sink(rendered):
         if 'grounding_basis_catalog' in body['messages'][1]['content']:
-            gb.validate_native_rendered(body, 'choice' if stage == 'choice' else 'output', rendered)
+            gb.validate_native_rendered(body, 'choice' if stage == 'choice' else 'output', rendered,
+                                        budget_variant=budget_variant)
         write_bytes(private/(key+'.'+stage+'.rendered.bin'), rendered.encode('utf-8'))
     measured = base.count_prompt(body, wire_payload=payload, private_sink=sink)
     if remaining() < base.REQUEST_SECONDS:
         raise Stop('DEADLINE')
-    digest = reserve(out, private.name+'-'+key+'-'+stage, body)
+    digest = reserve(out, private.name+'-'+key+'-'+stage, body, call_cap=call_cap)
     meta = dict(stage=stage, wire_sha256=digest, consumed=True, reused=False,
                 status='STARTED', max_tokens=body['max_tokens'], started_at_utc=stamp(), **measured)
     # Durable private and public call markers precede dispatch; no retry on uncertainty.
