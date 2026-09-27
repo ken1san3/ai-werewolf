@@ -1,0 +1,1084 @@
+{
+  "artifact_version": "aiwolf.phase6-generation-v2-schema-fixture.v1",
+  "status": "DESIGN_FIXTURE",
+  "description": "T512 WP2 の送信 schema を固定した代表 catalog で解決した PF1/PF3 用 fixture。製品 factory は catalog 値を enum/const へ束縛し、opinion/CO/ability は同じ branch template を候補ごとに反復する。field 構造・branch 内キー順は変えない。",
+  "catalog_fixture": {
+    "reply_ids": [
+      "r000",
+      "r001"
+    ],
+    "player_ids": [
+      "p000",
+      "p001",
+      "p002"
+    ],
+    "fact_ids": [
+      "f000",
+      "f001",
+      "f002"
+    ],
+    "disclose_ids": [
+      "d000"
+    ],
+    "utterance_claim_ids": [
+      "c000",
+      "c001"
+    ],
+    "observed_claim_ids": [
+      "k000",
+      "k001"
+    ],
+    "opinion_basis": {
+      "u000": {
+        "subject_player_id": "p001",
+        "dimension": "SUSPICION",
+        "prior": 50,
+        "allowed_current": [
+          0,
+          25,
+          75,
+          100
+        ]
+      }
+    },
+    "co_options": {
+      "o100": [
+        "q000"
+      ]
+    },
+    "ability_options": {
+      "o200": {
+        "target_count": 0,
+        "valid_target_ids": [],
+        "allows_none": false
+      },
+      "o201": {
+        "target_count": 2,
+        "valid_target_ids": [
+          "p001",
+          "p002"
+        ],
+        "allows_none": true
+      }
+    },
+    "vote_options": {
+      "o000": {
+        "valid_target_ids": [
+          "p001",
+          "p002"
+        ],
+        "allows_abstain": false
+      },
+      "o001": {
+        "valid_target_ids": [
+          "p002"
+        ],
+        "allows_abstain": true
+      }
+    }
+  },
+  "schema_key_order": {
+    "chat_plan": [
+      "reply_to",
+      "act",
+      "subject_player_id",
+      "topic",
+      "stance",
+      "opinion_basis_id",
+      "opinion_current",
+      "claim_id",
+      "fact_ids",
+      "disclose_ids"
+    ],
+    "message": [
+      "message"
+    ],
+    "pre_vote": [
+      "vote_option_id",
+      "decision",
+      "ranked_player_ids",
+      "assessment_updates",
+      "claim_assessments",
+      "fact_ids"
+    ],
+    "co_opportunity": [
+      "decision",
+      "co_option_id",
+      "claimed_role_option_id",
+      "comment",
+      "fact_ids"
+    ],
+    "ability": [
+      "decision",
+      "ability_option_id",
+      "target_player_ids",
+      "fact_ids"
+    ]
+  },
+  "schemas": {
+    "chat_plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "topic": {
+          "enum": [
+            "ALIGNMENT",
+            "ROLE_CLAIM",
+            "VOTE",
+            "EVENT",
+            "RELATION",
+            "STRATEGY"
+          ]
+        },
+        "stance": {
+          "enum": [
+            "SUPPORT",
+            "OPPOSE",
+            "UNCERTAIN"
+          ]
+        },
+        "subject_or_null": {
+          "enum": [
+            "p000",
+            "p001",
+            "p002",
+            null
+          ]
+        },
+        "claim_or_null": {
+          "enum": [
+            "c000",
+            "c001",
+            null
+          ]
+        },
+        "fact_ids": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "f000",
+              "f001",
+              "f002"
+            ]
+          },
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "disclose_ids": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "d000"
+            ]
+          },
+          "maxItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "enum": [
+                "r000",
+                "r001"
+              ]
+            },
+            "act": {
+              "enum": [
+                "ANSWER",
+                "REBUTTAL"
+              ]
+            },
+            "subject_player_id": {
+              "$ref": "#/$defs/subject_or_null"
+            },
+            "topic": {
+              "$ref": "#/$defs/topic"
+            },
+            "stance": {
+              "$ref": "#/$defs/stance"
+            },
+            "opinion_basis_id": {
+              "const": null
+            },
+            "opinion_current": {
+              "const": null
+            },
+            "claim_id": {
+              "$ref": "#/$defs/claim_or_null"
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            },
+            "disclose_ids": {
+              "$ref": "#/$defs/disclose_ids"
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "enum": [
+                "r000",
+                "r001"
+              ]
+            },
+            "act": {
+              "const": "QUESTION"
+            },
+            "subject_player_id": {
+              "enum": [
+                "p000",
+                "p001",
+                "p002"
+              ]
+            },
+            "topic": {
+              "$ref": "#/$defs/topic"
+            },
+            "stance": {
+              "const": null
+            },
+            "opinion_basis_id": {
+              "const": null
+            },
+            "opinion_current": {
+              "const": null
+            },
+            "claim_id": {
+              "const": null
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            },
+            "disclose_ids": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "enum": [
+                "r000",
+                "r001"
+              ]
+            },
+            "act": {
+              "const": "CLAIM"
+            },
+            "subject_player_id": {
+              "enum": [
+                "p000",
+                "p001",
+                "p002"
+              ]
+            },
+            "topic": {
+              "$ref": "#/$defs/topic"
+            },
+            "stance": {
+              "$ref": "#/$defs/stance"
+            },
+            "opinion_basis_id": {
+              "const": null
+            },
+            "opinion_current": {
+              "const": null
+            },
+            "claim_id": {
+              "$ref": "#/$defs/claim_or_null"
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            },
+            "disclose_ids": {
+              "$ref": "#/$defs/disclose_ids"
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "enum": [
+                "r000",
+                "r001"
+              ]
+            },
+            "act": {
+              "const": "OPINION_CHANGE"
+            },
+            "subject_player_id": {
+              "const": "p001"
+            },
+            "topic": {
+              "enum": [
+                "ALIGNMENT",
+                "ROLE_CLAIM",
+                "RELATION"
+              ]
+            },
+            "stance": {
+              "const": null
+            },
+            "opinion_basis_id": {
+              "const": "u000"
+            },
+            "opinion_current": {
+              "enum": [
+                0,
+                25,
+                75,
+                100
+              ]
+            },
+            "claim_id": {
+              "const": null
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            },
+            "disclose_ids": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "const": null
+            },
+            "act": {
+              "const": "QUESTION"
+            },
+            "subject_player_id": {
+              "enum": [
+                "p000",
+                "p001",
+                "p002"
+              ]
+            },
+            "topic": {
+              "$ref": "#/$defs/topic"
+            },
+            "stance": {
+              "const": null
+            },
+            "opinion_basis_id": {
+              "const": null
+            },
+            "opinion_current": {
+              "const": null
+            },
+            "claim_id": {
+              "const": null
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            },
+            "disclose_ids": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "const": null
+            },
+            "act": {
+              "const": "CLAIM"
+            },
+            "subject_player_id": {
+              "enum": [
+                "p000",
+                "p001",
+                "p002"
+              ]
+            },
+            "topic": {
+              "$ref": "#/$defs/topic"
+            },
+            "stance": {
+              "$ref": "#/$defs/stance"
+            },
+            "opinion_basis_id": {
+              "const": null
+            },
+            "opinion_current": {
+              "const": null
+            },
+            "claim_id": {
+              "$ref": "#/$defs/claim_or_null"
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            },
+            "disclose_ids": {
+              "$ref": "#/$defs/disclose_ids"
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "const": null
+            },
+            "act": {
+              "const": "OPINION_CHANGE"
+            },
+            "subject_player_id": {
+              "const": "p001"
+            },
+            "topic": {
+              "enum": [
+                "ALIGNMENT",
+                "ROLE_CLAIM",
+                "RELATION"
+              ]
+            },
+            "stance": {
+              "const": null
+            },
+            "opinion_basis_id": {
+              "const": "u000"
+            },
+            "opinion_current": {
+              "enum": [
+                0,
+                25,
+                75,
+                100
+              ]
+            },
+            "claim_id": {
+              "const": null
+            },
+            "fact_ids": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "f000",
+                  "f001",
+                  "f002"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "disclose_ids": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reply_to": {
+              "const": null
+            },
+            "act": {
+              "const": "NONE"
+            },
+            "subject_player_id": {
+              "const": null
+            },
+            "topic": {
+              "const": null
+            },
+            "stance": {
+              "const": null
+            },
+            "opinion_basis_id": {
+              "const": null
+            },
+            "opinion_current": {
+              "const": null
+            },
+            "claim_id": {
+              "const": null
+            },
+            "fact_ids": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "disclose_ids": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "reply_to",
+            "act",
+            "subject_player_id",
+            "topic",
+            "stance",
+            "opinion_basis_id",
+            "opinion_current",
+            "claim_id",
+            "fact_ids",
+            "disclose_ids"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "message": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "pre_vote": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "score": {
+          "enum": [
+            0,
+            25,
+            50,
+            75,
+            100
+          ]
+        },
+        "fact_ids": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "f000",
+              "f001",
+              "f002"
+            ]
+          },
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "assessment": {
+          "type": "object",
+          "properties": {
+            "player_id": {
+              "enum": [
+                "p001",
+                "p002"
+              ]
+            },
+            "suspicion": {
+              "$ref": "#/$defs/score"
+            },
+            "credibility": {
+              "$ref": "#/$defs/score"
+            },
+            "confidence": {
+              "$ref": "#/$defs/score"
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "player_id",
+            "suspicion",
+            "credibility",
+            "confidence",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        "claim_assessment": {
+          "type": "object",
+          "properties": {
+            "claim_id": {
+              "enum": [
+                "k000",
+                "k001"
+              ]
+            },
+            "verdict": {
+              "enum": [
+                "UNVERIFIED",
+                "SUPPORTED",
+                "CONTRADICTED"
+              ]
+            },
+            "confidence": {
+              "$ref": "#/$defs/score"
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "claim_id",
+            "verdict",
+            "confidence",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "vote_option_id": {
+              "const": "o000"
+            },
+            "decision": {
+              "const": "VOTE"
+            },
+            "ranked_player_ids": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "p001",
+                  "p002"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "assessment_updates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/assessment"
+              },
+              "maxItems": 2
+            },
+            "claim_assessments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/claim_assessment"
+              },
+              "maxItems": 2
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "vote_option_id",
+            "decision",
+            "ranked_player_ids",
+            "assessment_updates",
+            "claim_assessments",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "vote_option_id": {
+              "const": "o001"
+            },
+            "decision": {
+              "const": "VOTE"
+            },
+            "ranked_player_ids": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "p002"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 1,
+              "uniqueItems": true
+            },
+            "assessment_updates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/assessment"
+              },
+              "maxItems": 2
+            },
+            "claim_assessments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/claim_assessment"
+              },
+              "maxItems": 2
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "vote_option_id",
+            "decision",
+            "ranked_player_ids",
+            "assessment_updates",
+            "claim_assessments",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "vote_option_id": {
+              "const": "o001"
+            },
+            "decision": {
+              "const": "ABSTAIN"
+            },
+            "ranked_player_ids": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "assessment_updates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/assessment"
+              },
+              "maxItems": 2
+            },
+            "claim_assessments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/claim_assessment"
+              },
+              "maxItems": 2
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "vote_option_id",
+            "decision",
+            "ranked_player_ids",
+            "assessment_updates",
+            "claim_assessments",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "co_opportunity": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "fact_ids": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "f000",
+              "f001",
+              "f002"
+            ]
+          },
+          "maxItems": 2,
+          "uniqueItems": true
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "const": "SILENCE"
+            },
+            "co_option_id": {
+              "const": null
+            },
+            "claimed_role_option_id": {
+              "const": null
+            },
+            "comment": {
+              "const": null
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "decision",
+            "co_option_id",
+            "claimed_role_option_id",
+            "comment",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "const": "DEFER"
+            },
+            "co_option_id": {
+              "const": null
+            },
+            "claimed_role_option_id": {
+              "const": null
+            },
+            "comment": {
+              "const": null
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "decision",
+            "co_option_id",
+            "claimed_role_option_id",
+            "comment",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "const": "DECLARE"
+            },
+            "co_option_id": {
+              "const": "o100"
+            },
+            "claimed_role_option_id": {
+              "const": "q000"
+            },
+            "comment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "decision",
+            "co_option_id",
+            "claimed_role_option_id",
+            "comment",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ability": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "fact_ids": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "f000",
+              "f001",
+              "f002"
+            ]
+          },
+          "maxItems": 2,
+          "uniqueItems": true
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "const": "USE"
+            },
+            "ability_option_id": {
+              "const": "o200"
+            },
+            "target_player_ids": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0,
+              "uniqueItems": true
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "decision",
+            "ability_option_id",
+            "target_player_ids",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "const": "USE"
+            },
+            "ability_option_id": {
+              "const": "o201"
+            },
+            "target_player_ids": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "p001",
+                  "p002"
+                ]
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "decision",
+            "ability_option_id",
+            "target_player_ids",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "const": "NONE"
+            },
+            "ability_option_id": {
+              "const": "o201"
+            },
+            "target_player_ids": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0,
+              "uniqueItems": true
+            },
+            "fact_ids": {
+              "$ref": "#/$defs/fact_ids"
+            }
+          },
+          "required": [
+            "decision",
+            "ability_option_id",
+            "target_player_ids",
+            "fact_ids"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

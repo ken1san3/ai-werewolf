@@ -22,3 +22,6 @@ Docs/**    linguist-documentation
 # D075保全原本: 記録済みSHA-256を維持するため改行変換を行わない。
 Docs/ai/history/2026-09-16-before-d075/CURRENT_STATE.md -text
 Docs/ai/history/2026-09-16-before-d075/TASKS.md -text
+
+# T512承認済schema fixture: 測定・reviewのexact SHA-256をGitでも保持する。
+Docs/ai/design/PHASE6_GENERATION_CONTRACT_V2_SCHEMAS.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
