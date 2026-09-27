@@ -68,7 +68,7 @@ T408で残った失敗と対照すると、強制層の穴と失敗の分布が�
 
 **「本文の内容を検査するコードは1つもない」は広すぎる表現であり、訂正する。**
 
-`ai_client/brain/controller.py` の `_validate_generated_text` は、190 code points
+`ai_client/llm/decision.py` の `_validate_generated_text` は、190 code points
 または570 UTF-8 bytes付近の非終止文を `TEXT_BOUND` へ送る検査を持つ。
 T427測定でこの経路は実際に発火しており、構造rejectの内訳は
 `qw9` 3件、`gm12` 1件、`tb27` 2件である。検出経路は存在する。
