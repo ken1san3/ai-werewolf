@@ -1,6 +1,6 @@
 # Phase 6 ローカル段階発話設計（L1〜L3）
 
-Status: DRAFT — 外部提案。独立設計reviewの承認前は実装しない（D051）
+Status: SUPERSEDED — PHASE6_REWRITE_BASIC_DESIGN.md へ吸収（2026-09-27）。§4.1・§5.2・§5.3は同文書から参照して再利用する
 作成: 2026-09-27
 作成者: Claude Code
 根拠: `Docs/ai/PHASE6_LOCAL_VS_API_ASSESSMENT_20260927.md`
