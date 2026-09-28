@@ -53,7 +53,4 @@
 
 ## 未解決
 
-T512 U1: 評価方式v2とD077の製品採用条件を採用するか。
-T512 U2: v1既定・provider holdを維持し、製品v2のoffline段階実装を開始するか。
-案・利点/欠点・Architect推奨は `handoffs/tasks/T512_USER_DECISION.md`。
-詳細設計/測定器の独立承認済み。ユーザー回答前に製品実装・providerへ進まない。
+T512 U1=A / U2=A は2026-09-28ユーザー承認、D086へ解決記録。providerとbaseline新規判定は未許可。

@@ -23,6 +23,7 @@ from .admission_client import (
     _encode_frame,
     _exact,
     _read_frame,
+    _structured_request_to_wire,
 )
 from .admission_metrics import AdmissionMetric, AdmissionMetrics
 from .admission_types import (
@@ -153,12 +154,12 @@ def _identity_to_wire(identity: BackendIdentity) -> object:
 
 
 def _structured_request_from_wire(value: object) -> StructuredGenerationRequest:
-    if not isinstance(value, dict) or set(value) != {
-        "messages",
-        "output_schema",
-        "request_id",
-    }:
+    legacy = {"messages", "output_schema", "request_id"}
+    v2 = legacy | {"generation_profile", "max_output_tokens", "seed"}
+    if not isinstance(value, dict) or set(value) not in (legacy, v2):
         raise _ProtocolViolation("invalid structured request")
+    if set(value) == v2 and value["generation_profile"] != "phase6_v2":
+        raise _ProtocolViolation("invalid structured request profile")
     raw_messages = value["messages"]
     if not isinstance(raw_messages, list) or not raw_messages:
         raise _ProtocolViolation("invalid structured request messages")
@@ -177,6 +178,9 @@ def _structured_request_from_wire(value: object) -> StructuredGenerationRequest:
             request_id=value["request_id"],  # type: ignore[arg-type]
             messages=tuple(messages),
             output_schema=value["output_schema"],  # type: ignore[arg-type]
+            generation_profile=value.get("generation_profile", "v1"),
+            max_output_tokens=value.get("max_output_tokens"),
+            seed=value.get("seed"),
         )
     except (TypeError, ValueError):
         raise _ProtocolViolation("invalid structured request") from None
@@ -215,14 +219,7 @@ def _plain_json(value: object) -> object:
 
 
 def _structured_request_size(request: StructuredGenerationRequest) -> int:
-    value = {
-        "messages": [
-            {"content": message.content, "role": message.role}
-            for message in request.messages
-        ],
-        "output_schema": _plain_json(request.output_schema),
-        "request_id": request.request_id,
-    }
+    value = _structured_request_to_wire(request)
     return len(
         json.dumps(
             value,
@@ -955,6 +952,8 @@ class GenerationAdmissionBroker:
         request: StructuredGenerationRequest,
     ) -> None:
         self._require_invocation_owner(connection, invocation_id)
+        if request.generation_profile == "phase6_v2":
+            raise _ProtocolViolation("v2 provider execution is not enabled")
         terminal = self._terminal_status.get(invocation_id)
         if terminal == AdmissionStatus.EXPIRED.value:
             return

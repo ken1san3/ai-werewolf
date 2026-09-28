@@ -1,7 +1,7 @@
 # Phase6 WP2 詳細設計要求
 
 Status: APPROVED
-Request status: CLOSED — T512詳細設計の独立承認済み。製品採用・provider権限ではない。
+Request status: OPEN — 設計は承認済み。D086/U2によるT513製品offline実装の対象。provider hold。
 DESIGN: REQUIRED
 
 T512とD085の許可内で `PHASE6_GENERATION_CONTRACT_V2_DESIGN.md` を作成し独立Reviewerへ渡す。

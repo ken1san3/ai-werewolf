@@ -290,6 +290,40 @@ class OpenAICompatibleBackend:
         return self._identity
 
     def _request_payload(self, request: StructuredGenerationRequest) -> bytes:
+        if request.generation_profile == "phase6_v2":
+            # Offline wire construction only until PF3/authority/lifecycle gates exist.
+            if (self._config.structured_mode != "json_schema"
+                    or self._config.llama_cpp_structured_output is not None):
+                raise _backend_error(
+                    LLMBackendErrorCode.ADMISSION_UNAVAILABLE,
+                    provider_quiescence=ProviderQuiescence.NOT_STARTED,
+                )
+            body = {
+                "max_tokens": request.max_output_tokens,
+                "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+                "model": self._config.model,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "aiwolf_brain_decision",
+                                    "schema": _plain_json(request.output_schema), "strict": True},
+                },
+                "seed": request.seed,
+                "stream": False,
+                "temperature": self._config.generation.temperature,
+            }
+            try:
+                payload = json.dumps(body, ensure_ascii=False, sort_keys=False,
+                                     separators=(",", ":"), allow_nan=False).encode("utf-8")
+            except UnicodeError:
+                raise _backend_error(LLMBackendErrorCode.RESPONSE_ENCODING,
+                                     provider_quiescence=ProviderQuiescence.NOT_STARTED) from None
+            except (TypeError, ValueError):
+                raise _backend_error(LLMBackendErrorCode.RESPONSE_ENVELOPE_INVALID,
+                                     provider_quiescence=ProviderQuiescence.NOT_STARTED) from None
+            if len(payload) > self._config.max_request_bytes:
+                raise _backend_error(LLMBackendErrorCode.RESPONSE_TOO_LARGE,
+                                     provider_quiescence=ProviderQuiescence.NOT_STARTED)
+            return payload
         if self._config.structured_mode == "json_schema":
             response_format: dict[str, object] = {
                 "type": "json_schema",
@@ -349,6 +383,10 @@ class OpenAICompatibleBackend:
     ) -> StructuredGenerationResponse:
         if not isinstance(request, StructuredGenerationRequest):
             raise TypeError("request must be StructuredGenerationRequest")
+        if request.generation_profile == "phase6_v2":
+            # No opt-out: product v2 execution is not enabled by offline wire support.
+            raise _backend_error(LLMBackendErrorCode.ADMISSION_UNAVAILABLE,
+                                 provider_quiescence=ProviderQuiescence.NOT_STARTED)
         if self._closed or self._client.is_closed:
             raise _backend_error(
                 LLMBackendErrorCode.CLOSED,

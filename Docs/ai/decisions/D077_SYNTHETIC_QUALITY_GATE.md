@@ -8,7 +8,11 @@ Authority: 最新ユーザーのPhase6 PART A–F指示
 
 今後の品質修正はoffline focused→固定人工LLM suite→意味上の改善確認→製品採用時独立review→
 許可された短い実gameの順とする。実gameで最初に問題を探す運用を避ける。
-hard100%、重大秘密/状態矛盾0、長文exact copy0は必要条件であり、speech_act比率だけで合格にしない。
+探索候補の製品採用には、対象行100%のschema・semantic validator通過、MISSING・UNKNOWN・ABSTAIN 0、
+S1〜S6aの違反0を絶対条件とする。探索のbaseline相対比較、speech_act比率、機械filterだけでこの条件を
+代替しない。自由文のS1残部とS2〜S4は独立Reviewerが判定する。合成suiteのS6aは直前自己反復だけを測り、
+D072-5の全ゲーム3回以上禁止は許可された実ゲームの完了gateとして維持する。
+指標正本は `Docs/ai/design/PHASE6_EVALUATION_V2_DESIGN.md`、採用権限はD086（2026-09-28 U1）。
 初回32caseでは小標本/戦略自由/未観測を明示し、恣意的なsemantic95%閾値は設定しない。
 
 proxyとactual tokenを別単位として記録し、推定比率を安全式へ流用しない。

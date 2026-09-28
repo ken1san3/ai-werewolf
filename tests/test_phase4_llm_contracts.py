@@ -118,7 +118,12 @@ def test_request_deep_copies_and_freezes_json_contract() -> None:
     with pytest.raises(FrozenInstanceError):
         request.request_id = "changed"  # type: ignore[misc]
     assert not hasattr(request, "temperature")
-    assert not hasattr(request, "max_output_tokens")
+    # U2: v2 adds per-request settings; v1 must never override its backend defaults.
+    assert request.generation_profile == "v1"
+    assert request.max_output_tokens is None
+    assert request.seed is None
+    with pytest.raises(ValueError):
+        StructuredGenerationRequest("v1-override", request.messages, source, max_output_tokens=128)
 
 
 def test_prompt_projection_verifies_complete_messages_and_schema_hash() -> None:

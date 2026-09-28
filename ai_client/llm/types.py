@@ -174,9 +174,20 @@ class StructuredGenerationRequest:
     request_id: str
     messages: tuple[LLMMessage, ...]
     output_schema: Mapping[str, object]
+    generation_profile: Literal["v1", "phase6_v2"] = "v1"
+    max_output_tokens: int | None = None
+    seed: int | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_string("request_id", self.request_id)
+        if self.generation_profile not in ("v1", "phase6_v2"):
+            raise ValueError("invalid generation profile")
+        if self.generation_profile == "v1":
+            if self.max_output_tokens is not None or self.seed is not None:
+                raise ValueError("v1 does not accept per-request generation settings")
+        else:
+            _require_bounded_int("max_output_tokens", self.max_output_tokens, 1, 512)
+            _require_bounded_int("seed", self.seed, 0, 2**32 - 1)
         object.__setattr__(self, "messages", _freeze_messages(self.messages))
         object.__setattr__(
             self,

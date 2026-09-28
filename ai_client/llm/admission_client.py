@@ -89,7 +89,11 @@ def _encode_frame(max_frame_bytes: int, message_type: str, **fields: object) -> 
         encoded = json.dumps(
             value,
             ensure_ascii=False,
-            sort_keys=True,
+            sort_keys=not (
+                message_type == "GENERATE"
+                and isinstance(fields.get("structured_request"), dict)
+                and fields["structured_request"].get("generation_profile") == "phase6_v2"
+            ),
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
@@ -129,15 +133,16 @@ def _plain_json(value: object) -> object:
     return value
 
 
-def _structured_request_to_wire(request: StructuredGenerationRequest) -> object:
-    return {
-        "messages": [
-            {"content": message.content, "role": message.role}
-            for message in request.messages
-        ],
+def _structured_request_to_wire(request: StructuredGenerationRequest) -> dict[str, object]:
+    value: dict[str, object] = {
+        "messages": [{"content": m.content, "role": m.role} for m in request.messages],
         "output_schema": _plain_json(request.output_schema),
         "request_id": request.request_id,
     }
+    if request.generation_profile == "phase6_v2":
+        value.update(generation_profile=request.generation_profile,
+                     max_output_tokens=request.max_output_tokens, seed=request.seed)
+    return value
 
 
 def _optional_count(value: object) -> int | None:
@@ -482,6 +487,8 @@ class BrokerAdmissionSession:
         self, invocation_id: str, request: StructuredGenerationRequest
     ) -> StructuredGenerationResponse:
         self._require_open()
+        if request.generation_profile == "phase6_v2":
+            raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_UNAVAILABLE)
         if self._activated_invocation != invocation_id:
             raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
         ordinal = self._call_ordinals.get(invocation_id, 0) + 1
