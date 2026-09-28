@@ -1,6 +1,6 @@
 # v2 inbound authority限定接続設計要求
 
-Status: DRAFT
+Status: APPROVED
 Request status: OPEN
 DESIGN: REQUIRED
 Task: T516
