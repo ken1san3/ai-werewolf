@@ -183,7 +183,21 @@ class WorldReducer:
         self.malformed_event_count = 0
         self._next_order = 1
 
-    def apply_server_event(self, event: ServerEvent) -> ReductionResult:
+    def apply_server_event(self, event: ServerEvent, observer: object | None = None) -> ReductionResult:
+        self._authority_observer = observer
+        self._authority_event = event
+        self._authority_history_index = None
+        try:
+            result = self._apply_server_event(event)
+            callback = getattr(observer, "after_apply", None)
+            if callback is not None: callback(result, self.memory.retention())
+            return result
+        finally:
+            self._authority_observer = None
+            self._authority_event = None
+            self._authority_history_index = None
+
+    def _apply_server_event(self, event: ServerEvent) -> ReductionResult:
         self.last_applied_seq = max(self.last_applied_seq, event.seq)
         if event.type == "game.state_sync":
             if not self._valid_state_sync_shape(event.payload):
@@ -228,6 +242,8 @@ class WorldReducer:
         self._next_order = 1
 
     def _apply_state_sync(self, payload: Mapping[str, Any]) -> bool:
+        callback = getattr(getattr(self, "_authority_observer", None), "before_sync_reset", None)
+        if callback is not None: callback()
         players = payload.get("players")
         revealed_roles = payload.get("revealed_roles")
         parsed_revealed_roles = self._parse_revealed_roles(players, revealed_roles)
@@ -266,9 +282,15 @@ class WorldReducer:
             if all(isinstance(item, str) and item for item in modifier_ids):
                 self.self_view = SelfView(player_id, role_id, tuple(modifier_ids))
         if isinstance(history, (list, tuple)):
-            for entry in history:
+            for index, entry in enumerate(history):
+                self._authority_history_index = index
+                callback = getattr(getattr(self, "_authority_observer", None), "before_sync_history_entry", None)
+                if callback is not None: callback(index, entry)
                 if isinstance(entry, Mapping):
                     self._apply_history_entry(entry)
+                callback = getattr(getattr(self, "_authority_observer", None), "after_sync_history_entry", None)
+                if callback is not None: callback(index)
+            self._authority_history_index = None
         # Historical GAME_CREATED / PLAYER_DIED facts are retained, but the
         # explicit state-sync collections remain authoritative for current
         # view materialization.
@@ -616,6 +638,10 @@ class WorldReducer:
 
     def _append(self, record: HistoryRecord) -> None:
         self.memory.append(record)
+        callback = getattr(getattr(self, "_authority_observer", None), "record_appended", None)
+        if callback is not None:
+            event = getattr(self, "_authority_event", None)
+            callback(record, event, getattr(self, "_authority_history_index", None))
 
     def _take_order(self) -> int:
         order = self._next_order

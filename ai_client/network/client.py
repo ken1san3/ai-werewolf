@@ -28,6 +28,11 @@ from .protocol import (
     make_client_request,
 )
 from .state import ClientState
+from .inbound_authority_v2 import (
+    InboundAuthorityClaimCapabilityV2, NetworkCommittedInboundV2,
+    NetworkLifecycleObservationV2, SyncCommitIdentityV2,
+    _issue_capability, _issue_lifecycle, _prepare_observation,
+)
 from .types import (
     AbilityAction,
     Action,
@@ -154,6 +159,7 @@ class NetworkClient:
         self._deadline_source_seq: int | None = None
         self._awaiting_sync = True
         self._authenticated = False
+        self._authenticated_player_id: str | None = None
         self._connected_once_in_generation = False
         self._join_request_sent = False
         self._resume_request_sent = False
@@ -171,6 +177,11 @@ class NetworkClient:
         self._sequence_gap_previous_seq: int | None = None
         self._background_failure: _FatalFailure | _TransientFailure | None = None
         self._cleanup_result: bool | None = True
+        self._authority_capability: InboundAuthorityClaimCapabilityV2 | None = None
+        self._authority_iteration_started = False
+        self._inbound_observations: dict[int, tuple[ServerEvent, NetworkCommittedInboundV2]] = {}
+        self._lifecycle_observations: dict[int, tuple[LifecycleChanged, NetworkLifecycleObservationV2]] = {}
+        self._ready_sync_identity: SyncCommitIdentityV2 | None = None
 
     @property
     def lifecycle(self) -> ClientLifecycle:
@@ -199,8 +210,37 @@ class NetworkClient:
                 return
             item = await self._events.get()
             if item is _EVENT_STREAM_END:
+                self._inbound_observations.clear(); self._lifecycle_observations.clear()
                 return
-            yield item
+            self._authority_iteration_started = True
+            try:
+                yield item
+            finally:
+                self._inbound_observations.pop(id(item), None)
+                self._lifecycle_observations.pop(id(item), None)
+
+    def acquire_inbound_authority_capability(self) -> InboundAuthorityClaimCapabilityV2:
+        if self._authority_capability is not None or self._authority_iteration_started:
+            raise RuntimeError("inbound authority capability is single-owner and pre-iteration")
+        capability = _issue_capability(self)
+        self._authority_capability = capability
+        return capability
+
+    def claim_committed_inbound(self, event: object, capability: object) -> NetworkCommittedInboundV2 | None:
+        if capability is not self._authority_capability or getattr(capability, "_client", None) is not self:
+            return None
+        entry = self._inbound_observations.get(id(event))
+        if entry is None or entry[0] is not event: return None
+        self._inbound_observations.pop(id(event), None)
+        return entry[1]
+
+    def claim_lifecycle_observation(self, event: object, capability: object) -> NetworkLifecycleObservationV2 | None:
+        if capability is not self._authority_capability or getattr(capability, "_client", None) is not self:
+            return None
+        entry = self._lifecycle_observations.get(id(event))
+        if entry is None or entry[0] is not event: return None
+        self._lifecycle_observations.pop(id(event), None)
+        return entry[1]
 
     async def run(self) -> ClientExit:
         """Run until game end, explicit stop, or a fatal/reconnect failure."""
@@ -385,10 +425,14 @@ class NetworkClient:
 
     async def _run_generation(self) -> _GenerationOutcome:
         self._connection_generation += 1
+        self._inbound_observations.clear()
+        self._lifecycle_observations.clear()
+        self._ready_sync_identity = None
         generation = self._connection_generation
         self._state.begin_connection(generation)
         self._awaiting_sync = True
         self._authenticated = False
+        self._authenticated_player_id = None
         self._connected_once_in_generation = False
         self._join_request_sent = False
         self._resume_request_sent = False
@@ -641,6 +685,7 @@ class NetworkClient:
                     "session.resumed sequence is not newer than the requested checkpoint",
                 )
             resumed_player_id = message["payload"]["player_id"]
+            self._authenticated_player_id = resumed_player_id
             known_player_id = self._state.snapshot().player_id
             if known_player_id is not None and resumed_player_id != known_player_id:
                 raise _FatalFailure(
@@ -672,6 +717,7 @@ class NetworkClient:
                 for replay_message, replay_observed_at in replay:
                     await self._commit_server_message(
                         replay_message,
+                        sequence_mode="RESUME_REPLAY",
                         observed_at_monotonic=replay_observed_at,
                     )
                 previous_seq = self._state.last_seq
@@ -719,6 +765,7 @@ class NetworkClient:
         await self._commit_server_message(
             message,
             is_sync_barrier=is_sync_barrier,
+            sequence_mode="SYNC_BARRIER" if is_sync_barrier else "CONTIGUOUS",
             observed_at_monotonic=observed_at_monotonic,
         )
 
@@ -759,11 +806,33 @@ class NetworkClient:
         message: Mapping[str, Any],
         *,
         is_sync_barrier: bool = False,
+        sequence_mode: str = "CONTIGUOUS",
         observed_at_monotonic: float | None = None,
     ) -> None:
         message_type = message["type"]
         sequence = message["seq"]
         self._state.apply_server_event(message)
+        event = self._server_event(message)
+        prepared = None
+        if self._authority_capability is not None and message_type in {"player.action_state", "game.state_sync", "game.event"}:
+            snapshot = self._state.snapshot()
+            player_id = self._authenticated_player_id
+            if player_id is None:
+                raise _FatalFailure(ClientExitReason.INVALID_SERVER_MESSAGE, "authority event has no authenticated owner")
+            if (sequence_mode in {"CONTIGUOUS", "RESUME_REPLAY"} and sequence != self._state.last_seq + 1
+                    or sequence_mode == "RESUME_REPLAY" and self._resume_last_seq_requested is None
+                    or sequence_mode == "SYNC_BARRIER" and (not is_sync_barrier or message_type != "game.state_sync")):
+                raise _FatalFailure(ClientExitReason.INVALID_SERVER_MESSAGE,
+                                    "sequence mode does not match receive control flow")
+            try:
+                prepared = _prepare_observation(event, player_id=player_id,
+                    generation=self._connection_generation, mode=sequence_mode,
+                    previous_seq=self._state.last_seq,
+                    snapshot_generation=snapshot.generation,
+                    action_generation=snapshot.action_generation, actions=tuple(snapshot.actions))
+            except (KeyError, TypeError, ValueError) as error:
+                raise _FatalFailure(ClientExitReason.INVALID_SERVER_MESSAGE,
+                                    f"inbound authority preflight failed: {error}") from error
         timing_payload = self._timing_payload(message)
         terminal_sync = is_sync_barrier and (
             self._terminal_candidate_seen
@@ -790,6 +859,7 @@ class NetworkClient:
                 raise _FatalFailure(ClientExitReason.INVALID_SERVER_MESSAGE, str(error)) from error
             token = token_value
             self._authenticated = True
+            self._authenticated_player_id = message["payload"]["player_id"]
         if token is None:
             raise _FatalFailure(ClientExitReason.CREDENTIAL_SAVE_FAILED, "no connection token")
         try:
@@ -806,7 +876,12 @@ class NetworkClient:
         self._checkpoint = checkpoint
         self._state.set_last_seq(sequence)
 
-        event = self._server_event(message)
+        if prepared is not None:
+            self._inbound_observations[id(event)] = (event, prepared)
+            if len(self._inbound_observations) > self.config.inbound_event_capacity:
+                raise _FatalFailure(ClientExitReason.CONSUMER_OVERRUN)
+            if is_sync_barrier:
+                self._ready_sync_identity = SyncCommitIdentityV2(event, event.event_id, event.seq, self._connection_generation)
         terminal_event = (
             message_type == "game.event"
             and message["payload"]["event_type"] == "GAME_ENDED"
@@ -817,7 +892,11 @@ class NetworkClient:
             self._ensure_event_capacity(
                 1 + (1 if self._sequence_gap_previous_seq is not None else 0) + 2
             )
-        await self._publish(event)
+        try:
+            await self._publish(event)
+        except Exception:
+            self._inbound_observations.pop(id(event), None)
+            raise
         if message_type == "action.accepted":
             payload = message["payload"]
             assert observed_at_monotonic is not None
@@ -1270,10 +1349,17 @@ class NetworkClient:
         if previous is lifecycle:
             return
         self._state.set_lifecycle(lifecycle)
-        await self._publish(LifecycleChanged(previous, lifecycle))
+        event = LifecycleChanged(previous, lifecycle)
+        if self._authority_capability is not None:
+            identity = self._ready_sync_identity if lifecycle is ClientLifecycle.CONNECTED else None
+            self._lifecycle_observations[id(event)] = (
+                event, _issue_lifecycle(event, self._connection_generation, identity)
+            )
+        await self._publish(event)
 
     async def _publish(self, event: ClientEvent) -> None:
         if self._events.full():
+            self._inbound_observations.clear(); self._lifecycle_observations.clear()
             raise _FatalFailure(ClientExitReason.CONSUMER_OVERRUN)
         self._events.put_nowait(event)
 
@@ -1301,6 +1387,8 @@ class NetworkClient:
         if self._event_stream_closed:
             return
         self._event_stream_closed = True
+        self._inbound_observations.clear()
+        self._lifecycle_observations.clear()
         if not self._events.full():
             self._events.put_nowait(_EVENT_STREAM_END)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import suppress
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from ai_client.network import (
@@ -27,6 +28,7 @@ from ai_client.network import (
 )
 
 from .model import (
+    AbilityResultRecord,
     AbilityResultView,
     ActionAcceptedObservation,
     ActionRejectionObservation,
@@ -50,6 +52,16 @@ from .model import (
 )
 from .reducer import WorldReducer
 from .transport import TransportObservationStore
+from .inbound_authority_v2 import InboundAuthorityRuntimeV2, InboundAuthoritySnapshotV2
+
+
+@dataclass(frozen=True)
+class _AbortPublishBundleV2:
+    expected_current_world_object: WorldSnapshot
+    expected_current_authority_object: InboundAuthorityRuntimeV2
+    failed_world: WorldSnapshot
+    invalid_authority: InboundAuthorityRuntimeV2
+    successor_update_event: asyncio.Event
 
 
 class NetworkEventSource(Protocol):
@@ -85,9 +97,14 @@ class WorldState:
         *,
         config: WorldStateConfig = WorldStateConfig(),
         transport_retention: TransportObservationRetention = TransportObservationRetention(),
+        inbound_authority: InboundAuthorityRuntimeV2 | None = None,
     ) -> None:
         if not isinstance(transport_retention, TransportObservationRetention):
             raise TypeError("transport_retention must be TransportObservationRetention")
+        if (inbound_authority is not None
+                and getattr(source, "_authority_capability", None)
+                is not getattr(inbound_authority, "_composition_capability", None)):
+            raise TypeError("authority source and sink composition do not match")
         self._source = source
         self.config = config
         self.transport_retention = transport_retention
@@ -104,8 +121,16 @@ class WorldState:
         self._stop_requested = False
         self._run_started = False
         self._run_task: asyncio.Task[WorldStateExit] | None = None
+        self._inbound_authority = inbound_authority
+        self._next_authority_delta = None
+        self._next_lifecycle_observation = None
+        self._invalidate_authority_next = False
         self._update_event = asyncio.Event()
         self._snapshot = self._make_snapshot()
+        self._abort_bundle = (
+            None if self._inbound_authority is None else
+            self._prepare_abort_bundle(self._snapshot, self._inbound_authority)
+        )
 
     async def run(self) -> WorldStateExit:
         """Consume the exclusive source iterator until it closes or fails."""
@@ -164,6 +189,9 @@ class WorldState:
 
     def snapshot(self) -> WorldSnapshot:
         return self._snapshot
+
+    def inbound_authority_snapshot(self) -> InboundAuthoritySnapshotV2 | None:
+        return None if self._inbound_authority is None else self._inbound_authority.snapshot()
 
     def current_actions(self) -> CurrentActionsView:
         network = self._source.snapshot()
@@ -236,7 +264,24 @@ class WorldState:
             await event.wait()
 
     def _consume(self, event: ClientEvent) -> None:
+        try:
+            self._consume_inner(event)
+        except Exception:
+            if self._abort_bundle is not None:
+                self._abort_inbound_authority()
+            raise
+
+    def _consume_inner(self, event: ClientEvent) -> None:
         if isinstance(event, ServerEvent):
+            observation = None
+            if self._inbound_authority is not None:
+                claim = getattr(self._source, "claim_committed_inbound", None)
+                observation = None if claim is None else claim(event)
+                if event.type in {"player.action_state", "game.state_sync", "game.event"} and observation is None:
+                    self._invalidate_authority_next = True
+                elif observation is not None:
+                    self._inbound_authority.begin(observation, event, self._version,
+                        self._reducer.last_applied_seq, self._reducer.phase)
             if event.type == "action.accepted":
                 # This is a transport receipt fact, not semantic history.  Keep
                 # the reducer's drain cursor coherent without creating an
@@ -248,7 +293,11 @@ class WorldState:
                 )
                 self._commit()
                 return
-            result = self._reducer.apply_server_event(event)
+            result = self._reducer.apply_server_event(
+                event, observer=self._inbound_authority if observation is not None else None
+            )
+            if observation is not None:
+                self._next_authority_delta = self._inbound_authority.finish(self._reducer, result)
             if self._server_event_invalidates_deadline(event):
                 self._current_deadline = None
             if result.state_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
@@ -268,6 +317,11 @@ class WorldState:
             self._commit()
             return
         if isinstance(event, LifecycleChanged):
+            if self._inbound_authority is not None:
+                claim = getattr(self._source, "claim_lifecycle_observation", None)
+                self._next_lifecycle_observation = None if claim is None else claim(event)
+                if self._next_lifecycle_observation is None:
+                    self._invalidate_authority_next = True
             self._apply_lifecycle(event.current)
             self._commit()
             return
@@ -366,11 +420,13 @@ class WorldState:
             self._commit()
             return
         if isinstance(event, SequenceGapDetected):
+            self._invalidate_authority_next = True
             if self._has_sync and self._freshness not in {Freshness.ENDED, Freshness.FAILED}:
                 self._freshness = Freshness.STALE
             self._commit()
             return
         if isinstance(event, FatalTermination):
+            self._invalidate_authority_next = True
             self._freshness = Freshness.FAILED
             self._commit()
             return
@@ -429,26 +485,95 @@ class WorldState:
             self._freshness = Freshness.FAILED
 
     def _commit(self) -> None:
-        self._version += 1
-        self._snapshot = self._make_snapshot()
+        next_version = self._version + 1
+        prepared_authority = None
+        prepared_abort_bundle = None
+        try:
+            prepared_world = self._make_snapshot(version=next_version)
+            prepared_update_event = asyncio.Event()
+            if self._inbound_authority is not None:
+                prepared_authority = self._inbound_authority.prepare_commit(
+                    next_version, self._reducer.last_applied_seq,
+                    self._next_authority_delta, self._next_lifecycle_observation,
+                    self._invalidate_authority_next,
+                    frozenset(record.order for record in self._reducer.memory.query()
+                              if isinstance(record, AbilityResultRecord)))
+                authority_snapshot = prepared_authority.snapshot()
+                if (authority_snapshot.world_version != prepared_world.version
+                        or authority_snapshot.last_committed_server_seq != prepared_world.last_applied_seq):
+                    raise ValueError("world and authority snapshots diverged")
+                prepared_abort_bundle = self._prepare_abort_bundle(
+                    prepared_world, prepared_authority)
+        except Exception:
+            self._abort_inbound_authority()
+            raise
+        if prepared_authority is not None:
+            self._inbound_authority = prepared_authority
+            self._abort_bundle = prepared_abort_bundle
+        self._version = next_version
+        self._snapshot = prepared_world
+        self._next_authority_delta = None; self._next_lifecycle_observation = None
+        self._invalidate_authority_next = False
         previous = self._update_event
-        self._update_event = asyncio.Event()
+        self._update_event = prepared_update_event
         previous.set()
+
+    def _abort_inbound_authority(self) -> None:
+        if self._inbound_authority is None:
+            return
+        bundle = self._abort_bundle
+        if bundle is None:
+            raise RuntimeError("inbound authority abort bundle was already consumed")
+        previous = self._update_event
+        self._inbound_authority = bundle.invalid_authority
+        self._freshness = Freshness.FAILED
+        self._version = bundle.failed_world.version
+        self._snapshot = bundle.failed_world
+        self._abort_bundle = None
+        self._update_event = bundle.successor_update_event
+        self._next_authority_delta = None; self._next_lifecycle_observation = None
+        self._invalidate_authority_next = False
+        previous.set()
+
+    def _prepare_abort_bundle(
+        self,
+        current_world: WorldSnapshot,
+        current_authority: InboundAuthorityRuntimeV2,
+    ) -> _AbortPublishBundleV2:
+        invalid_authority = current_authority.prepare_invalid_empty(
+            current_world.version + 1, current_world.last_applied_seq)
+        failed_world = replace(
+            current_world, version=current_world.version + 1,
+            freshness=Freshness.FAILED, is_caught_up=False)
+        successor = asyncio.Event()
+        invalid_snapshot = invalid_authority.snapshot()
+        if (invalid_snapshot.world_version != failed_world.version
+                or invalid_snapshot.last_committed_server_seq != failed_world.last_applied_seq):
+            raise ValueError("abort world and authority snapshots diverged")
+        return _AbortPublishBundleV2(
+            expected_current_world_object=current_world,
+            expected_current_authority_object=current_authority,
+            failed_world=failed_world,
+            invalid_authority=invalid_authority,
+            successor_update_event=successor,
+        )
 
     def _set_freshness(self, freshness: Freshness) -> None:
         if self._freshness is freshness:
             return
         self._freshness = freshness
+        if freshness in {Freshness.ENDED, Freshness.FAILED}:
+            self._invalidate_authority_next = True
         self._commit()
 
-    def _make_snapshot(self) -> WorldSnapshot:
+    def _make_snapshot(self, *, version: int | None = None) -> WorldSnapshot:
         network_last_seq = 0
         try:
             network_last_seq = self._source.snapshot().last_seq
         except Exception:
             pass
         return WorldSnapshot(
-            version=self._version,
+            version=self._version if version is None else version,
             freshness=self._freshness,
             is_caught_up=self._reducer.last_applied_seq == network_last_seq,
             last_applied_seq=self._reducer.last_applied_seq,

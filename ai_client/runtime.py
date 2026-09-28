@@ -69,6 +69,7 @@ from .world import (
     WorldStateExit,
     WorldStateExitReason,
 )
+from .world.inbound_authority_v2 import _create_runtime as _create_inbound_authority_runtime
 
 
 Clock = Callable[[], float]
@@ -88,8 +89,13 @@ class _Phase6NetworkEventSource:
         self,
         network: NetworkClient,
         pending: PendingDiscussionContext,
+        *,
+        enable_inbound_authority_v2: bool = False,
     ) -> None:
         self._network = network
+        acquire_authority = (getattr(network, "acquire_inbound_authority_capability", None)
+                             if enable_inbound_authority_v2 else None)
+        self._authority_capability = None if acquire_authority is None else acquire_authority()
         self._pending: PendingDiscussionContext | None = pending
         self._world: WorldState | None = None
         self._iteration_started = False
@@ -102,6 +108,14 @@ class _Phase6NetworkEventSource:
         )
         self._context_outcome: asyncio.Future[None] = loop.create_future()
         self._composition_gate = asyncio.Event()
+
+    def claim_committed_inbound(self, event_object: object):
+        if self._authority_capability is None: return None
+        return self._network.claim_committed_inbound(event_object, self._authority_capability)
+
+    def claim_lifecycle_observation(self, event_object: object):
+        if self._authority_capability is None: return None
+        return self._network.claim_lifecycle_observation(event_object, self._authority_capability)
 
     def snapshot(self) -> ClientSnapshot:
         return self._network.snapshot()
@@ -228,6 +242,22 @@ class _Phase6NetworkEventSource:
             return
         if not self._context_outcome.done():
             self._context_outcome.set_result(None)
+
+
+def _create_phase6_v2_inbound_world(
+    network: NetworkClient,
+    pending: PendingDiscussionContext,
+    *,
+    config: WorldStateConfig = WorldStateConfig(),
+) -> tuple[_Phase6NetworkEventSource, WorldState]:
+    """Explicit offline v2 opt-in; normal Phase 6 runtime remains sink-null."""
+    source = _Phase6NetworkEventSource(
+        network, pending, enable_inbound_authority_v2=True
+    )
+    authority = _create_inbound_authority_runtime(source._authority_capability)
+    world = WorldState(source, config=config, inbound_authority=authority)
+    source.attach_world(world)
+    return source, world
 
 
 class Phase5RuntimeLifecycle(str, Enum):
@@ -573,7 +603,10 @@ class Phase5ClientRuntime:
                 sleep=sleep,
             )
             event_source = _Phase6NetworkEventSource(network, pending)
-            world = WorldState(event_source, config=config.world)
+            authority_runtime = (None if event_source._authority_capability is None else
+                                 _create_inbound_authority_runtime(event_source._authority_capability))
+            world = WorldState(event_source, config=config.world,
+                               inbound_authority=authority_runtime)
             event_source.attach_world(world)
             return cls(
                 config=config,
