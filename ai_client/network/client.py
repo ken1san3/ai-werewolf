@@ -178,6 +178,7 @@ class NetworkClient:
         self._background_failure: _FatalFailure | _TransientFailure | None = None
         self._cleanup_result: bool | None = True
         self._authority_capability: InboundAuthorityClaimCapabilityV2 | None = None
+        self._authority_owner_registration_v2 = None
         self._authority_iteration_started = False
         self._inbound_observations: dict[int, tuple[ServerEvent, NetworkCommittedInboundV2]] = {}
         self._lifecycle_observations: dict[int, tuple[LifecycleChanged, NetworkLifecycleObservationV2]] = {}

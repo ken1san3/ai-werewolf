@@ -52,7 +52,13 @@ from .model import (
 )
 from .reducer import WorldReducer
 from .transport import TransportObservationStore
-from .inbound_authority_v2 import InboundAuthorityRuntimeV2, InboundAuthoritySnapshotV2
+from .inbound_authority_v2 import (
+    InboundAuthorityRuntimeV2, InboundAuthoritySnapshotV2,
+    AuthoritySuccessorTicketV2, _SUCCESSOR_TICKET_ISSUER, _release_successor_ticket_v2,
+)
+
+
+_REGISTERED_WORLD_CONSTRUCTION_V2 = object()
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,7 @@ class _AbortPublishBundleV2:
     failed_world: WorldSnapshot
     invalid_authority: InboundAuthorityRuntimeV2
     successor_update_event: asyncio.Event
+    successor_ticket: AuthoritySuccessorTicketV2 | None = None
 
 
 class NetworkEventSource(Protocol):
@@ -98,6 +105,7 @@ class WorldState:
         config: WorldStateConfig = WorldStateConfig(),
         transport_retention: TransportObservationRetention = TransportObservationRetention(),
         inbound_authority: InboundAuthorityRuntimeV2 | None = None,
+        _authority_registration_token: object | None = None,
     ) -> None:
         if not isinstance(transport_retention, TransportObservationRetention):
             raise TypeError("transport_retention must be TransportObservationRetention")
@@ -122,19 +130,31 @@ class WorldState:
         self._run_started = False
         self._run_task: asyncio.Task[WorldStateExit] | None = None
         self._inbound_authority = inbound_authority
+        if _authority_registration_token is not None:
+            if (_authority_registration_token is not _REGISTERED_WORLD_CONSTRUCTION_V2
+                    or type(inbound_authority) is not InboundAuthorityRuntimeV2):
+                raise TypeError("registered authority construction is private")
+            self._authority_owner_mode_v2 = "REGISTRATION_PENDING"
+        else:
+            self._authority_owner_mode_v2 = (
+                "SINK_NULL" if inbound_authority is None else "UNREGISTERED_STRUCTURAL")
+        self._authority_owner_registration_v2 = None
+        self._authority_successor_publish_capability_v2 = None
+        self._authority_read_port_v2 = None
         self._next_authority_delta = None
         self._next_lifecycle_observation = None
         self._invalidate_authority_next = False
         self._update_event = asyncio.Event()
         self._snapshot = self._make_snapshot()
         self._abort_bundle = (
-            None if self._inbound_authority is None else
+            None if self._authority_owner_mode_v2 != "UNREGISTERED_STRUCTURAL" else
             self._prepare_abort_bundle(self._snapshot, self._inbound_authority)
         )
 
     async def run(self) -> WorldStateExit:
         """Consume the exclusive source iterator until it closes or fails."""
 
+        self._check_authority_mode_v2()
         if self._run_started:
             raise RuntimeError("WorldState.run() may only be called once")
         self._run_started = True
@@ -193,8 +213,18 @@ class WorldState:
     def inbound_authority_snapshot(self) -> InboundAuthoritySnapshotV2 | None:
         return None if self._inbound_authority is None else self._inbound_authority.snapshot()
 
+    def _create_authority_read_port_v2(self, receipt: object):
+        if self._inbound_authority is None:
+            raise TypeError("exact authority-enabled World source is required")
+        from ai_client.discussion.authority_capture_bridge_v2 import (
+            _create_world_authority_read_port_v2,
+        )
+        return _create_world_authority_read_port_v2(self, receipt)
+
     def current_actions(self) -> CurrentActionsView:
-        network = self._source.snapshot()
+        return self._current_actions_for_snapshot(self._source.snapshot())
+
+    def _current_actions_for_snapshot(self, network: ClientSnapshot) -> CurrentActionsView:
         caught_up = self._reducer.last_applied_seq == network.last_seq
         actions: tuple[object, ...] = ()
         if (
@@ -485,30 +515,58 @@ class WorldState:
             self._freshness = Freshness.FAILED
 
     def _commit(self) -> None:
+        self._check_authority_mode_v2()
         next_version = self._version + 1
+        prior_world = self._snapshot
+        prior_abort = self._abort_bundle
         prepared_authority = None
         prepared_abort_bundle = None
+        commit_ticket = None
         try:
             prepared_world = self._make_snapshot(version=next_version)
             prepared_update_event = asyncio.Event()
             if self._inbound_authority is not None:
-                prepared_authority = self._inbound_authority.prepare_commit(
-                    next_version, self._reducer.last_applied_seq,
-                    self._next_authority_delta, self._next_lifecycle_observation,
-                    self._invalidate_authority_next,
-                    frozenset(record.order for record in self._reducer.memory.query()
-                              if isinstance(record, AbilityResultRecord)))
+                if self._authority_owner_mode_v2 == "REGISTERED_OWNER":
+                    prepared_authority, commit_ticket = self._prepare_registered_commit_v2(prepared_world)
+                else:
+                    prepared_authority = self._prepare_authority_copy_v2(prepared_world)
                 authority_snapshot = prepared_authority.snapshot()
                 if (authority_snapshot.world_version != prepared_world.version
                         or authority_snapshot.last_committed_server_seq != prepared_world.last_applied_seq):
                     raise ValueError("world and authority snapshots diverged")
                 prepared_abort_bundle = self._prepare_abort_bundle(
-                    prepared_world, prepared_authority)
+                    prepared_world, prepared_authority, parent_ticket=commit_ticket)
+                if commit_ticket is not None:
+                    self._validate_registered_transition_v2(prepared_world)
+                    self._validate_saved_abort_v2(prior_abort)
+                    self._validate_successor_ticket_v2(
+                        commit_ticket, self._inbound_authority, prepared_world, "COMMIT", "PREPARED")
+                    self._validate_successor_ticket_v2(
+                        prepared_abort_bundle.successor_ticket, prepared_authority,
+                        prepared_abort_bundle.failed_world, "ABORT", "PREPARED", parent=commit_ticket)
+                    if (self._snapshot is not prior_world or self._abort_bundle is not prior_abort
+                            or prepared_abort_bundle.expected_current_world_object is not prepared_world
+                            or prepared_abort_bundle.expected_current_authority_object is not prepared_authority):
+                        raise ValueError("authority prepare changed its predecessor")
         except Exception:
+            if prepared_abort_bundle is not None and prepared_abort_bundle.successor_ticket is not None:
+                _release_successor_ticket_v2(prepared_abort_bundle.successor_ticket, "RETIRED")
+            if commit_ticket is not None:
+                _release_successor_ticket_v2(commit_ticket, "RETIRED")
             self._abort_inbound_authority()
             raise
         if prepared_authority is not None:
             self._inbound_authority = prepared_authority
+            if commit_ticket is not None:
+                registration = commit_ticket.exact_registration
+                registration.exact_authority_runtime = prepared_authority
+                prepared_authority._published_successor_lineage_v2 = commit_ticket.lineage_identity
+                child = prepared_abort_bundle.successor_ticket
+                child.exact_parent_commit_ticket_or_null = None
+                child.parent_commit_lineage_identity_or_null = commit_ticket.lineage_identity
+                child.state = "ARMED_ABORT"
+                _release_successor_ticket_v2(commit_ticket, "PUBLISHED")
+                _release_successor_ticket_v2(prior_abort.successor_ticket, "RETIRED")
             self._abort_bundle = prepared_abort_bundle
         self._version = next_version
         self._snapshot = prepared_world
@@ -519,13 +577,22 @@ class WorldState:
         previous.set()
 
     def _abort_inbound_authority(self) -> None:
+        self._check_authority_mode_v2()
         if self._inbound_authority is None:
             return
         bundle = self._abort_bundle
         if bundle is None:
             raise RuntimeError("inbound authority abort bundle was already consumed")
+        ticket = bundle.successor_ticket
+        if self._authority_owner_mode_v2 == "REGISTERED_OWNER":
+            self._validate_registered_transition_v2(bundle.failed_world)
+            self._validate_saved_abort_v2(bundle)
         previous = self._update_event
         self._inbound_authority = bundle.invalid_authority
+        if ticket is not None:
+            ticket.exact_registration.exact_authority_runtime = bundle.invalid_authority
+            bundle.invalid_authority._published_successor_lineage_v2 = ticket.lineage_identity
+            _release_successor_ticket_v2(ticket, "PUBLISHED")
         self._freshness = Freshness.FAILED
         self._version = bundle.failed_world.version
         self._snapshot = bundle.failed_world
@@ -539,7 +606,22 @@ class WorldState:
         self,
         current_world: WorldSnapshot,
         current_authority: InboundAuthorityRuntimeV2,
+        *, parent_ticket: AuthoritySuccessorTicketV2 | None = None,
+        initial_registration: object | None = None,
     ) -> _AbortPublishBundleV2:
+        if (initial_registration is not None
+                and self._authority_owner_mode_v2 != "REGISTRATION_PENDING"):
+            raise ValueError("initial registration is only valid during construction")
+        registration = initial_registration
+        if self._authority_owner_mode_v2 == "REGISTERED_OWNER":
+            registration = self._validate_registered_transition_v2(current_world)
+            if parent_ticket is not None:
+                self._validate_successor_ticket_v2(
+                    parent_ticket, self._inbound_authority, current_world, "COMMIT", "PREPARED")
+                if parent_ticket.exact_successor_authority is not current_authority:
+                    raise ValueError("abort parent successor mismatch")
+            elif current_authority is not self._inbound_authority or current_world is not self._snapshot:
+                raise ValueError("abort predecessor is not current")
         invalid_authority = current_authority.prepare_invalid_empty(
             current_world.version + 1, current_world.last_applied_seq)
         failed_world = replace(
@@ -550,13 +632,174 @@ class WorldState:
         if (invalid_snapshot.world_version != failed_world.version
                 or invalid_snapshot.last_committed_server_seq != failed_world.last_applied_seq):
             raise ValueError("abort world and authority snapshots diverged")
-        return _AbortPublishBundleV2(
-            expected_current_world_object=current_world,
-            expected_current_authority_object=current_authority,
-            failed_world=failed_world,
-            invalid_authority=invalid_authority,
-            successor_update_event=successor,
+        ticket = None
+        try:
+            if registration is not None:
+                invalid_authority._authority_owner_registration_v2 = registration
+                ticket = AuthoritySuccessorTicketV2(
+                    _SUCCESSOR_TICKET_ISSUER, registration, self, current_authority,
+                    invalid_authority, "ABORT", True, failed_world.version,
+                    failed_world.last_applied_seq, parent_ticket)
+                invalid_authority._prepared_successor_ticket_v2 = ticket
+                self._validate_successor_ticket_v2(
+                    ticket, current_authority, failed_world, "ABORT", ticket.state,
+                    parent=parent_ticket, registration=registration,
+                    initial=initial_registration is not None)
+            return _AbortPublishBundleV2(
+                expected_current_world_object=current_world,
+                expected_current_authority_object=current_authority,
+                failed_world=failed_world,
+                invalid_authority=invalid_authority,
+                successor_update_event=successor,
+                successor_ticket=ticket,
+            )
+        except BaseException:
+            if ticket is not None:
+                _release_successor_ticket_v2(ticket, "RETIRED")
+            raise
+
+    def _prepare_initial_registered_abort_v2(self, registration):
+        from ai_client.discussion.authority_capture_bridge_v2 import AuthorityOwnerRegistrationV2
+        if (type(registration) is not AuthorityOwnerRegistrationV2
+                or self._authority_owner_mode_v2 != "REGISTRATION_PENDING"
+                or self._run_started or self._authority_owner_registration_v2 is not None
+                or self._abort_bundle is not None
+                or registration.exact_world is not self
+                or registration.exact_runtime_source is not self._source
+                or registration.exact_authority_runtime is not self._inbound_authority):
+            raise ValueError("initial registered authority mismatch")
+        return self._prepare_abort_bundle(
+            self._snapshot, self._inbound_authority, initial_registration=registration)
+
+    def _check_authority_mode_v2(self):
+        mode = self._authority_owner_mode_v2
+        if mode == "REGISTRATION_PENDING":
+            raise RuntimeError("authority registration is pending")
+        if mode == "REGISTERED_OWNER":
+            if (self._authority_owner_registration_v2 is None
+                    or type(self._inbound_authority) is not InboundAuthorityRuntimeV2):
+                raise ValueError("registered authority is missing")
+        elif mode in {"SINK_NULL", "UNREGISTERED_STRUCTURAL"}:
+            if (self._authority_owner_registration_v2 is not None
+                    or getattr(self._source, "_authority_owner_registration_v2", None) is not None
+                    or (mode == "SINK_NULL") != (self._inbound_authority is None)):
+                raise ValueError("authority mode cannot be downgraded")
+        else:
+            raise ValueError("unknown authority owner mode")
+
+    def _validate_saved_abort_v2(self, bundle):
+        if (type(bundle) is not _AbortPublishBundleV2
+                or bundle.expected_current_world_object is not self._snapshot
+                or bundle.expected_current_authority_object is not self._inbound_authority
+                or bundle.failed_world.freshness is not Freshness.FAILED
+                or bundle.failed_world.version != self._snapshot.version + 1
+                or bundle.failed_world.last_applied_seq != self._snapshot.last_applied_seq):
+            raise ValueError("abort bundle predecessor mismatch")
+        self._validate_successor_ticket_v2(
+            bundle.successor_ticket, self._inbound_authority, bundle.failed_world,
+            "ABORT", "ARMED_ABORT")
+        if bundle.successor_ticket.exact_successor_authority is not bundle.invalid_authority:
+            raise ValueError("abort bundle successor mismatch")
+
+    def _validate_registered_transition_v2(self, target_world):
+        from ai_client.discussion.authority_capture_bridge_v2 import (
+            _validate_owner_registration_structure_v2,
         )
+        registration = self._authority_owner_registration_v2
+        _validate_owner_registration_structure_v2(registration, allow_retired=True)
+        if (registration.exact_world is not self
+                or (registration.lifecycle == "RETIRED"
+                    and target_world.freshness not in {Freshness.ENDED, Freshness.FAILED})):
+            raise ValueError("retired owner only permits terminal transfer")
+        return registration
+
+    def _prepare_authority_copy_v2(self, target_world):
+        return self._inbound_authority.prepare_commit(
+            target_world.version, target_world.last_applied_seq,
+            self._next_authority_delta, self._next_lifecycle_observation,
+            self._invalidate_authority_next,
+            frozenset(record.order for record in self._reducer.memory.query()
+                      if isinstance(record, AbilityResultRecord)))
+
+    def _prepare_registered_commit_v2(self, target_world):
+        registration = self._validate_registered_transition_v2(target_world)
+        predecessor = self._inbound_authority
+        if predecessor._prepared_successor_ticket_v2 is not None:
+            raise ValueError("current authority is an unpublished candidate")
+        successor = self._prepare_authority_copy_v2(target_world)
+        ticket = None
+        try:
+            terminal = target_world.freshness in {Freshness.ENDED, Freshness.FAILED}
+            ticket = AuthoritySuccessorTicketV2(
+                _SUCCESSOR_TICKET_ISSUER, registration, self, predecessor, successor,
+                "COMMIT", terminal, target_world.version, target_world.last_applied_seq)
+            successor._prepared_successor_ticket_v2 = ticket
+            self._validate_successor_ticket_v2(
+                ticket, predecessor, target_world, "COMMIT", "PREPARED")
+            return successor, ticket
+        except BaseException:
+            if ticket is not None:
+                _release_successor_ticket_v2(ticket, "RETIRED")
+            raise
+
+    def _validate_successor_ticket_v2(
+        self, ticket, predecessor, target_world, kind, state, *, parent=None,
+        registration=None, initial=False,
+    ):
+        registration = (self._authority_owner_registration_v2
+                        if registration is None else registration)
+        if (type(ticket) is not AuthoritySuccessorTicketV2 or ticket.state != state
+                or ticket.transition_kind != kind
+                or ticket.exact_registration is not registration or ticket.exact_world is not self
+                or ticket.issuer_capability is not registration.authority_successor_publish_capability
+                or (not initial and ticket.issuer_capability
+                    is not self._authority_successor_publish_capability_v2)
+                or ticket.exact_predecessor_authority is not predecessor
+                or type(ticket.expected_world_version) is not int
+                or type(ticket.expected_last_applied_seq) is not int
+                or ticket.expected_world_version != target_world.version
+                or ticket.expected_last_applied_seq != target_world.last_applied_seq):
+            raise ValueError("successor ticket owner or pair mismatch")
+        successor = ticket.exact_successor_authority
+        if (type(successor) is not InboundAuthorityRuntimeV2 or successor is predecessor
+                or successor._composition_capability is not registration.exact_claim_capability
+                or successor._authority_owner_registration_v2 is not registration
+                or successor._prepared_successor_ticket_v2 is not ticket
+                or successor.snapshot().world_version != target_world.version
+                or successor.snapshot().last_committed_server_seq != target_world.last_applied_seq):
+            raise ValueError("successor authority mismatch")
+        terminal = kind == "ABORT" or target_world.freshness in {Freshness.ENDED, Freshness.FAILED}
+        if ticket.terminal_only is not terminal:
+            raise ValueError("successor terminal mode mismatch")
+        if terminal and (successor.snapshot().readiness_status != "INVALID"
+                         or successor._actions or successor._abilities or successor._pending is not None
+                         or successor._private_sources):
+            raise ValueError("terminal successor retains positive authority")
+        if kind == "COMMIT":
+            if (state != "PREPARED" or ticket.exact_parent_commit_ticket_or_null is not None
+                    or ticket.parent_commit_lineage_identity_or_null is not None
+                    or predecessor is not self._inbound_authority
+                    or predecessor is not registration.exact_authority_runtime):
+                raise ValueError("commit predecessor or lineage mismatch")
+        elif state == "PREPARED":
+            if (type(parent) is not AuthoritySuccessorTicketV2
+                    or parent.state != "PREPARED" or parent.transition_kind != "COMMIT"
+                    or parent.exact_registration is not registration or parent.exact_world is not self
+                    or parent.exact_successor_authority is not predecessor
+                    or parent.expected_world_version + 1 != target_world.version
+                    or parent.expected_last_applied_seq != target_world.last_applied_seq
+                    or ticket.exact_parent_commit_ticket_or_null is not parent
+                    or ticket.parent_commit_lineage_identity_or_null is not None):
+                raise ValueError("abort parent lineage mismatch")
+        elif state == "ARMED_ABORT":
+            if (ticket.exact_parent_commit_ticket_or_null is not None
+                    or ticket.parent_commit_lineage_identity_or_null
+                        != predecessor._published_successor_lineage_v2
+                    or predecessor is not self._inbound_authority
+                    or predecessor is not registration.exact_authority_runtime):
+                raise ValueError("armed abort lineage mismatch")
+        else:
+            raise ValueError("invalid successor ticket state")
 
     def _set_freshness(self, freshness: Freshness) -> None:
         if self._freshness is freshness:

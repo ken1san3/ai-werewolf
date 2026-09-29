@@ -1173,6 +1173,116 @@ def _deep_freeze(value: object) -> object:
     return value
 
 
+_BOOTSTRAP_RECEIPT_TOKEN = object()
+_EMPTY_AUTHORITY_PROOF_REFS = MappingProxyType({})
+
+
+class _BootstrapValidationReceiptV2:
+    __slots__ = (
+        "_token", "_pending", "_manifest_material", "_manifest_bytes",
+        "_manifest_sha256", "_context", "_context_sha256",
+    )
+
+    def __init__(self, token: object, pending: object) -> None:
+        if token is not _BOOTSTRAP_RECEIPT_TOKEN:
+            raise TypeError("bootstrap validation receipt is opaque")
+        object.__setattr__(self, "_token", token)
+        object.__setattr__(self, "_pending", pending)
+        object.__setattr__(self, "_manifest_material", pending._manifest_material)
+        object.__setattr__(self, "_manifest_bytes", pending._manifest_bytes)
+        object.__setattr__(self, "_manifest_sha256", pending.manifest_sha256)
+        object.__setattr__(self, "_context", pending.context)
+        object.__setattr__(self, "_context_sha256", pending.context_sha256)
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("bootstrap validation receipt is immutable")
+
+
+class AuthorityPendingProofV2:
+    __slots__ = ("_state", "_secret_refs", "_proof_identity", "_issuer_capability")
+    def __init__(self, token: object, refs: Mapping[str, object]) -> None:
+        if token is not _BOOTSTRAP_RECEIPT_TOKEN:
+            raise TypeError("authority pending proof is opaque")
+        self._state = "ACTIVE"
+        self._secret_refs = MappingProxyType(dict(refs))
+        self._proof_identity = object()
+        self._issuer_capability = object()
+    def __repr__(self) -> str: return "AuthorityPendingProofV2(<opaque>)"
+
+
+def _retire_pending_proof_v2(proof: AuthorityPendingProofV2) -> None:
+    proof._state = "RETIRED"
+    proof._secret_refs = _EMPTY_AUTHORITY_PROOF_REFS
+
+
+def _revalidate_authority_pending_v2(
+    pending: "PendingDiscussionContext",
+    snapshot: WorldSnapshot,
+    registration: object,
+) -> AuthorityPendingProofV2:
+    from .authority_capture_bridge_v2 import (
+        AuthorityOwnerRegistrationV2, _validate_owner_registration_v2,
+    )
+    if type(pending) is not PendingDiscussionContext:
+        raise DiscussionContextError("pending discussion context is required")
+    receipt = pending._bootstrap_validation_receipt
+    if (type(receipt) is not _BootstrapValidationReceiptV2
+            or receipt._pending is not pending
+            or receipt._manifest_material is not pending._manifest_material
+            or receipt._manifest_bytes is not pending._manifest_bytes
+            or receipt._manifest_sha256 != pending.manifest_sha256
+            or receipt._context is not pending.context
+            or receipt._context_sha256 != pending.context_sha256):
+        raise DiscussionContextError("bootstrap validation route is not proven")
+    material = pending._manifest_material
+    retained = pending._manifest_bytes
+    if material is None or retained is None:
+        raise DiscussionContextError("manifest material has already been disposed")
+    canonical = canonical_json_bytes(material)
+    if canonical != retained or sha256(canonical).hexdigest() != pending.manifest_sha256:
+        raise DiscussionContextError("retained manifest material mismatch")
+    if pending._active_authority_proof_v2 is not None:
+        raise DiscussionContextError("authority pending proof already exists")
+    if type(registration) is not AuthorityOwnerRegistrationV2 or registration.lifecycle != "ACTIVE":
+        raise DiscussionContextError("authority owner registration is invalid")
+    _validate_owner_registration_v2(registration)
+    if registration.exact_runtime_source._pending is not pending:
+        raise DiscussionContextError("pending context is not owned by the runtime source")
+    world = registration.exact_world
+    network = registration.exact_network_client.snapshot()
+    authority_runtime = world._inbound_authority
+    authority = world.inbound_authority_snapshot()
+    if (world.snapshot() is not snapshot or authority is not world.inbound_authority_snapshot()
+            or authority_runtime._authority_owner_registration_v2 is not registration
+            or authority_runtime._composition_capability is not registration.exact_claim_capability
+            or network.player_id is None or authority.readiness_status not in {"PENDING_SYNC", "READY"}
+            or authority.game_id != registration.exact_network_client.config.game_id
+            or authority.player_id != network.player_id
+            or authority.connection_generation != network.connection_generation):
+        raise DiscussionContextError("authority owner snapshot mismatch")
+    if (pending.context.game_id != registration.exact_network_client.config.game_id
+            or pending.context.player_id != network.player_id):
+        raise DiscussionContextError("runtime game/player identity does not match context")
+    if pending.context.content_manifest_sha256 != pending.manifest_sha256:
+        raise DiscussionContextError("context manifest hash mismatch")
+    if canonical_sha256(pending.context) != pending.context_sha256:
+        raise DiscussionContextError("context_sha256 mismatch")
+    _validate_context_against_manifest(pending.context, material)
+    validate_context_snapshot(pending.context, snapshot)
+    proof = AuthorityPendingProofV2(_BOOTSTRAP_RECEIPT_TOKEN, {
+        "pending": pending, "bootstrap_receipt": receipt,
+        "manifest_material": material, "manifest_bytes": retained,
+        "manifest_sha256": pending.manifest_sha256, "context": pending.context,
+        "context_sha256": pending.context_sha256, "world_snapshot": snapshot,
+        "authority_snapshot": authority, "registration": registration,
+        "authenticated_player_id": network.player_id,
+        "connection_generation": network.connection_generation,
+        "readiness_status": authority.readiness_status,
+    })
+    pending._active_authority_proof_v2 = proof
+    return proof
+
+
 class PendingDiscussionContext:
     """Validated, single-use bootstrap material awaiting the first CURRENT sync."""
 
@@ -1182,6 +1292,8 @@ class PendingDiscussionContext:
         "manifest_sha256",
         "context_sha256",
         "context",
+        "_bootstrap_validation_receipt",
+        "_active_authority_proof_v2",
     )
 
     def __init__(
@@ -1192,12 +1304,15 @@ class PendingDiscussionContext:
         manifest_sha256: str,
         context_sha256: str,
         context: AuthorizedDiscussionContext,
+        _bootstrap_validation_receipt: object | None = None,
     ) -> None:
         self._manifest_material: Mapping[str, Any] | None = manifest_material
         self._manifest_bytes: bytes | None = manifest_bytes
         self.manifest_sha256 = manifest_sha256
         self.context_sha256 = context_sha256
         self.context = context
+        self._bootstrap_validation_receipt = _bootstrap_validation_receipt
+        self._active_authority_proof_v2 = None
 
     def __repr__(self) -> str:
         state = "pending" if self._manifest_material is not None else "disposed"
@@ -1216,6 +1331,14 @@ class PendingDiscussionContext:
         return self._manifest_bytes
 
     def discard_manifest(self) -> None:
+        proof = self._active_authority_proof_v2
+        if isinstance(proof, AuthorityPendingProofV2):
+            _retire_pending_proof_v2(proof)
+            self._active_authority_proof_v2 = None
+        receipt = self._bootstrap_validation_receipt
+        if isinstance(receipt, _BootstrapValidationReceiptV2):
+            object.__setattr__(receipt, "_manifest_material", None)
+            object.__setattr__(receipt, "_manifest_bytes", None)
         self._manifest_material = None
         self._manifest_bytes = None
 
@@ -1275,13 +1398,16 @@ def validate_discussion_bootstrap(
     _validate_context_against_manifest(context, manifest)
     frozen_manifest = _deep_freeze(_canonical_value(manifest))
     assert isinstance(frozen_manifest, Mapping)
-    return PendingDiscussionContext(
+    pending = PendingDiscussionContext(
         manifest_material=frozen_manifest,
         manifest_bytes=manifest_bytes,
         manifest_sha256=manifest_hash,
         context_sha256=context_hash,
         context=context,
     )
+    pending._bootstrap_validation_receipt = _BootstrapValidationReceiptV2(
+        _BOOTSTRAP_RECEIPT_TOKEN, pending)
+    return pending
 
 
 def validate_context_snapshot(

@@ -33,6 +33,7 @@ from .discussion import (
     canonical_sha256,
     validate_bound_context_snapshot,
 )
+from .discussion.context import _revalidate_authority_pending_v2
 from .llm import (
     AdmissionCredentials,
     AiAuditWriterConfig,
@@ -102,6 +103,8 @@ class _Phase6NetworkEventSource:
         self._retired = False
         self._last_observed_version = 0
         self._bound: BoundDiscussionContext | None = None
+        self._context_owner_receipt_v2 = None
+        self._authority_owner_registration_v2 = None
         loop = asyncio.get_running_loop()
         self._bound_outcome: asyncio.Future[BoundDiscussionContext] = (
             loop.create_future()
@@ -128,6 +131,10 @@ class _Phase6NetworkEventSource:
     @property
     def bound_outcome(self) -> asyncio.Future[BoundDiscussionContext]:
         return self._bound_outcome
+
+    @property
+    def context_owner_receipt_v2(self):
+        return self._context_owner_receipt_v2
 
     async def wait_context_outcome(self) -> None:
         await self._context_outcome
@@ -156,6 +163,9 @@ class _Phase6NetworkEventSource:
         # Revoke snapshot inspection before Pending is disposed. World may still
         # resume its existing iterator while earlier owners are being closed.
         self._retired = True
+        if self._authority_owner_registration_v2 is not None:
+            from .discussion.authority_capture_bridge_v2 import _retire_authority_registration_v2
+            _retire_authority_registration_v2(self)
         self._pending = None
         for outcome in (self._bound_outcome, self._context_outcome):
             if not outcome.done():
@@ -217,8 +227,20 @@ class _Phase6NetworkEventSource:
                 self._bound_outcome.set_exception(error)
                 raise error
             try:
-                bound = pending.bind(snapshot)
+                if self._authority_capability is not None:
+                    proof = _revalidate_authority_pending_v2(
+                        pending, snapshot, self._authority_owner_registration_v2)
+                    from .discussion.authority_capture_bridge_v2 import (
+                        _consume_authority_pending_proof_v2,
+                    )
+                    bound, self._context_owner_receipt_v2 = (
+                        _consume_authority_pending_proof_v2(proof, self, world))
+                else:
+                    bound = pending.bind(snapshot)
             except DiscussionContextError as error:
+                self._bound_outcome.set_exception(error)
+                raise
+            except BaseException as error:
                 self._bound_outcome.set_exception(error)
                 raise
             self._pending = None
@@ -255,9 +277,35 @@ def _create_phase6_v2_inbound_world(
         network, pending, enable_inbound_authority_v2=True
     )
     authority = _create_inbound_authority_runtime(source._authority_capability)
-    world = WorldState(source, config=config, inbound_authority=authority)
+    from .world.service import _REGISTERED_WORLD_CONSTRUCTION_V2
+    world = WorldState(source, config=config, inbound_authority=authority,
+                       _authority_registration_token=_REGISTERED_WORLD_CONSTRUCTION_V2)
     source.attach_world(world)
+    from .discussion.authority_capture_bridge_v2 import _register_authority_owners_v2
+    _register_authority_owners_v2(network, source._authority_capability, source, authority, world)
     return source, world
+
+
+def _create_phase6_v2_authority_capture_bridge(
+    source: _Phase6NetworkEventSource,
+    world: WorldState,
+    store: DiscussionStateStore,
+):
+    """Compose the private UNLEASED bridge from exact already-bound owners."""
+    receipt = source.context_owner_receipt_v2
+    if receipt is None:
+        raise DiscussionContextError("validated authority context owner is required")
+    from .discussion.authority_capture_bridge_v2 import (
+        _attach_discussion_store_v2, _create_authority_capture_bridge_v2,
+    )
+    registration = source._authority_owner_registration_v2
+    if registration.exact_discussion_store is None:
+        _attach_discussion_store_v2(registration, receipt, store)
+    return _create_authority_capture_bridge_v2(
+        world._create_authority_read_port_v2(receipt),
+        store._create_capture_read_port_v2(receipt),
+        receipt,
+    )
 
 
 class Phase5RuntimeLifecycle(str, Enum):
@@ -775,6 +823,13 @@ class Phase5ClientRuntime:
         self.discussion_context = bound
 
         store = DiscussionStateStore(bound)
+        if source.context_owner_receipt_v2 is not None:
+            from .discussion.authority_capture_bridge_v2 import _attach_discussion_store_v2
+            _attach_discussion_store_v2(
+                source._authority_owner_registration_v2,
+                source.context_owner_receipt_v2,
+                store,
+            )
         self.discussion_store = store
         brain_arguments: dict[str, object] = {
             "backend": self.backend,

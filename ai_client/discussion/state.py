@@ -503,6 +503,8 @@ class DiscussionStateStore:
         self._current_player_ids: frozenset[str] = frozenset()
         self._closed = False
         self._owner_token: tuple[int, int | None] | None = None
+        self._authority_owner_registration_v2 = None
+        self._capture_read_port_v2 = None
         self._reset_reason = (
             DiscussionResetReason.PROCESS_RESTART if process_restart else None
         )
@@ -549,6 +551,10 @@ class DiscussionStateStore:
     @property
     def is_closed(self) -> bool:
         return self._closed
+
+    def _create_capture_read_port_v2(self, receipt: object):
+        from .authority_capture_bridge_v2 import _create_capture_read_port_v2
+        return _create_capture_read_port_v2(self, receipt)
 
     def _check_owner(self) -> None:
         try:

@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 from typing import Literal, Mapping
+from uuid import uuid4
 
 from ai_client.network.inbound_authority_v2 import (
     NetworkCommittedInboundV2, NetworkLifecycleObservationV2, PrivateSourceSliceV2,
@@ -18,6 +19,55 @@ from .model import AbilityResultRecord, PhaseTransitionRecord
 
 
 _TOKEN = object()
+_SUCCESSOR_TICKET_ISSUER = object()
+
+
+class AuthoritySuccessorTicketV2:
+    """Private, one-shot publish proof; consumed tickets retain no owner graph."""
+
+    __slots__ = (
+        "exact_registration", "exact_world", "exact_predecessor_authority",
+        "exact_successor_authority", "transition_kind", "terminal_only",
+        "expected_world_version", "expected_last_applied_seq",
+        "exact_parent_commit_ticket_or_null", "parent_commit_lineage_identity_or_null",
+        "lineage_identity", "state", "issuer_capability",
+    )
+
+    def __init__(self, token, registration, world, predecessor, successor,
+                 kind, terminal_only, version, seq, parent=None):
+        if token is not _SUCCESSOR_TICKET_ISSUER:
+            raise TypeError("authority successor ticket is private")
+        self.exact_registration = registration
+        self.exact_world = world
+        self.exact_predecessor_authority = predecessor
+        self.exact_successor_authority = successor
+        self.transition_kind = kind
+        self.terminal_only = terminal_only
+        self.expected_world_version = version
+        self.expected_last_applied_seq = seq
+        self.exact_parent_commit_ticket_or_null = parent
+        self.parent_commit_lineage_identity_or_null = None
+        self.lineage_identity = uuid4().hex
+        self.state = "ARMED_ABORT" if kind == "ABORT" and parent is None else "PREPARED"
+        self.issuer_capability = registration.authority_successor_publish_capability
+
+    def __repr__(self):
+        return "AuthoritySuccessorTicketV2(<opaque>)"
+
+
+def _release_successor_ticket_v2(ticket, state):
+    """Non-allocating terminal transition, after all fallible checks."""
+    successor = ticket.exact_successor_authority
+    if successor is not None and successor._prepared_successor_ticket_v2 is ticket:
+        successor._prepared_successor_ticket_v2 = None
+    ticket.state = state
+    ticket.exact_registration = None
+    ticket.exact_world = None
+    ticket.exact_predecessor_authority = None
+    ticket.exact_successor_authority = None
+    ticket.exact_parent_commit_ticket_or_null = None
+    ticket.parent_commit_lineage_identity_or_null = None
+    ticket.issuer_capability = None
 
 
 def _bytes(value: object) -> bytes:
@@ -103,6 +153,9 @@ class InboundAuthorityRuntimeV2:
         self._actions = (); self._abilities = (); self._observation = None
         self._private_sources: dict[tuple[str, str], PrivateSourceSliceV2] = {}
         self._snapshot = self._make_snapshot(0, 0)
+        self._authority_owner_registration_v2 = None
+        self._prepared_successor_ticket_v2 = None
+        self._published_successor_lineage_v2 = None
 
     def begin(self, observation: NetworkCommittedInboundV2, event: object,
               world_version: int, last_seq: int, phase: object) -> None:
@@ -140,6 +193,8 @@ class InboundAuthorityRuntimeV2:
                invalidate: bool = False,
                retained_ability_orders: frozenset[int] | None = None) -> "InboundAuthorityRuntimeV2":
         prepared = copy.copy(self)
+        prepared._prepared_successor_ticket_v2 = None
+        prepared._published_successor_lineage_v2 = None
         prepared._private_sources = dict(self._private_sources)
         prepared._apply_commit(world_version, last_seq, delta, lifecycle, invalidate,
                                retained_ability_orders)
@@ -147,6 +202,8 @@ class InboundAuthorityRuntimeV2:
 
     def prepare_invalid_empty(self, world_version: int, last_seq: int) -> "InboundAuthorityRuntimeV2":
         prepared = copy.copy(self)
+        prepared._prepared_successor_ticket_v2 = None
+        prepared._published_successor_lineage_v2 = None
         prepared._private_sources = {}
         prepared._invalidate(world_version, last_seq)
         return prepared
@@ -319,7 +376,8 @@ class InboundAuthorityRuntimeV2:
                 reducer_phase_witness_sha256=witness,
                 state_sync_history_index=actual_index,
                 preceding_phase_entry_index=phase_index,
-                world_version_before=version, last_applied_sequence_before=last_seq))
+                world_version_before=(version if observation.event_object.type == "game.event" else None),
+                last_applied_sequence_before=(last_seq if observation.event_object.type == "game.event" else None)))
         return tuple(result)
 
     def _prune_private_sources(self) -> None:

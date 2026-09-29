@@ -99,10 +99,11 @@ class NetworkLifecycleObservationV2:
 
 
 class InboundAuthorityClaimCapabilityV2:
-    __slots__ = ("_client",)
+    __slots__ = ("_client", "_authority_owner_registration_v2")
     def __init__(self, token: object, client: object) -> None:
         if token is not _ISSUER: raise TypeError("claim capability is opaque")
         self._client = client
+        self._authority_owner_registration_v2 = None
 
 
 def _issue_capability(client: object) -> InboundAuthorityClaimCapabilityV2:
