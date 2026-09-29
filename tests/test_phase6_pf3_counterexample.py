@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from types import SimpleNamespace
 import os
@@ -12,6 +13,12 @@ import pytest
 from scripts import phase6_pf3_counterexample as tool
 
 SCHEMA = tool.ROOT / "Docs/ai/design/PHASE6_GENERATION_CONTRACT_V2_SCHEMAS.json"
+
+
+def test_static_allowlist_contains_complete_sha256_digests():
+    # T528 stopped before native execution because one allowlist digest lost a nibble.
+    assert len(tool.HASHES) == 11
+    assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in tool.HASHES.values())
 
 
 @pytest.fixture

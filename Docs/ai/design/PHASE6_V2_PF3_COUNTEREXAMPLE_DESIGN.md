@@ -43,7 +43,7 @@ public reportへ出さない。
 | `llama-common.dll` | `32079d938fe545c1d9801b0935cda8468c105cba27795f9ba0ffeddafd2d9ac9` | static native identity |
 | `llama.dll` | `2b84a13dc35361309a4bb9745853b0950c1e8b10a7c2d5e4c7e419b0ab9819a6` | static native identity |
 | `ggml.dll` | `097c276b838facce28c3eb6fe3b9657c7ba1e0375e7578f5cb1d2a38da704228` | static native identity |
-| `ggml-base.dll` | `091def1bb64b6e8b50118d7e0219dbe79a220998ac3efc5de1a260b6d0cbefc` | static native identity |
+| `ggml-base.dll` | `091def1bb64cb6e8b50118d7e0219dbe79a220998ac3efc5de1a260b6d0cbefc` | static native identity |
 | `libomp.dll` | `a12116ba72d1d6820407cf30be23da04ce79d6bb8a71a5ee71759c5a1faa6f1c` | static native identity |
 | llama.cpp config | `43e509956d96492cace8393bdc3fd598ab2418315ccdfd82e144b876241f3bab` | build設定 |
 | saved converter source | `4d58b73438e97ac4e2d11dbb0309702d6899088d3c44a75a2dcb9c57697bb288` | provenanceのみ |
