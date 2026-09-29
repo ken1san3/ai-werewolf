@@ -93,7 +93,8 @@ async def test_actual_composition_is_idle_read_only_and_one_shot(graph):
     assert c.exact_clock_callable is g.arbiter._clock is g.controller._clock
     assert before == (g.store.snapshot, g.store._current_capture, g.world.snapshot())
     assert not hasattr(port, "acquire_and_prepare_initial_v2")
-    assert not hasattr(g.store, "_state_generation_lease_v2")
+    assert g.store._state_generation_lease_v2 is None
+    assert g.store._preparing_lease_owner_receipt_v2 is None
     with pytest.raises(OfferCompositionError, match="ALREADY_BOUND"):
         bind(g)
     assert not g.backend.calls and not g.brain.calls

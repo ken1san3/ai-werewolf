@@ -582,6 +582,13 @@ class BrokerAdmissionSession:
                 lane = self._register_control_lane(invocation_id)
             if lane.lease is not None or lane.disposition is not None:
                 raise _ProtocolViolation("duplicate or terminal offer")
+            if self._offer_preparing_mode_v2:
+                from ai_client.discussion.offer_composition_v2 import (
+                    _publish_offer_from_frame_v2,
+                )
+                if _publish_offer_from_frame_v2(self, frame, lane, future):
+                    self._terminal_controls.clear()
+                    return
             lease = _ClientGenerationLease(self, invocation_id, lane)
             lane.lease = lease
             self._terminal_controls.clear()

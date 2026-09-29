@@ -219,6 +219,125 @@ class BrainInvocationArbiter:
             return await self._invoke_direct(pending)
         return await self._invoke_admitted(pending)
 
+    async def _run_offer_preparing_offline_v2(
+        self, pending: _PendingInvocation,
+    ) -> BrainDispatchResult:
+        """Private T525 driver; normal invoke and feature paths never call it."""
+        from ai_client.discussion.offer_composition_v2 import (
+            OfferCompositionError,
+            _issue_initial_ticket_owned_v2,
+            _owned_acquire_initial_offer_v2,
+            _cleanup_offered_source_v2,
+            _publish_preparing_from_offer_v2,
+            _prepare_next_idle_generation_v2,
+            _register_initial_offer_source_v2,
+        )
+        composition = self._offer_preparing_composition_v2
+        if (not self._offer_preparing_mode_v2 or composition is None
+                or composition.exact_arbiter is not self
+                or type(pending) is not _PendingInvocation):
+            raise OfferCompositionError("OFFER_PREPARING_DRIVER_MISMATCH")
+        current = asyncio.current_task()
+        _prepare_next_idle_generation_v2(composition.exact_caller_port)
+        async with self._lock:
+            if (current is None or self._admission_driver is not None
+                    or self._active is not None or self._pending
+                    or self._admission_state != "IDLE"):
+                raise OfferCompositionError("OFFER_PREPARING_DRIVER_BUSY")
+            self._active = pending
+            self._admission_driver = current
+            self._admission_state = "WAITING_ADMISSION"
+            pending.execution_complete.clear()
+        source = None
+        try:
+            ticket = await _issue_initial_ticket_owned_v2(
+                composition.exact_caller_port, pending)
+            if not hasattr(ticket, "exact_request"):
+                self._finish(pending, ticket)
+                return ticket
+            source = _register_initial_offer_source_v2(
+                composition.exact_caller_port, ticket)
+            offer_task = asyncio.create_task(
+                _owned_acquire_initial_offer_v2(source),
+                name=f"aiwolf-v2-owned-offer-{ticket.exact_request.invocation_id}")
+            object.__setattr__(ticket, "exact_offer_task_or_null", offer_task)
+            self._admission_wait_task = offer_task
+            self._admission_state = "V2_WAITING_OFFER"
+            result, receipt = await offer_task
+            self._admission_wait_task = None
+            from ai_client.llm.admission_types import AdmissionStatus
+            if result.status is not AdmissionStatus.OFFERED:
+                terminal = ticket.terminal_candidates.admission_terminals[result.status]
+                self._finish(pending, terminal)
+                return terminal
+            self._admission_state = "V2_PREPARING"
+            _publish_preparing_from_offer_v2(
+                composition.exact_caller_port, ticket, result, receipt)
+            self._admission_state = "V2_PREPARING_HELD"
+            terminal = ticket.terminal_candidates.preparing_complete
+            try:
+                self._finish(pending, terminal)
+            except BaseException:
+                object.__setattr__(source, "state", "TERMINAL_HELD")
+                composition.flow_state = "PREPARING_TERMINAL_HELD"
+                composition.initial_invocation_slot = "PREPARING_HELD"
+                await asyncio.Future()
+            return terminal
+        except BaseException as error:
+            if isinstance(error, asyncio.CancelledError):
+                if composition.flow_state == "IDLE":
+                    self._finish(pending, BrainInvocationArbiter._cancelled_result())
+                raise
+            if composition.flow_state == "OFFER_NOTIFICATION_UNKNOWN":
+                # The wakeup shape is unknown.  Retain the exact active owner;
+                # only existing runtime cancellation may end this wait.
+                await asyncio.Future()
+            if composition.flow_state == "PREPARING_TERMINAL_HELD":
+                await asyncio.Future()
+            code = error.code if type(error) is OfferCompositionError else None
+            if composition.flow_state == "OFFER_CLEANUP_UNKNOWN":
+                ticket = composition.active_initial_ticket_or_null
+                terminal = (
+                    ticket.terminal_candidates.cleanup_unknown
+                    if ticket is not None else
+                    composition.prebuilt_pre_ticket_abort_bundle.failure_result)
+            elif code == "PREPARING_DEADLINE_EXPIRED":
+                terminal = ticket.terminal_candidates.deadline_suppressed
+            elif code in {
+                "PREPARING_FRESHNESS_MISMATCH", "PREPARING_CAS_MISMATCH",
+                "PREPARING_SESSION_MISMATCH", "PREPARING_OWNER_MISMATCH",
+            }:
+                terminal = ticket.terminal_candidates.stale
+            else:
+                terminal = composition.prebuilt_pre_ticket_abort_bundle.failure_result
+            if (source is not None and getattr(source, "state", None) == "OFFERED"
+                    and getattr(source, "exact_offer_receipt_or_null", None) is not None):
+                terminal = await _cleanup_offered_source_v2(source, terminal)
+            self._finish(pending, terminal)
+            return terminal
+        finally:
+            async with self._lock:
+                owner_held = composition.flow_state in {
+                    "OFFER_NOTIFICATION_UNKNOWN", "PREPARING_TERMINAL_HELD",
+                }
+                if self._active is pending and not owner_held:
+                    self._active = None
+                if (not owner_held and self._admission_wait_task is not None
+                        and self._admission_wait_task.done()):
+                    self._admission_wait_task = None
+                if not owner_held:
+                    pending.execution_complete.set()
+                if self._admission_driver is current and not owner_held:
+                    self._admission_driver = None
+                if composition.flow_state == "IDLE":
+                    self._admission_state = "IDLE"
+                elif composition.flow_state == "OFFER_CLEANUP_UNKNOWN":
+                    self._admission_state = "V2_CLEANUP_UNKNOWN"
+                elif composition.flow_state == "OFFER_NOTIFICATION_UNKNOWN":
+                    self._admission_state = "V2_NOTIFICATION_UNKNOWN"
+                elif composition.flow_state in {"PREPARING", "PREPARING_TERMINAL_HELD"}:
+                    self._admission_state = "V2_PREPARING_HELD"
+
     async def stop(self) -> None:
         """Permanently stop new work, pending grants, and the owned controller."""
 

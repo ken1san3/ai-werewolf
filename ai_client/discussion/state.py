@@ -507,6 +507,7 @@ class DiscussionStateStore:
         self._capture_read_port_v2 = None
         self._offer_preparing_composition_v2 = None
         self._offer_preparing_mode_v2 = False
+        self._preparing_lease_bundle_v2 = None
         self._reset_reason = (
             DiscussionResetReason.PROCESS_RESTART if process_restart else None
         )
@@ -573,6 +574,47 @@ class DiscussionStateStore:
         self._check_owner()
         if self._closed:
             raise DiscussionStateError("discussion store is closed")
+
+    def _publish_preparing_lease_v2(
+        self, composition: object, expected_capture: object,
+        lease: object, owner_receipt: object, bundle: object,
+    ) -> None:
+        """Private owner CAS; all candidate allocation precedes this method."""
+        from .capture_v2 import StateGenerationLeaseV2
+        from .offer_composition_v2 import (
+            OfferPreparingCompositionV2, PreparingLeaseOwnerReceiptV2,
+        )
+        self._require_open()
+        if (type(composition) is not OfferPreparingCompositionV2
+                or composition.exact_discussion_store is not self
+                or self._offer_preparing_composition_v2 is not composition
+                or type(lease) is not StateGenerationLeaseV2
+                or lease.status != "PREPARING"
+                or type(owner_receipt) is not PreparingLeaseOwnerReceiptV2
+                or owner_receipt.exact_store is not self
+                or owner_receipt.exact_composition is not composition
+                or type(bundle) is not tuple or len(bundle) != 2
+                or bundle[0] is not lease or bundle[1] is not owner_receipt
+                or self._current_capture is not expected_capture
+                or lease.base_revision != self._revision
+                or lease.fact_revision != self._fact_revision
+                or self._preparing_lease_bundle_v2 is not None
+                or self._staged is not None or self._committed is not None
+                or self._dispatch is not None or self._delivery is not None):
+            raise DiscussionStateError("PREPARING_CAS_MISMATCH")
+        # One already-allocated tuple reference is the complete publication.
+        # Readers never observe just one half of the lease/owner pair.
+        self._preparing_lease_bundle_v2 = bundle
+
+    @property
+    def _state_generation_lease_v2(self):
+        bundle = self._preparing_lease_bundle_v2
+        return None if bundle is None else bundle[0]
+
+    @property
+    def _preparing_lease_owner_receipt_v2(self):
+        bundle = self._preparing_lease_bundle_v2
+        return None if bundle is None else bundle[1]
 
     def _freeze_terminal(self) -> None:
         if self._offer_preparing_composition_v2 is not None:
