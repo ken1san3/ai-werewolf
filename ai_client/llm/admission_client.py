@@ -236,6 +236,8 @@ class BrokerAdmissionSession:
         identity: BackendIdentity,
         config: GenerationBrokerConfig,
     ) -> None:
+        self._offer_preparing_composition_v2 = None
+        self._offer_preparing_mode_v2 = False
         self._reader = reader
         self._writer = writer
         self._credentials = credentials
@@ -334,6 +336,8 @@ class BrokerAdmissionSession:
         return self._identity
 
     async def acquire(self, request: AdmissionRequest) -> AdmissionResult:
+        if self._offer_preparing_mode_v2 or self._offer_preparing_composition_v2 is not None:
+            raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
         self._require_open()
         if not isinstance(request, AdmissionRequest):
             raise TypeError("request must be AdmissionRequest")
@@ -353,6 +357,8 @@ class BrokerAdmissionSession:
     async def replace_waiting(
         self, old_invocation_id: str, replacement: AdmissionRequest
     ) -> AdmissionResult:
+        if self._offer_preparing_mode_v2 or self._offer_preparing_composition_v2 is not None:
+            raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
         self._require_open()
         if not isinstance(old_invocation_id, str) or not old_invocation_id:
             raise ValueError("old_invocation_id must be non-empty")
@@ -378,6 +384,8 @@ class BrokerAdmissionSession:
     async def reserve_successor(
         self, active_invocation_id: str, successor: AdmissionRequest
     ) -> _ClientSuccessorReservation:
+        if self._offer_preparing_mode_v2 or self._offer_preparing_composition_v2 is not None:
+            raise _admission_backend_error(LLMBackendErrorCode.ADMISSION_PROTOCOL)
         self._require_open()
         if not isinstance(active_invocation_id, str) or not active_invocation_id:
             raise ValueError("active_invocation_id must be non-empty")
@@ -442,6 +450,9 @@ class BrokerAdmissionSession:
         return status
 
     async def aclose(self) -> None:
+        if self._offer_preparing_composition_v2 is not None:
+            from ai_client.discussion.offer_composition_v2 import _retire_offer_composition_v2
+            _retire_offer_composition_v2(self)
         if self._transport_closed:
             return
         if not self._closed and self._claimed_invocation is not None:

@@ -308,6 +308,16 @@ def _create_phase6_v2_authority_capture_bridge(
     )
 
 
+def _create_phase6_v2_offer_composition(
+    bridge: object, arbiter: BrainInvocationArbiter,
+):
+    """Explicit offline binding only; no invocation, OFFER, or PREPARING."""
+    from .discussion.offer_composition_v2 import _bind_offer_composition_v2
+    if type(arbiter) is not BrainInvocationArbiter:
+        raise TypeError("exact arbiter required")
+    return _bind_offer_composition_v2(arbiter._admission, bridge, arbiter, arbiter._clock)
+
+
 class Phase5RuntimeLifecycle(str, Enum):
     NEW = "NEW"
     RUNNING = "RUNNING"

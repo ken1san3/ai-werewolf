@@ -505,6 +505,8 @@ class DiscussionStateStore:
         self._owner_token: tuple[int, int | None] | None = None
         self._authority_owner_registration_v2 = None
         self._capture_read_port_v2 = None
+        self._offer_preparing_composition_v2 = None
+        self._offer_preparing_mode_v2 = False
         self._reset_reason = (
             DiscussionResetReason.PROCESS_RESTART if process_restart else None
         )
@@ -573,6 +575,9 @@ class DiscussionStateStore:
             raise DiscussionStateError("discussion store is closed")
 
     def _freeze_terminal(self) -> None:
+        if self._offer_preparing_composition_v2 is not None:
+            from .offer_composition_v2 import _retire_offer_composition_v2
+            _retire_offer_composition_v2(self)
         self._invalidate_current_work()
         self._closed = True
 
@@ -1630,6 +1635,9 @@ class DiscussionStateStore:
             raise DiscussionStateError(
                 "LOCAL_SENT correlation requires authoritative finalization before close"
             )
+        if self._offer_preparing_composition_v2 is not None:
+            from .offer_composition_v2 import _retire_offer_composition_v2
+            _retire_offer_composition_v2(self)
         self._staged = None
         self._current_capture = None
         self._committed = None

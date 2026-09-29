@@ -151,6 +151,8 @@ class BrainInvocationArbiter:
                 raise TypeError("admission must implement GenerationAdmission")
         if not callable(invocation_id_factory):
             raise TypeError("invocation_id_factory must be callable")
+        self._offer_preparing_composition_v2 = None
+        self._offer_preparing_mode_v2 = False
         self.controller = controller
         self._clock = clock
         self._admission = admission
@@ -192,6 +194,10 @@ class BrainInvocationArbiter:
     ) -> BrainDispatchResult:
         """Register one bounded request and await its exact terminal result."""
 
+        if self._offer_preparing_mode_v2 or self._offer_preparing_composition_v2 is not None:
+            from ai_client.discussion.offer_composition_v2 import OfferCompositionError
+            raise OfferCompositionError("INITIAL_TICKET_NOT_CONNECTED")
+
         self._validate_call(
             owner=owner,
             priority=priority,
@@ -215,6 +221,10 @@ class BrainInvocationArbiter:
 
     async def stop(self) -> None:
         """Permanently stop new work, pending grants, and the owned controller."""
+
+        if self._offer_preparing_composition_v2 is not None:
+            from ai_client.discussion.offer_composition_v2 import _retire_offer_composition_v2
+            _retire_offer_composition_v2(self)
 
         # There is deliberately no await between selecting and retaining this
         # task.  Event-loop execution therefore installs the sole stop owner
