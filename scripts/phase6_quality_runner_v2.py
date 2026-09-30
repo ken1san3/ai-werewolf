@@ -15,6 +15,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import threading
@@ -35,6 +36,14 @@ SOURCES = ('scripts/phase6_quality_probe_v2.py', 'scripts/phase6_quality_runner_
            'scripts/phase6_context_probe.py', 'tests/fixtures/phase6_evidence.py',
            'tests/fixtures/phase6_conversation_cases.py', 'ai_client/discussion/generation_v2.py',
            'ai_client/llm/decision.py', 'ai_client/brain/controller.py')
+OLD_CLAIM = ROOT / 'logs/t550-quality-v2.claim.json'
+OLD_CLAIM_SHA256 = '23a589f0c3969d78f58135c22aee271dbf7b9c344dd90925ffb1620000f301a8'
+OLD_PUBLIC_SHA256 = 'fec2e8e2bdc00481a3c3a615361de887ba4acd0ab53ea4ee90bc3ab4a4937576'
+DECISION6_DESIGN_SHA256 = '5f0e72e033c4e5fc092c3b65c49d60e760c8db2b213064bcb17e04126ae5e7fe'
+DECISION6_DESIGN = ROOT / 'Docs/ai/design/PHASE6_V2_QUALITY_PROBE_AMENDMENT.md'
+DECISION6_TOOL_REVIEW = ROOT / 'Docs/ai/handoffs/tasks/T550_DECISION6_TOOL_REVIEW.md'
+DECISION6_RUN_ID = 'T550_DECISION6_CHECKED_RECONNECTION_V1'
+DECISION6_CLAIM = ROOT / 'logs/t550-quality-v2-decision6.claim.json'
 
 
 def source_hashes():
@@ -119,6 +128,17 @@ class Owner:
         self.integrity = True
         self.runtime_identity = None
         self.sources = source_hashes()
+        self.executable = self._executable_identity()
+
+    def _executable_identity(self):
+        path = Path(self.start['image'])
+        try:
+            stat = path.stat()
+            return (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+        except FileNotFoundError:
+            # Test doubles may use a synthetic image path; production full()
+            # still rejects it against the frozen profile before any request.
+            return (str(path.resolve()), None, None)
 
     def light(self):
         try:
@@ -150,20 +170,74 @@ class Owner:
             self.integrity = False
             raise
 
+    def bind_runtime(self, runtime):
+        """Bind the small reported identity without rehashing boundary files."""
+        self.light()
+        try:
+            if Path(runtime['model_path']).resolve() != Path(self.profile['model']['path']).resolve():
+                raise RuntimeError('MODEL_DRIFT')
+            canonical = json.loads(q.wire(runtime))
+            if self.runtime_identity is None:
+                self.runtime_identity = canonical
+            elif canonical != self.runtime_identity:
+                raise RuntimeError('RUNTIME_DRIFT')
+        except Exception:
+            self.integrity = False
+            raise
+
+    def reconnect_check(self):
+        """Check reconnect bindings without hashing large model/runtime files."""
+        self.light()
+        try:
+            if self._executable_identity() != self.executable:
+                raise RuntimeError('EXECUTABLE_DRIFT')
+            if self.sources != source_hashes():
+                raise RuntimeError('SOURCE_DRIFT')
+        except Exception:
+            self.integrity = False
+            raise
+
+    def reconnect_post_check(self):
+        """Post-connect check; source bytes were verified before connect."""
+        self.light()
+        try:
+            if self._executable_identity() != self.executable:
+                raise RuntimeError('EXECUTABLE_DRIFT')
+        except Exception:
+            self.integrity = False
+            raise
+
 
 class TransportRecorder:
-    def __init__(self):
+    REASONS = {'IDLE_CLOSE', 'MAX_REQUEST_CLOSE', 'PEER_CONNECTION_CLOSE',
+               'TRANSPORT_ERROR', 'NEW_CONNECT_OBSERVED'}
+
+    def __init__(self, generation=1, body_send_counts=None):
+        self.generation = generation
         self.connects = 0
         self.fixed = False
         self.connection = None
         self.closed = False
         self.events = []
+        self.active_request = None
+        self.body_send_counts = body_send_counts if body_send_counts is not None else {}
+
+    def begin_request(self, request_id):
+        self.active_request = request_id
 
     def trace(self, name, info):
         if name == 'connection.connect_tcp.started':
             if self.fixed or self.connects:
-                raise RuntimeError('RECONNECT_FORBIDDEN')
+                if self.active_request is not None and self.body_send_counts.get(self.active_request, 0):
+                    raise RuntimeError('SENT_REQUEST_RECONNECT')
+                raise UnsentReconnect('NEW_CONNECT_OBSERVED')
             self.connects += 1
+        if name == 'http11.send_request_body.started':
+            if self.active_request is None:
+                raise RuntimeError('REQUEST_UNTRACKED')
+            self.body_send_counts[self.active_request] = self.body_send_counts.get(self.active_request, 0) + 1
+            if self.body_send_counts[self.active_request] > 1:
+                raise RuntimeError('REQUEST_REPLAY')
         if name == 'connection.close.started':
             self.closed = True
         if name.startswith('connection.'):
@@ -177,18 +251,80 @@ class TransportRecorder:
             self.connection = stream
         elif stream is not self.connection:
             raise RuntimeError('CONNECTION_DRIFT')
-        if response.headers.get('connection', '').lower() == 'close':
-            raise RuntimeError('DISCONNECT')
+        return response.headers.get('connection', '').lower() == 'close'
+
+
+class UnsentReconnect(RuntimeError):
+    """A connect was observed before request body transmission."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class GenerationDisconnected(RuntimeError):
+    """A sent generation lost its response and must never be replayed."""
 
 
 class Runtime:
     def __init__(self, owner):
         self.owner = owner
-        self.recorder = TransportRecorder()
-        self.client = httpx.Client(trust_env=False, timeout=60, transport=httpx.HTTPTransport(retries=0,
-            limits=httpx.Limits(max_connections=1, max_keepalive_connections=1, keepalive_expiry=None)))
+        self.body_send_counts = {}
+        self.recorder = TransportRecorder(body_send_counts=self.body_send_counts)
+        self.transport_generation = 1
+        self.pending_reconnect = None
+        self.reconnects = []
+        self.verifying_reconnect = False
+        self.request_serial = 0
+        self.sent_request_ids = set()
+        self.utility_attempts = 0
+        self.generation_attempts = 0
+        self.client = self._new_client()
         self.utility_calls = self.generation_calls = 0
         self.token_cache = {}
+
+    @staticmethod
+    def _new_client():
+        return httpx.Client(trust_env=False, timeout=60, transport=httpx.HTTPTransport(retries=0,
+            limits=httpx.Limits(max_connections=1, max_keepalive_connections=1, keepalive_expiry=None)))
+
+    def _reconnect(self, reason):
+        if self.verifying_reconnect or reason not in TransportRecorder.REASONS:
+            self.owner.integrity = False
+            raise RuntimeError('RECONNECT_INVALID')
+        previous = self.transport_generation
+        self.client.close()
+        self.recorder.closed = True
+        self.owner.reconnect_check()
+        source_binding = q.digest(self.owner.sources)
+        self.transport_generation += 1
+        self.recorder = TransportRecorder(self.transport_generation, self.body_send_counts)
+        self.client = self._new_client()
+        event = dict(transport_generation=self.transport_generation,
+                     previous_generation=previous,
+                     utc=datetime.now(timezone.utc).isoformat(), reason=reason,
+                     precheck=True, source_sha256=source_binding, postcheck=False)
+        self.reconnects.append(event)
+        self.pending_reconnect = None
+        self.verifying_reconnect = True
+        try:
+            identity = self.identity(_verification=True)
+            if identity != self.owner.runtime_identity:
+                raise RuntimeError('RUNTIME_DRIFT')
+            if q.digest(self.owner.sources) != source_binding:
+                raise RuntimeError('SOURCE_BINDING_DRIFT')
+            self.owner.reconnect_post_check()
+            event['postcheck'] = True
+            self.recorder.fixed = True
+            self.pending_reconnect = None
+        except Exception:
+            self.owner.integrity = False
+            raise
+        finally:
+            self.verifying_reconnect = False
+        if len(self.reconnects) > self.utility_attempts + self.generation_attempts:
+            self.owner.integrity = False
+            raise RuntimeError('RECONNECT_BOUND')
 
     def request(self, endpoint, body=None, *, generation=False, readiness=False, timeout=60, wire_payload=None):
         if readiness and (endpoint != '/health' or generation or body is not None):
@@ -196,13 +332,26 @@ class Runtime:
         if wire_payload is not None and (body is None or wire_payload != q.wire(body)):
             raise ValueError('REQUEST_WIRE')
         self.owner.light()
+        if self.pending_reconnect:
+            if self.verifying_reconnect:
+                self.owner.integrity = False
+                raise RuntimeError('UTILITY_DISCONNECT')
+            self._reconnect(self.pending_reconnect)
         if self.recorder.closed or (generation and (not self.recorder.fixed or self.recorder.connection is None)):
             self.owner.integrity = False
             raise RuntimeError('CONNECTION_NOT_FIXED')
         if generation:
             self.generation_calls += 1
+            self.generation_attempts += 1
         else:
             self.utility_calls += 1
+            self.utility_attempts += 1
+        self.request_serial += 1
+        request_id = self.request_serial
+        if request_id in self.sent_request_ids:
+            raise RuntimeError('REQUEST_REPLAY')
+        self.sent_request_ids.add(request_id)
+        self.recorder.begin_request(request_id)
         try:
             expired = threading.Event()
             def abort_timeout():
@@ -215,10 +364,19 @@ class Runtime:
             watchdog = threading.Timer(min(60, timeout), abort_timeout)
             watchdog.daemon = True
             watchdog.start()
-            response = self.client.request('GET' if body is None else 'POST',
-                f'http://127.0.0.1:{existing.PORT}{endpoint}', content=None if body is None else (wire_payload if wire_payload is not None else q.wire(body)),
-                headers={'Content-Type': 'application/json'}, extensions={'trace': self.recorder.trace}, timeout=min(60, timeout))
-            self.recorder.observe(response)
+            try:
+                response = self.client.request('GET' if body is None else 'POST',
+                    f'http://127.0.0.1:{existing.PORT}{endpoint}', content=None if body is None else (wire_payload if wire_payload is not None else q.wire(body)),
+                    headers={'Content-Type': 'application/json'}, extensions={'trace': self.recorder.trace}, timeout=min(60, timeout))
+            except UnsentReconnect as signal:
+                if self.verifying_reconnect:
+                    raise RuntimeError('UTILITY_DISCONNECT') from signal
+                self._reconnect(signal.reason)
+                self.recorder.begin_request(request_id)
+                response = self.client.request('GET' if body is None else 'POST',
+                    f'http://127.0.0.1:{existing.PORT}{endpoint}', content=None if body is None else (wire_payload if wire_payload is not None else q.wire(body)),
+                    headers={'Content-Type': 'application/json'}, extensions={'trace': self.recorder.trace}, timeout=min(60, timeout))
+            peer_close = self.recorder.observe(response)
             # Even a known not-ready response fixes the one allowed connection.
             self.recorder.fixed = True
             self.owner.light()
@@ -234,19 +392,36 @@ class Runtime:
                     return False
                 raise RuntimeError('READINESS_RESPONSE')
             response.raise_for_status()
-            return response.json()
+            value = response.json()
+            if peer_close:
+                self.pending_reconnect = 'PEER_CONNECTION_CLOSE'
+            return value
+        except (httpx.TransportError, httpx.DecodingError) as error:
+            if self.verifying_reconnect:
+                self.owner.integrity = False
+                raise RuntimeError('UTILITY_DISCONNECT') from error
+            self.pending_reconnect = 'TRANSPORT_ERROR'
+            if generation:
+                raise GenerationDisconnected('GENERATION_DISCONNECTED') from error
+            self.owner.integrity = False
+            raise RuntimeError('UTILITY_DISCONNECT') from error
+        except GenerationDisconnected:
+            raise
         except Exception:
             self.owner.integrity = False
-            self.owner.full()
             raise
         finally:
             if 'watchdog' in locals():
                 watchdog.cancel()
                 watchdog.join()
 
-    def identity(self):
+    def identity(self, _verification=False):
         props = self.request('/props')
+        if _verification and self.pending_reconnect:
+            raise RuntimeError('UTILITY_DISCONNECT')
         slots = self.request('/slots')
+        if _verification and self.pending_reconnect:
+            raise RuntimeError('UTILITY_DISCONNECT')
         if len(slots) != 1 or slots[0]['n_ctx'] != 8192 or slots[0]['is_processing']:
             raise RuntimeError('SLOT_CONTRACT')
         return dict(build=props['build_info'], model_path=props['model_path'],
@@ -282,6 +457,7 @@ class Runtime:
 
     def close(self):
         self.client.close()
+        self.recorder.closed = True
 
 
 def prepare_witnesses(fixtures):
@@ -516,9 +692,12 @@ def attempt(runtime, fixture, seed, stage, budget, ordinal, private, *, cache, p
                 except ValueError:
                     parsed = None
                     outcome['status'] = 'GUARD_REJECT'
+    except GenerationDisconnected:
+        outcome['status'] = 'TRANSPORT_GENERATION_LOST'
     except Exception as error:
         runtime.owner.integrity = False
         outcome['status'] = 'P_CONTEXT_PREFLIGHT_MISS' if str(error) == 'P_CONTEXT_PREFLIGHT_MISS' else 'TRANSPORT_OR_OWNERSHIP'
+        outcome['failure_code'] = str(error)
     write_once(private / (stem + '-outcome.json'), outcome)
     outcome['elapsed'] = clock() - started
     write_once(private / (stem + '-clock.json'), {'elapsed': outcome['elapsed']})
@@ -565,7 +744,7 @@ def run_rows(rows, runtime, budgets, private, *, cache, probe, clock=time.monoto
 
 
 DEFAULT_FREEZE = ROOT / 'logs/t507-choice-budget/formal-binary-v2/freeze.json'
-CANONICAL_CLAIM = ROOT / 'logs/t550-quality-v2.claim.json'
+CANONICAL_CLAIM = DECISION6_CLAIM
 
 
 def claim_experiment(public_path, profile, sources):
@@ -573,8 +752,41 @@ def claim_experiment(public_path, profile, sources):
     output = Path(public_path).resolve()
     if output == CANONICAL_CLAIM.resolve() or output.exists() or CANONICAL_CLAIM.exists():
         raise ValueError('TASK_ALREADY_CLAIMED')
-    record = dict(task='T550', public_path=str(output), source_sha256=q.digest(sources),
-                  profile_sha256=q.digest(profile), retry=0)
+    if not OLD_CLAIM.is_file() or existing.file_hash(OLD_CLAIM) != OLD_CLAIM_SHA256:
+        raise ValueError('OLD_CLAIM_BINDING')
+    old_record = json.loads(OLD_CLAIM.read_bytes())
+    old_public = Path(old_record['public_path'])
+    if not old_public.is_file() or existing.file_hash(old_public) != OLD_PUBLIC_SHA256:
+        raise ValueError('OLD_PUBLIC_BINDING')
+    if existing.file_hash(DECISION6_DESIGN) != DECISION6_DESIGN_SHA256:
+        raise ValueError('DESIGN_BINDING')
+    if not DECISION6_TOOL_REVIEW.is_file():
+        raise ValueError('TOOL_REVIEW_MISSING')
+    review_text = DECISION6_TOOL_REVIEW.read_text(encoding='utf-8')
+    tool_scope = {p: existing.file_hash(ROOT / p) for p in
+                  ('scripts/phase6_quality_runner_v2.py', 'tests/test_phase6_quality_probe_v2.py')}
+    expected_review = {
+        'Status': 'APPROVED',
+        'Design-SHA-256': DECISION6_DESIGN_SHA256,
+        'Tool-SHA-256': q.digest(tool_scope),
+        'Source-SHA-256': q.digest(sources),
+        'Approval-Scope': 'scripts/phase6_quality_runner_v2.py;tests/test_phase6_quality_probe_v2.py',
+    }
+    fields = {}
+    for key in expected_review:
+        matches = re.findall(rf'(?m)^{re.escape(key)}: ([^\r\n]+)$', review_text)
+        if len(matches) != 1:
+            raise ValueError('TOOL_REVIEW_FORMAT')
+        fields[key] = matches[0]
+    if fields != expected_review:
+        raise ValueError('TOOL_REVIEW_NOT_APPROVED')
+    record = dict(task='T550', run_id=DECISION6_RUN_ID,
+                  old_claim_sha256=OLD_CLAIM_SHA256, old_public_sha256=OLD_PUBLIC_SHA256,
+                  old_run_identity=old_record,
+                  design_sha256=DECISION6_DESIGN_SHA256,
+                  tool_review_sha256=existing.file_hash(DECISION6_TOOL_REVIEW),
+                  tool_sha256=expected_review['Tool-SHA-256'],
+                  source_sha256=q.digest(sources), profile_sha256=q.digest(profile), retry=0)
     write_once(CANONICAL_CLAIM, record)  # Exclusive create is the concurrency gate.
     return record
 
@@ -627,7 +839,7 @@ def launch(profile, private, label):
         runtime = Runtime(owner)
         runtime.wait_ready(limit)
         identity = runtime.identity()
-        owner.full(identity)
+        owner.bind_runtime(identity)
         runtime.recorder.fixed = True
         return process, owner, runtime
     except Exception:
@@ -676,6 +888,7 @@ def run(profile_path, public_path):
                    actual_generation_calls=0, probe_generation_calls=0)
     start = time.monotonic()
     probe_attempts, probe_results, actual_attempts, actual_results = [], [], [], []
+    all_reconnects = []
     phase = 'probe'
     try:
         process, owner, runtime = launch(profile, private, 'probe')
@@ -692,8 +905,6 @@ def run(profile_path, public_path):
         cache_hashes = {p.name: existing.file_hash(p) for p in cache_paths}
         write_once(private / 'measurement.json', {'budgets': budgets, 'cache_hashes': cache_hashes,
             'runtime': identity, 'source': frozen_sources, 'utility_calls': runtime.utility_calls})
-        if source_hashes() != frozen_sources:
-            raise RuntimeError('SOURCE_DRIFT')
         probe_rows = tuple(next((f, s) for f, s in rows if (f.case.case_id, s) == key) for key in PROBE)
         fixed_start = time.monotonic()
         probe_attempts, probe_results, ok = run_rows(probe_rows, runtime, budgets, private, cache=probe_cache, probe=True)
@@ -703,14 +914,18 @@ def run(profile_path, public_path):
         else:
             # Include elapsed non-row setup conservatively. End identity and
             # cleanup are measured below before the estimate is finalized.
-            owner.full(runtime.identity())
+            end_identity = runtime.identity()
+            if end_identity != owner.runtime_identity:
+                raise RuntimeError('RUNTIME_DRIFT')
             # Probe must actually include its end checks and cleanup before
             # using H_FIXED. The gated run gets a fresh owned process/client.
             summary['generation_calls'] += runtime.generation_calls
             summary['probe_generation_calls'] = runtime.generation_calls
             summary['utility_calls'] += runtime.utility_calls
+            all_reconnects.extend(runtime.reconnects)
             runtime.close()
             runtime = None
+            owner.full()
             probe_cleanup = existing.cleanup_owned(None, process)
             if probe_cleanup['owned_processes_remaining'] or listener_owners(existing.PORT):
                 raise RuntimeError('PROBE_CLEANUP')
@@ -735,10 +950,19 @@ def run(profile_path, public_path):
                     raise RuntimeError('RUNTIME_DRIFT')
                 actual_attempts, actual_results, ok = run_rows(rows, runtime, budgets, actual, cache=RequestCache(json.loads(records_bytes)), probe=False)
                 summary['status'] = 'COMPLETE' if ok and len(actual_results) == 96 else 'INCOMPLETE'
+        if runtime is not None:
+            end_identity = runtime.identity()
+            if end_identity != owner.runtime_identity:
+                raise RuntimeError('RUNTIME_DRIFT')
+            summary['generation_calls'] += runtime.generation_calls
+            summary[phase + '_generation_calls'] = runtime.generation_calls
+            summary['utility_calls'] += runtime.utility_calls
+            all_reconnects.extend(runtime.reconnects)
+            runtime.close()
+            runtime = None
+            owner.full()
         if source_hashes() != frozen_sources or any(existing.file_hash(private / name) != h for name, h in cache_hashes.items()):
             raise RuntimeError('CACHE_DRIFT')
-        if runtime is not None:
-            owner.full(runtime.identity())
         summary.update(run_integrity=owner.integrity, budgets=budgets)
     except Exception as error:
         summary['status'] = 'UNKNOWN'
@@ -749,6 +973,7 @@ def run(profile_path, public_path):
             summary['generation_calls'] += runtime.generation_calls
             summary[phase + '_generation_calls'] = runtime.generation_calls
             summary['utility_calls'] += runtime.utility_calls
+            all_reconnects.extend(runtime.reconnects)
             try:
                 runtime.close()
             except Exception:
@@ -764,9 +989,13 @@ def run(profile_path, public_path):
         if not summary['run_integrity'] and summary['status'] == 'COMPLETE':
             summary['status'] = 'UNKNOWN'
         summary['duration'] = time.monotonic() - start
+        reconnects = all_reconnects
+        summary['reconnect_durable_count'] = len(reconnects)
+        summary['reconnect_reason_counts'] = dict(Counter(e['reason'] for e in reconnects))
         summary.update(actual_summary(actual_attempts, actual_results, summary['actual_generation_calls']))
         summary.update(probe_summary(probe_attempts, probe_results))
         write_once(private / 'cleanup.json', cleanup)
+        write_once(private / 'reconnects.json', reconnects)
         seal = {p.relative_to(private).as_posix(): existing.file_hash(p) for p in sorted(private.rglob('*')) if p.is_file()}
         summary['private_seal_sha256'] = write_once(private / 'seal.json', seal)
         write_once(public_path, summary)

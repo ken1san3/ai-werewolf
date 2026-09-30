@@ -18,6 +18,32 @@ def suite():
     return q.prepare()
 
 
+def claim_bindings(tmp_path, monkeypatch, sources=None):
+    sources = {'source': 'fixed'} if sources is None else sources
+    old_claim = tmp_path / 'old.claim.json'
+    old_public = tmp_path / 'old-public.json'
+    design = tmp_path / 'design.md'
+    review = tmp_path / 'review.md'
+    old_public.write_bytes(b'old public')
+    old_claim.write_bytes(q.wire({'public_path': str(old_public), 'old': 'identity'}))
+    design.write_bytes(b'decision6 design')
+    monkeypatch.setattr(r, 'OLD_CLAIM', old_claim)
+    monkeypatch.setattr(r, 'OLD_CLAIM_SHA256', r.existing.file_hash(old_claim))
+    monkeypatch.setattr(r, 'OLD_PUBLIC_SHA256', r.existing.file_hash(old_public))
+    monkeypatch.setattr(r, 'DECISION6_DESIGN', design)
+    monkeypatch.setattr(r, 'DECISION6_DESIGN_SHA256', r.existing.file_hash(design))
+    monkeypatch.setattr(r, 'DECISION6_TOOL_REVIEW', review)
+    tool_scope = {p: r.existing.file_hash(r.ROOT / p) for p in
+                  ('scripts/phase6_quality_runner_v2.py', 'tests/test_phase6_quality_probe_v2.py')}
+    review.write_text('\n'.join((
+        '# Tool review', 'Status: APPROVED',
+        f'Design-SHA-256: {r.DECISION6_DESIGN_SHA256}',
+        f'Tool-SHA-256: {q.digest(tool_scope)}',
+        f'Source-SHA-256: {q.digest(sources)}',
+        'Approval-Scope: scripts/phase6_quality_runner_v2.py;tests/test_phase6_quality_probe_v2.py',
+        '')), encoding='utf-8')
+
+
 def test_suite_original_96_domain_and_prior(suite):
     fs, rows = suite
     assert len(rows) == len({(f.case.case_id, s) for f, s in rows}) == 96
@@ -144,7 +170,7 @@ def test_transport_requires_actual_connection_and_rejects_reconnect():
     rec.observe(response)
     rec.fixed = True
     rec.observe(response)
-    with pytest.raises(RuntimeError, match='RECONNECT'):
+    with pytest.raises(r.UnsentReconnect, match='NEW_CONNECT_OBSERVED'):
         rec.trace('connection.connect_tcp.started', {})
     response.extensions['network_stream'] = object()
     with pytest.raises(RuntimeError, match='DRIFT'):
@@ -168,7 +194,8 @@ def test_real_http_transport_events_and_windows_listener_table():
         assert r.listener_owners(server.server_port) == (os.getpid(),)
         rec = r.TransportRecorder()
         with httpx.Client(trust_env=False) as client:
-            for _ in range(2):
+            for request_id in range(2):
+                rec.begin_request(request_id)
                 response = client.get(f'http://127.0.0.1:{server.server_port}/', extensions={'trace': rec.trace})
                 rec.observe(response)
                 rec.fixed = True
@@ -371,6 +398,7 @@ def test_readiness_503_then_ready_on_one_real_connection(monkeypatch):
 
 @pytest.mark.parametrize('alias', ['other.json', 'result.txt', 'same', 'absolute'])
 def test_canonical_task_claim_survives_output_alias_and_unknown(tmp_path, monkeypatch, alias):
+    claim_bindings(tmp_path, monkeypatch)
     canonical = tmp_path / 'canonical.claim'
     monkeypatch.setattr(r, 'CANONICAL_CLAIM', canonical)
     output = tmp_path / 'result.json'
@@ -383,6 +411,15 @@ def test_canonical_task_claim_survives_output_alias_and_unknown(tmp_path, monkey
     with pytest.raises(ValueError, match='TASK_ALREADY_CLAIMED'):
         r.claim_experiment(candidate, {'profile': 'fixed'}, {'source': 'fixed'})
     assert canonical.read_bytes() == original
+
+
+def test_claim_rejects_unscoped_approved_substring(tmp_path, monkeypatch):
+    claim_bindings(tmp_path, monkeypatch)
+    monkeypatch.setattr(r, 'CANONICAL_CLAIM', tmp_path / 'canonical.claim')
+    r.DECISION6_TOOL_REVIEW.write_text('review text mentions APPROVED only', encoding='utf-8')
+    with pytest.raises(ValueError, match='TOOL_REVIEW_FORMAT'):
+        r.claim_experiment(tmp_path / 'public.json', {'profile': 'fixed'}, {'source': 'fixed'})
+    assert not r.CANONICAL_CLAIM.exists()
 
 
 @pytest.mark.parametrize('stage', ['chat_plan', 'pre_vote', 'co_opportunity'])
@@ -480,6 +517,7 @@ def test_actual_and_probe_summary_denominators_are_separate(actual_rows):
 @pytest.mark.parametrize('scenario,expected', [('probe_failure', 0), ('estimate_stop', 0),
     ('actual_start_failure', 0), ('cache_failure_after_claim', 0), ('partial_actual', 17), ('complete', 96)])
 def test_run_never_reports_probe_rows_as_actual(suite, tmp_path, monkeypatch, scenario, expected):
+    claim_bindings(tmp_path, monkeypatch, {'v': 'fixed'})
     private = tmp_path / 'private'
     private.mkdir()
     monkeypatch.setattr(r, 'CANONICAL_CLAIM', tmp_path / 'canonical.claim')
@@ -499,7 +537,7 @@ def test_run_never_reports_probe_rows_as_actual(suite, tmp_path, monkeypatch, sc
             raise RuntimeError('ACTUAL_START')
         owner = SimpleNamespace(integrity=True, runtime_identity={'identity': 'fixed'}, full=lambda *a: None)
         runtime = SimpleNamespace(owner=owner, identity=lambda: owner.runtime_identity,
-                                  generation_calls=0, utility_calls=0, close=lambda: None)
+                                  generation_calls=0, utility_calls=0, reconnects=[], close=lambda: None)
         return object(), owner, runtime
     monkeypatch.setattr(r, 'launch', launch)
     monkeypatch.setattr(r, 'measure', lambda *a, **k: ({stage: 100 for stage in q.STAGES}, []))
@@ -548,68 +586,232 @@ def test_prepared_witnesses_are_exact_immutable_bytes(suite, monkeypatch):
         r.measure(fixtures, (), Counter(), None, witness_sets=prepared)
 
 
-@pytest.mark.parametrize('late_cpu,expected', [(True, 'RECONNECT_FORBIDDEN'), (False, 'COUNT_OK')])
-def test_idle_close_negative_and_prepared_witness_control(suite, monkeypatch, late_cpu, expected):
-    # The delayed source simulates the measured >1s product witness validation.
-    # The HTTP idle timeout stays identical in both arms; reconnect stays forbidden.
-    f = suite[0][0]
-    values = {stage: q.witnesses(stage, f) for stage in ('chat_plan', 'message')}
-    started = threading.Event()
-    seen = []
+@pytest.mark.parametrize('close_mode', ['idle', 'count'])
+def test_fake_http_checked_reconnect_completes_all_96_rows(monkeypatch, close_mode):
+    seen, requests = [], 0
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
         def setup(self):
             super().setup()
-            self.connection.settimeout(.2)
+            if close_mode == 'idle':
+                self.connection.settimeout(.05)
         def do_POST(self):
-            self.rfile.read(int(self.headers['Content-Length']))
-            self.reply({'tokens': [1]})
+            nonlocal requests
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            requests += 1
+            seen.append(body['row'])
+            self.reply({'row': body['row']}, close=close_mode == 'count' and requests % 7 == 0)
         def do_GET(self):
-            self.reply({'status': 'ok'})
-        def reply(self, value):
-            seen.append(self.path)
+            if self.path == '/props':
+                value = {'build_info': 'fake', 'model_path': 'fake.gguf', 'chat_template': 'x',
+                         'default_generation_settings': {'seed': 1}}
+            elif self.path == '/slots':
+                value = [{'n_ctx': 8192, 'is_processing': False}]
+            else:
+                value = {'status': 'ok'}
+            self.reply(value)
+        def reply(self, value, close=False):
             raw = q.wire(value)
             self.send_response(200)
             self.send_header('Content-Length', str(len(raw)))
+            if close:
+                self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(raw)
-            started.set()
         def log_message(self, *args):
             pass
-    def cpu(stage, fixture):
-        if stage == 'chat_plan':
-            r.time.sleep(.35)
-        return values[stage]
-    monkeypatch.setattr(q, 'witnesses', cpu)
-    prepared = None if late_cpu else r.prepare_witnesses((f,))
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     monkeypatch.setattr(r.existing, 'PORT', server.server_port)
-    owner = SimpleNamespace(integrity=True, light=lambda: None, full=lambda *a: None)
+    owner = SimpleNamespace(integrity=True, sources={'fixed': 'source'}, light=lambda: None,
+                            reconnect_check=lambda: None, reconnect_post_check=lambda: None,
+                            runtime_identity=None)
     runtime = r.Runtime(owner)
-    class CountFinished(Exception):
-        pass
-    original_count = runtime.count
-    def count(raw):
-        original_count(raw)
-        raise CountFinished
-    runtime.count = count
     try:
-        runtime.wait_ready(r.time.monotonic() + 5)
-        assert started.wait(1)
-        if late_cpu:
-            prepared = r.prepare_witnesses((f,))
-        try:
-            r.measure((f,), (), runtime, None, witness_sets=prepared)
-        except CountFinished:
-            status = 'COUNT_OK'
-        except RuntimeError as error:
-            status = str(error)
-        assert status == expected
-        assert runtime.generation_calls == 0 and runtime.recorder.connects == 1
-        assert seen == (['/health'] if late_cpu else ['/health', '/tokenize'])
-        assert owner.integrity is not late_cpu
+        owner.runtime_identity = runtime.identity()
+        runtime.recorder.fixed = True
+        for row in range(96):
+            if close_mode == 'idle':
+                r.time.sleep(.08)
+            assert runtime.request('/row', {'row': row}, generation=True) == {'row': row}
+        assert seen == list(range(96))
+        assert runtime.generation_calls == 96
+        assert runtime.transport_generation == len(runtime.reconnects) + 1
+        assert all(e['postcheck'] and e['utc'] and e['reason'] in r.TransportRecorder.REASONS
+                   for e in runtime.reconnects)
+        assert all(e['transport_generation'] == i + 2 for i, e in enumerate(runtime.reconnects))
+        assert runtime.body_send_counts and set(runtime.body_send_counts.values()) == {1}
+    finally:
+        runtime.close()
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_reconnect_source_drift_stops_before_new_transport(monkeypatch):
+    owner = SimpleNamespace(integrity=True, sources={'fixed': 'source'}, light=lambda: None,
+                            runtime_identity={'fixed': True}, reconnect_post_check=lambda: None)
+    def fail_source():
+        owner.integrity = False
+        raise RuntimeError('SOURCE_DRIFT')
+    owner.reconnect_check = fail_source
+    runtime = r.Runtime(owner)
+    old_client = runtime.client
+    with pytest.raises(RuntimeError, match='SOURCE_DRIFT'):
+        runtime._reconnect('IDLE_CLOSE')
+    assert runtime.client is old_client and not owner.integrity
+
+
+def test_reconnect_source_hash_check_runs_after_old_transport_close(monkeypatch):
+    owner = SimpleNamespace(integrity=True, sources={'fixed': 'source'}, light=lambda: None,
+                            runtime_identity={'fixed': True}, reconnect_post_check=lambda: None)
+    runtime = r.Runtime(owner)
+    runtime.utility_attempts = 1
+    observed = []
+    owner.reconnect_check = lambda: observed.append(runtime.recorder.closed)
+    monkeypatch.setattr(runtime, 'identity', lambda _verification=False: owner.runtime_identity)
+    runtime._reconnect('IDLE_CLOSE')
+    assert observed == [True] and runtime.reconnects[0]['source_sha256'] == q.digest(owner.sources)
+
+
+def test_reconnect_cached_source_binding_tamper_stops(monkeypatch):
+    owner = SimpleNamespace(integrity=True, sources={'fixed': 'source'}, light=lambda: None,
+                            runtime_identity={'fixed': True}, reconnect_check=lambda: None,
+                            reconnect_post_check=lambda: None)
+    runtime = r.Runtime(owner)
+    def tamper(_verification=False):
+        owner.sources['fixed'] = 'tampered'
+        return owner.runtime_identity
+    monkeypatch.setattr(runtime, 'identity', tamper)
+    with pytest.raises(RuntimeError, match='SOURCE_BINDING_DRIFT'):
+        runtime._reconnect('IDLE_CLOSE')
+    assert not owner.integrity and runtime.reconnects[-1]['source_sha256'] != q.digest(owner.sources)
+
+
+def test_utility_disconnect_stops_without_nested_reconnect(monkeypatch):
+    owner = SimpleNamespace(integrity=True, light=lambda: None)
+    runtime = r.Runtime(owner)
+    runtime.recorder.fixed = True
+    monkeypatch.setattr(runtime.client, 'request', lambda *a, **k: (_ for _ in ()).throw(httpx.ReadError('lost')))
+    with pytest.raises(RuntimeError, match='UTILITY_DISCONNECT'):
+        runtime.request('/props')
+    assert not owner.integrity and runtime.reconnects == []
+
+
+def test_generation_loss_is_failed_sample_and_next_seed_not_replay(suite, tmp_path):
+    fixture = next(f for f in suite[0] if f.stage == 'pre_vote')
+    valid = q.witnesses('pre_vote', fixture)[0].decode()
+    class LostOnce(FakeRuntime):
+        def __init__(self):
+            super().__init__(None)
+            self.seeds = []
+        def request(self, endpoint, body, **kwargs):
+            self.calls += 1
+            self.seeds.append(body['seed'])
+            if len(self.seeds) == 1:
+                raise r.GenerationDisconnected('GENERATION_DISCONNECTED')
+            return {'choices': [{'finish_reason': 'stop', 'message': {'content': valid}}],
+                    'usage': {'prompt_tokens': 1, 'completion_tokens': 1}}
+    runtime = LostOnce()
+    attempts, results, ok = r.run_rows([(fixture, 4242027)], runtime, {'pre_vote': 100}, tmp_path,
+                                        cache=request_cache(fixture), probe=False)
+    assert ok and len(results) == 1
+    assert [a['status'] for a in attempts] == ['TRANSPORT_GENERATION_LOST', 'ACCEPTED']
+    assert runtime.seeds == [r.derived_seed(4242027, 'pre_vote', 1),
+                             r.derived_seed(4242027, 'pre_vote', 2)]
+
+
+@pytest.mark.parametrize('close_mode', ['idle', 'count'])
+def test_fake_http_reconnect_runs_default_96_row_domain(suite, tmp_path, monkeypatch, close_mode):
+    fixtures, rows = suite
+    first = rows[0]
+    answer_raw = next(raw for raw in q.witnesses('chat_plan', first[0])
+                      if json.loads(raw)['act'] == 'ANSWER')
+    answer = q.product.parse_and_validate_generation_v2_candidate_structure(
+        'chat_plan', answer_raw, first[0].catalog)
+    responses = []
+    records = []
+    for index, (fixture, seed) in enumerate(rows):
+        raw = (answer_raw if index == 0 else
+               next(raw for raw in q.witnesses(fixture.stage, fixture)
+                    if fixture.stage != 'chat_plan' or json.loads(raw)['act'] == 'NONE'))
+        responses.append(raw.decode())
+        body = q.body(fixture.stage, fixture, r.derived_seed(seed, fixture.stage, 1), 100, None)
+        wire = q.wire(body)
+        records.append({'case_id': fixture.case.case_id, 'seed': seed,
+                        'measured': [{'stage': fixture.stage, 'ordinal': 1,
+                                      'plan_sha256': None, 'wire': wire.decode(),
+                                      'wire_sha256': q.digest(wire), 'input_tokens': 1,
+                                      'rendered_sha256': 'f' * 64}]})
+        if index == 0:
+            responses.append(q.wire({'message': 'I will reconsider that evidence.'}).decode())
+    cache = r.RequestCache(records)
+    cache.prepare_message(first[0], first[1], answer, 100,
+                          SimpleNamespace(input_count=lambda body: (1, 'f' * 64)), tmp_path)
+    sent_generation = []
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+        def setup(self):
+            super().setup()
+            if close_mode == 'idle':
+                self.connection.settimeout(.05)
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            if self.path == '/v1/chat/completions':
+                content = responses[len(sent_generation)]
+                sent_generation.append(body['seed'])
+                value = {'choices': [{'finish_reason': 'stop', 'message': {'content': content}}],
+                         'usage': {'prompt_tokens': 1, 'completion_tokens': 1}}
+                close = close_mode == 'count' and len(sent_generation) % 7 == 0
+            elif self.path == '/tokenize':
+                value, close = {'tokens': [1]}, False
+            else:
+                raise AssertionError(self.path)
+            self.reply(value, close)
+        def do_GET(self):
+            value = ({'build_info': 'fake', 'model_path': 'fake.gguf', 'chat_template': 'x',
+                      'default_generation_settings': {'seed': 1}} if self.path == '/props' else
+                     [{'n_ctx': 8192, 'is_processing': False}])
+            self.reply(value, False)
+        def reply(self, value, close):
+            raw = q.wire(value)
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(raw)))
+            if close:
+                self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(raw)
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(r.existing, 'PORT', server.server_port)
+    owner = SimpleNamespace(integrity=True, sources={'fixed': 'source'}, light=lambda: None,
+                            reconnect_check=lambda: None, reconnect_post_check=lambda: None,
+                            runtime_identity=None)
+    runtime = r.Runtime(owner)
+    original_request = runtime.request
+    def delayed_request(endpoint, *args, **kwargs):
+        if close_mode == 'idle' and kwargs.get('generation'):
+            r.time.sleep(.08)
+        return original_request(endpoint, *args, **kwargs)
+    runtime.request = delayed_request
+    try:
+        owner.runtime_identity = runtime.identity()
+        runtime.recorder.fixed = True
+        attempts, results, ok = r.run_rows(rows, runtime,
+            {stage: 100 for stage in q.STAGES}, tmp_path, cache=cache, probe=False)
+        assert ok and len(results) == 96 and r.actual_summary(attempts, results)['unrun'] == 0, (
+            attempts[-1] if attempts else None, len(results), len(sent_generation), owner.integrity,
+            runtime.pending_reconnect, runtime.reconnects[-1:] )
+        assert len(sent_generation) == len(attempts) == 97
+        assert [a['stage'] for a in attempts[:2]] == ['chat_plan', 'message']
+        assert len({a['case_id'] for a in attempts}) == 32
+        assert runtime.transport_generation == len(runtime.reconnects) + 1
+        assert all(e['postcheck'] for e in runtime.reconnects)
+        assert set(runtime.body_send_counts.values()) == {1}
     finally:
         runtime.close()
         server.shutdown()
