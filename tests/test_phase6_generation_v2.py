@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -56,6 +57,23 @@ def catalog() -> GenerationCatalogV2:
             AbilityOptionV2("o201", 2, ("p001", "p002"), True),
         ),
     )
+
+
+@pytest.mark.parametrize('prior', [0, 20, 75, 80, 100])
+def test_exact_prior_preserves_existing_score_and_current_grid(prior):
+    choices = tuple(x for x in (0, 25, 50, 75, 100) if x != prior)
+    value = replace(catalog(), opinion_bases=(OpinionBasisV2('u000', 'p001', 'SUSPICION', prior, choices),))
+    schema = build_generation_v2_schema('chat_plan', value)
+    branches = [b for b in schema['oneOf'] if b['properties']['act'].get('const') == 'OPINION_CHANGE']
+    assert branches
+    assert all(b['properties']['opinion_current']['enum'] == list(choices) for b in branches)
+    assert value.opinion_bases[0].prior == prior
+
+
+@pytest.mark.parametrize('prior', [-1, 101, True, False, 20.0, '20', None])
+def test_prior_rejects_non_exact_integer_or_out_of_range(prior):
+    with pytest.raises(GenerationV2Error):
+        replace(catalog(), opinion_bases=(OpinionBasisV2('u000', 'p001', 'SUSPICION', prior, (0, 25, 50, 75, 100)),))
 
 
 def compact(value: object) -> bytes:

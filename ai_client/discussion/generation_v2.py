@@ -105,7 +105,7 @@ class GenerationCatalogV2:
             if basis.subject_player_id not in self.player_ids:
                 raise GenerationV2Error("opinion basis subject is outside player catalog")
             if (basis.dimension not in {"SUSPICION", "CREDIBILITY"}
-                    or type(basis.prior) is not int or basis.prior not in _SCORES
+                    or type(basis.prior) is not int or not 0 <= basis.prior <= 100
                     or type(basis.allowed_current) is not tuple or not basis.allowed_current):
                 raise GenerationV2Error("opinion basis requires a score prior and current choices")
             expected_current = tuple(score for score in _SCORES if score != basis.prior)
