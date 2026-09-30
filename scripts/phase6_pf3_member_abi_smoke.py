@@ -217,6 +217,7 @@ def run(args, *, backend_factory=None, binding_validator=_validate_static_bindin
             failure = None
             pre = ()
             post = ()
+            events = ()
             history = ["NEW", "CLAIMED", "INPUT_BOUND", "TOOL_BOUND"]
             input_stream = tempfile.TemporaryFile(mode="w+b")
             try:
@@ -230,7 +231,8 @@ def run(args, *, backend_factory=None, binding_validator=_validate_static_bindin
                 backend.wait_ready("PRE", max(0.0, deadline - time.monotonic()))
                 history.append("NATIVE_LOADED")
                 pre = backend.snapshot()
-                core.validate_module_sets(pre, pre, backend.events(), config["approved_non_system"])
+                events = tuple(backend.events())
+                core.validate_module_sets(pre, pre, events, config["approved_non_system"])
                 history.append("MODULE_PRE_VERIFIED")
                 backend.continue_child("PRE", config["nonce"])
                 result = backend.raw_result(max(0.0, deadline - time.monotonic()))
@@ -239,7 +241,8 @@ def run(args, *, backend_factory=None, binding_validator=_validate_static_bindin
                 history.append("DUMP_VERIFIED")
                 backend.wait_ready("POST", max(0.0, deadline - time.monotonic()))
                 post = backend.snapshot()
-                core.validate_module_sets(pre, post, backend.events(), config["approved_non_system"])
+                events = tuple(backend.events())
+                core.validate_module_sets(pre, post, events, config["approved_non_system"])
                 history.append("MODULE_POST_VERIFIED")
                 backend.continue_child("POST", config["nonce"])
                 backend.reap(max(0.0, deadline - time.monotonic()))
@@ -254,7 +257,6 @@ def run(args, *, backend_factory=None, binding_validator=_validate_static_bindin
                         failure = failure or core.failure_observation(exc)
                 input_stream.close()
             status = "ABI_COMPATIBLE" if failure is None and result is not None else "UNKNOWN_ABI_IDENTITY"
-            events = () if backend is None else backend.events()
             module_projection = {"module_pre": _module_projection(pre), "module_post": _module_projection(post),
                 "module_events": [{"ordinal": item.ordinal, "kind": item.kind,
                     "module": None if item.module is None else item.module.__dict__} for item in events]}

@@ -146,9 +146,10 @@ def test_pinned_identity_drift_is_rejected(tmp_path: Path) -> None:
             build_tool._verify_pinned_identity(pin, sha, ("foreign",))
 
 
+@pytest.mark.parametrize("unload_at", ["none", "cleanup", "post"])
 @pytest.mark.parametrize("fail_child", [False, True])
 def test_member_smoke_owned_evidence_is_closed_and_one_shot(tmp_path: Path, monkeypatch,
-                                                            fail_child: bool) -> None:
+                                                            fail_child: bool, unload_at: str) -> None:
     from contextlib import ExitStack
     from types import SimpleNamespace
     import scripts.phase6_private_review as private_helper
@@ -198,17 +199,21 @@ def test_member_smoke_owned_evidence_is_closed_and_one_shot(tmp_path: Path, monk
     class Backend:
         def __init__(self, *args, **kwargs):
             self.started_count = 0; self.exit_code = None; self.timed_out = False
-            self.cleanup_result = "NOT_STARTED"; self._phase = 0
+            self.cleanup_result = "NOT_STARTED"; self._phase = 0; self._closed = False
         def start(self, *args): self.started_count += 1
         def wait_ready(self, phase, timeout):
             if fail_child and phase == "PRE":
                 raise proof.ProofError("UNKNOWN_ABI_IDENTITY", "synthetic smoke failure")
         def snapshot(self): return (module,)
-        def events(self): return (event,)
+        def events(self):
+            if (unload_at == "cleanup" and self._closed) or (unload_at == "post" and self._phase == 1):
+                return (event, proof.ModuleEvent(1, "UNLOAD", module))
+            return (event,)
         def continue_child(self, phase, nonce): self._phase += 1
         def raw_result(self, timeout): return child_result
         def reap(self, timeout): self.exit_code = 0; self.cleanup_result = "REAPED"
         def close(self):
+            self._closed = True
             if self.cleanup_result == "NOT_STARTED":
                 self.exit_code = 1; self.cleanup_result = "REAPED"
         def stderr_bytes(self): return b"synthetic-private-smoke"
@@ -218,7 +223,8 @@ def test_member_smoke_owned_evidence_is_closed_and_one_shot(tmp_path: Path, monk
     args = SimpleNamespace(config=config_path, private=private, output=output)
     result = abi_smoke.run(args, backend_factory=factory,
         binding_validator=lambda value, stack: binding)
-    assert result == (2 if fail_child else 0)
+    rejected = fail_child or unload_at == "post"
+    assert result == (2 if rejected else 0)
     assert created[0].started_count == 1
     assert set(path.name for path in private.iterdir()) == {
         "claim.json", "child-stderr.bin", "detail.json", "manifest.json", "seal.json"}
@@ -228,7 +234,15 @@ def test_member_smoke_owned_evidence_is_closed_and_one_shot(tmp_path: Path, monk
         "claim.json", "child-stderr.bin", "detail.json"}
     public = json.loads(output.read_text())
     assert public["child_count"] == 1
-    assert public["status"] == ("UNKNOWN_ABI_IDENTITY" if fail_child else "ABI_COMPATIBLE")
+    assert public["status"] == ("UNKNOWN_ABI_IDENTITY" if rejected else "ABI_COMPATIBLE")
+    detail = json.loads((private / "detail.json").read_text())
+    if not rejected:
+        projection = detail["module_projection"]
+        assert [item["kind"] for item in projection["module_events"]] == [event.kind]
+        sealed_events = tuple(proof.ModuleEvent(item["ordinal"], item["kind"],
+            proof.ModuleIdentity(**item["module"])) for item in projection["module_events"])
+        proof.validate_module_sets((module,), (module,), sealed_events, allow)
+        assert created[0]._closed is True
     with pytest.raises(proof.ProofError, match="container already used"):
         abi_smoke.run(args, backend_factory=factory,
             binding_validator=lambda value, stack: binding)
