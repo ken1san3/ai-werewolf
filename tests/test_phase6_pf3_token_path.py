@@ -14,6 +14,7 @@ import pytest
 from scripts import build_phase6_pf3_token_path as build_tool
 from scripts import phase6_pf3_token_path as proof
 from scripts import phase6_pf3_token_path_windows as windows_proof
+from scripts import phase6_pf3_member_abi_smoke as abi_smoke
 
 
 def sampler_values() -> dict[str, object]:
@@ -46,6 +47,7 @@ def good_result(*, count: int = 512) -> proof.ChildResult:
         eog_allowed=(True,), accepted_eog=1024, accounted_generated_tokens=count + 1,
         calls=calls, sampler_record=proof.EffectiveSamplerRecord(**sampler_values()),
         abi={key: 0 for key in proof.ABI_KEYS},
+        member_abi={"schema_version": proof.MEMBER_ABI_RUNTIME_SCHEMA, "synthetic": True},
         status="PROOF_COMPLETE")
 
 
@@ -53,6 +55,192 @@ def one_module() -> tuple[proof.ModuleIdentity, proof.ModuleEvent, dict[str, str
     module = proof.ModuleIdentity("C:/proof/proof.exe", 1, 2, 3, "2" * 64, "NON_SYSTEM")
     event = proof.ModuleEvent(0, "CREATE_PROCESS", module)
     return module, event, {"proof.exe": module.sha256}
+
+
+def member_runtime() -> dict[str, object]:
+    return {
+        "schema_version": proof.MEMBER_ABI_RUNTIME_SCHEMA,
+        "compile_record_sha256": "1" * 64, "_MSC_VER": 1940, "_MSC_FULL_VER": 194000000,
+        "_MSVC_LANG": 202002, "dynamic_crt": True, "iterator_debug_level": 0,
+        "pmf_mode": "MSVC_DEFAULT_BEST_CASE_NO_BASE", "pmf_size": 8, "pmf_alignment": 8,
+        "farproc_size": 8, "pointer_size": 8, "pmf_trivially_copyable": True,
+        "decorated_symbol": build_tool.MEMBER_ABI_DUMP_SYMBOL, "export_kind": "DIRECT_EXECUTABLE",
+        "export_nonforwarded": True, "address_in_pinned_module": True,
+        "address_in_executable_section": True, "getmodule_owner_matches": True,
+        "virtualquery_allocation_base_matches": True, "pmf_roundtrip_bytes_match": True,
+        "pmf_roundtrip_pointer_match": True, "binding_enabled": True,
+    }
+
+
+def test_member_abi_runtime_record_is_closed() -> None:
+    record = member_runtime()
+    proof.validate_member_abi_runtime(record, expected_compile_record_sha256="1" * 64,
+                                      expected_symbol=build_tool.MEMBER_ABI_DUMP_SYMBOL)
+    for key in sorted(record):
+        bad = dict(record); bad.pop(key)
+        with pytest.raises(proof.ProofError):
+            proof.validate_member_abi_runtime(bad)
+    bad = dict(record); bad["binding_enabled"] = False
+    with pytest.raises(proof.ProofError):
+        proof.validate_member_abi_runtime(bad)
+    failure = {"schema_version": "aiwolf.pf3-dump-member-abi-runtime-failure.v1",
+        "status": "UNKNOWN_ABI_IDENTITY", "failing_check": "PMF_SHAPE",
+        "parse_calls": 0, "dump_calls": 0, "emitter_calls": 0}
+    proof.validate_member_abi_runtime_failure(failure)
+    failure["parse_calls"] = 1
+    with pytest.raises(proof.ProofError):
+        proof.validate_member_abi_runtime_failure(failure)
+
+
+def test_member_abi_mock_record_is_closed() -> None:
+    value = {
+        "schema_version": "aiwolf.pf3-dump-member-abi-mock.v1", "status": "PASS",
+        "call_count": 1, "receiver_expected": 51, "receiver_observed": 51,
+        "indent_expected": -1, "indent_observed": -1,
+        "returned_utf8": proof.MEMBER_ABI_MOCK_RETURNED,
+        "returned_size": len(proof.MEMBER_ABI_MOCK_RETURNED),
+        "returned_sha256": proof.MEMBER_ABI_MOCK_RETURNED_SHA256, "returned_exact_match": True,
+        "destructor_count": 1, "cpp_exception": False, "seh": False, "timed_out": False,
+        "exit_code": 0, "mock_dll_sha256": "2" * 64, "mock_caller_exe_sha256": "3" * 64,
+    }
+    proof.validate_member_abi_mock_result(value, dll_sha256="2" * 64, caller_sha256="3" * 64)
+    for key in sorted(value):
+        bad = dict(value); bad.pop(key)
+        with pytest.raises(proof.ProofError):
+            proof.validate_member_abi_mock_result(bad, dll_sha256="2" * 64, caller_sha256="3" * 64)
+
+
+def test_member_binding_source_has_no_old_free_function_call() -> None:
+    source = (proof.ROOT / "scripts/native/phase6_pf3_token_path.cpp").read_text(encoding="utf-8")
+    assert "using pf3_json_dump_fn" not in source
+    assert "g_common_json_dump(&parsed" not in source
+    assert "(parsed.*g_common_json_dump)(-1)" in source
+    helper = (proof.ROOT / "scripts/native/phase6_pf3_member_abi.h").read_text(encoding="utf-8")
+    assert "std::string (Owner::*)(int) const" in helper
+    assert "std::memcpy(&member, &address" in helper
+
+
+def test_member_smoke_execution_bundle_is_closed() -> None:
+    path = proof.ROOT / "scripts/native/phase6_pf3_member_abi_execution_bundle.json"
+    assert proof.digest(path.read_bytes()) == abi_smoke.EXECUTION_BUNDLE_SHA256
+    value = proof.strict_json(path.read_bytes())
+    abi_smoke.validate_execution_bundle(value, value["artifacts"] | {
+        "runner_source": "0" * 64, "windows_source": "0" * 64,
+        "build_helper_source": "0" * 64,
+    })
+    bad = dict(value); bad["qualification_sha256"] = "1" * 64
+    with pytest.raises(proof.ProofError):
+        abi_smoke.validate_execution_bundle(bad, value["artifacts"])
+
+
+def test_pinned_identity_drift_is_rejected(tmp_path: Path) -> None:
+    target = tmp_path / "pinned.bin"
+    target.write_bytes(b"pinned")
+    with proof.t527.pinned_static_file(target) as pin:
+        sha = proof.t527.descriptor_hash(pin["fd"])
+        identity = proof.t527.file_identity(pin["fd"])
+        build_tool._verify_pinned_identity(pin, sha, identity)
+        with pytest.raises(proof.ProofError, match="pinned artifact drift"):
+            build_tool._verify_pinned_identity(pin, "0" * 64, identity)
+        with pytest.raises(proof.ProofError, match="pinned artifact drift"):
+            build_tool._verify_pinned_identity(pin, sha, ("foreign",))
+
+
+@pytest.mark.parametrize("fail_child", [False, True])
+def test_member_smoke_owned_evidence_is_closed_and_one_shot(tmp_path: Path, monkeypatch,
+                                                            fail_child: bool) -> None:
+    from contextlib import ExitStack
+    from types import SimpleNamespace
+    import scripts.phase6_private_review as private_helper
+    monkeypatch.setattr(private_helper, "_windows_private_path", lambda *a, **kw: True)
+    private = tmp_path / ("private-fail" if fail_child else "private-pass")
+    private.mkdir()
+    output = tmp_path / ("public-fail.json" if fail_child else "public-pass.json")
+    module, event, allow = one_module()
+    paths = {key: str((tmp_path / key).resolve()) for key in abi_smoke.PUBLIC_HASH_KEYS}
+    paths["actual_smoke_exe"] = str((tmp_path / "proof.exe").resolve())
+    hashes = {key: "a" * 64 for key in abi_smoke.PUBLIC_HASH_KEYS}
+    config = {"schema_version": abi_smoke.SCHEMA,
+        "run_id": ("smoke_fail_00001" if fail_child else "smoke_pass_00001"),
+        "nonce": "a" * 32, "paths": paths, "hashes": hashes,
+        "module_paths": {"proof": str((tmp_path / "proof.exe").resolve())},
+        "approved_non_system": allow,
+        "symbols": {"json_parse": "parse", "json_dump": "dump", "json_destroy": "destroy"},
+        "execution_bundle": str((tmp_path / "bundle.json").resolve())}
+    config_path = tmp_path / ("fail-config.json" if fail_child else "pass-config.json")
+    config_path.write_bytes(proof.canonical_bytes(config) + b"\n")
+    runtime = member_runtime()
+    compile_record = {"schema_version": "aiwolf.pf3-dump-member-abi-compile-record.v1",
+        "target_arch": "x86_64-pc-windows-msvc", "compiler_sha256": "1" * 64,
+        "linker_sha256": "2" * 64, "msvc_version": "synthetic",
+        "_MSC_VER": runtime["_MSC_VER"], "_MSC_FULL_VER": runtime["_MSC_FULL_VER"],
+        "_MSVC_LANG": runtime["_MSVC_LANG"], "dynamic_crt": True,
+        "iterator_debug_level": 0, "header_relative_path": "common/json.h",
+        "header_sha256": "3" * 64, "source_archive_sha256": "4" * 64,
+        "class_declaration": "common_json", "no_base_clause": True,
+        "dll_sha256": "5" * 64, "decorated_symbol": build_tool.MEMBER_ABI_DUMP_SYMBOL,
+        "export_kind": "DIRECT_EXECUTABLE", "pmf_mode": "MSVC_DEFAULT_BEST_CASE_NO_BASE",
+        "pmf_size": 8, "pmf_alignment": 8, "farproc_size": 8, "pointer_size": 8,
+        "pmf_trivially_copyable": True, "binding_method": "MEMCPY_FARPROC_BYTES_TO_PMF_V1"}
+    compile_sha = proof.digest(proof.canonical_bytes(compile_record) + b"\n")
+    runtime["compile_record_sha256"] = compile_sha
+    child_result = {"schema_version": "aiwolf.pf3-dump-actual-abi-smoke.v1",
+        "status": "ABI_COMPATIBLE", "parse_calls": 1, "dump_calls": 1,
+        "destroy_calls": 1, "input_utf8": '{"pf3":1}', "output_utf8": '{"pf3":1}',
+        "output_exact_match": True, "output_size": 9,
+        "output_sha256": proof.digest(b'{"pf3":1}'), "compile_record_sha256": compile_sha,
+        "runtime_record": runtime, "exception": False, "seh": False, "timed_out": False,
+        "exit_code": 0, "cleanup": "PENDING_POST"}
+    binding = {"pins": {"actual_smoke_exe": {"path": paths["actual_smoke_exe"]}},
+        "module_pins": {}, "identities": hashes, "execution": {}, "dependency": {},
+        "build_manifest": {}, "compile_record": compile_record,
+        "compile_record_sha256": compile_sha}
+    class Backend:
+        def __init__(self, *args, **kwargs):
+            self.started_count = 0; self.exit_code = None; self.timed_out = False
+            self.cleanup_result = "NOT_STARTED"; self._phase = 0
+        def start(self, *args): self.started_count += 1
+        def wait_ready(self, phase, timeout):
+            if fail_child and phase == "PRE":
+                raise proof.ProofError("UNKNOWN_ABI_IDENTITY", "synthetic smoke failure")
+        def snapshot(self): return (module,)
+        def events(self): return (event,)
+        def continue_child(self, phase, nonce): self._phase += 1
+        def raw_result(self, timeout): return child_result
+        def reap(self, timeout): self.exit_code = 0; self.cleanup_result = "REAPED"
+        def close(self):
+            if self.cleanup_result == "NOT_STARTED":
+                self.exit_code = 1; self.cleanup_result = "REAPED"
+        def stderr_bytes(self): return b"synthetic-private-smoke"
+    created = []
+    def factory(*args, **kwargs):
+        value = Backend(*args, **kwargs); created.append(value); return value
+    args = SimpleNamespace(config=config_path, private=private, output=output)
+    result = abi_smoke.run(args, backend_factory=factory,
+        binding_validator=lambda value, stack: binding)
+    assert result == (2 if fail_child else 0)
+    assert created[0].started_count == 1
+    assert set(path.name for path in private.iterdir()) == {
+        "claim.json", "child-stderr.bin", "detail.json", "manifest.json", "seal.json"}
+    assert not (private / "input.bin").exists()
+    manifest = json.loads((private / "manifest.json").read_text())
+    assert {item["name"] for item in manifest["files"]} == {
+        "claim.json", "child-stderr.bin", "detail.json"}
+    public = json.loads(output.read_text())
+    assert public["child_count"] == 1
+    assert public["status"] == ("UNKNOWN_ABI_IDENTITY" if fail_child else "ABI_COMPATIBLE")
+    with pytest.raises(proof.ProofError, match="container already used"):
+        abi_smoke.run(args, backend_factory=factory,
+            binding_validator=lambda value, stack: binding)
+    assert len(created) == 1
+
+
+def test_build_and_run_member_abi_mock(tmp_path: Path) -> None:
+    record = build_tool.build_member_abi_mock(tmp_path / "member-abi")
+    assert record["schema_version"] == "aiwolf.pf3-member-abi-mock-build.v1"
+    result = proof.strict_json((tmp_path / "member-abi/phase6_pf3_member_abi_mock_result.json").read_bytes())
+    proof.validate_member_abi_mock_result(result, dll_sha256=record["mock_dll_sha256"],
+                                          caller_sha256=record["mock_caller_exe_sha256"])
 
 
 def test_witness_is_fixed_and_bounded() -> None:

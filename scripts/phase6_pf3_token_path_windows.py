@@ -283,8 +283,8 @@ def _identity_from_fd(fd: int, path: Path, deadline: float) -> core.ModuleIdenti
 
 class WindowsDebugBackend:
     def __init__(self, child: Path, input_fd: int, approved_paths: Mapping[str, str], *,
-                 model_path: Path, native_dir: Path, symbols: Mapping[str, str],
-                 static_verify, run_deadline: float):
+                 model_path: Path | None, native_dir: Path, symbols: Mapping[str, str],
+                 static_verify, run_deadline: float, mode: str = "proof"):
         if os.name != "nt":
             raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "Windows required")
         self.child = child
@@ -295,6 +295,9 @@ class WindowsDebugBackend:
         self.symbols = dict(symbols)
         self.static_verify = static_verify
         self.run_deadline = run_deadline
+        if mode not in {"proof", "abi_smoke"}:
+            raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "child mode")
+        self.mode = mode
         self.stack = ExitStack()
         self.lock = threading.Lock()
         self._events: list[core.ModuleEvent] = []
@@ -404,16 +407,19 @@ class WindowsDebugBackend:
             if self._start_cancel.is_set():
                 raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "spawn cancelled")
             self._debug_operation = "CREATE_PROCESS"
-            proc = subprocess.Popen([str(self.child), "--input-handle", str(input_handle),
+            command = [str(self.child), "--input-handle", str(input_handle),
                                      "--input-volume", str(input_identity[0]),
                                      "--input-file-id", str(input_identity[1]),
                                      "--input-size", str(input_identity[2]),
-                                     "--model", str(self.model_path),
                                      "--native-dir", str(self.native_dir),
-                                     "--emitter-symbol", self.symbols["emitter"],
                                      "--json-parse-symbol", self.symbols["json_parse"],
                                      "--json-dump-symbol", self.symbols["json_dump"],
-                                     "--json-destroy-symbol", self.symbols["json_destroy"]],
+                                     "--json-destroy-symbol", self.symbols["json_destroy"]]
+            if self.mode == "proof":
+                if self.model_path is None:
+                    raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "model path")
+                command += ["--model", str(self.model_path), "--emitter-symbol", self.symbols["emitter"]]
+            proc = subprocess.Popen(command,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 creationflags=DEBUG_ONLY_THIS_PROCESS | CREATE_NO_WINDOW,
                 startupinfo=startup, close_fds=True)
@@ -640,13 +646,16 @@ class WindowsDebugBackend:
                 result.append(identity)
         return tuple(sorted(result, key=lambda item: os.path.normcase(item.final_path)))
 
-    def result(self, timeout: float) -> core.ChildResult:
+    def raw_result(self, timeout: float) -> dict[str, object]:
         raw = self._line(timeout)
         try: value = core.strict_json(raw)
         except Exception as exc: raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "result JSON") from exc
         if not isinstance(value, dict):
             raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "result object")
-        return core.parse_child_result(value)
+        return value
+
+    def result(self, timeout: float) -> core.ChildResult:
+        return core.parse_child_result(self.raw_result(timeout))
 
     def events(self) -> tuple[core.ModuleEvent, ...]:
         with self.lock: return tuple(self._events)

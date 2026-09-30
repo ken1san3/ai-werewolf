@@ -360,11 +360,154 @@ class ChildResult:
     calls: Mapping[str, int]
     sampler_record: EffectiveSamplerRecord
     abi: Mapping[str, int]
+    member_abi: Mapping[str, object]
     status: str
 
 
+MEMBER_ABI_RUNTIME_SCHEMA = "aiwolf.pf3-dump-member-abi-runtime.v1"
+MEMBER_ABI_RUNTIME_KEYS = {
+    "schema_version", "compile_record_sha256", "_MSC_VER", "_MSC_FULL_VER", "_MSVC_LANG",
+    "dynamic_crt", "iterator_debug_level", "pmf_mode", "pmf_size", "pmf_alignment",
+    "farproc_size", "pointer_size", "pmf_trivially_copyable", "decorated_symbol", "export_kind",
+    "export_nonforwarded", "address_in_pinned_module", "address_in_executable_section",
+    "getmodule_owner_matches", "virtualquery_allocation_base_matches", "pmf_roundtrip_bytes_match",
+    "pmf_roundtrip_pointer_match", "binding_enabled",
+}
+MEMBER_ABI_TRUE_KEYS = {
+    "dynamic_crt", "pmf_trivially_copyable", "export_nonforwarded", "address_in_pinned_module",
+    "address_in_executable_section", "getmodule_owner_matches", "virtualquery_allocation_base_matches",
+    "pmf_roundtrip_bytes_match", "pmf_roundtrip_pointer_match", "binding_enabled",
+}
+MEMBER_ABI_MOCK_KEYS = {
+    "schema_version", "status", "call_count", "receiver_expected", "receiver_observed",
+    "indent_expected", "indent_observed", "returned_utf8", "returned_size", "returned_sha256",
+    "returned_exact_match", "destructor_count", "cpp_exception", "seh", "timed_out", "exit_code",
+    "mock_dll_sha256", "mock_caller_exe_sha256",
+}
+MEMBER_ABI_MOCK_RETURNED = '{"receiver":51,"indent":-1}'
+MEMBER_ABI_MOCK_RETURNED_SHA256 = hashlib.sha256(MEMBER_ABI_MOCK_RETURNED.encode("utf-8")).hexdigest()
+
+
+def validate_member_abi_mock_result(value: Mapping[str, object], *, dll_sha256: str,
+                                    caller_sha256: str) -> None:
+    if set(value) != MEMBER_ABI_MOCK_KEYS:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI mock shape")
+    expected = {
+        "schema_version": "aiwolf.pf3-dump-member-abi-mock.v1", "status": "PASS",
+        "call_count": 1, "receiver_expected": 51, "receiver_observed": 51,
+        "indent_expected": -1, "indent_observed": -1, "returned_utf8": MEMBER_ABI_MOCK_RETURNED,
+        "returned_size": len(MEMBER_ABI_MOCK_RETURNED),
+        "returned_sha256": MEMBER_ABI_MOCK_RETURNED_SHA256, "returned_exact_match": True,
+        "destructor_count": 1, "cpp_exception": False, "seh": False, "timed_out": False,
+        "exit_code": 0, "mock_dll_sha256": dll_sha256, "mock_caller_exe_sha256": caller_sha256,
+    }
+    if dict(value) != expected:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI mock result")
+
+
+MEMBER_ABI_SMOKE_CHILD_KEYS = {
+    "schema_version", "status", "parse_calls", "dump_calls", "destroy_calls", "input_utf8",
+    "output_utf8", "output_exact_match", "output_size", "output_sha256", "compile_record_sha256",
+    "runtime_record", "exception", "seh", "timed_out", "exit_code", "cleanup",
+}
+MEMBER_ABI_FAILURE_CHECKS = {
+    "COMPILE_RECORD", "COMPILER_MACROS", "PMF_MODE", "PMF_SHAPE", "SYMBOL", "EXPORT_DIRECT",
+    "ADDRESS_MODULE", "ADDRESS_SECTION", "GETMODULE_OWNER", "VIRTUALQUERY_BASE",
+    "ROUNDTRIP_BYTES", "ROUNDTRIP_POINTER",
+}
+
+
+def validate_member_abi_runtime_failure(value: Mapping[str, object]) -> None:
+    if (set(value) != {"schema_version", "status", "failing_check", "parse_calls", "dump_calls",
+                       "emitter_calls"}
+            or value.get("schema_version") != "aiwolf.pf3-dump-member-abi-runtime-failure.v1"
+            or value.get("status") != "UNKNOWN_ABI_IDENTITY"
+            or value.get("failing_check") not in MEMBER_ABI_FAILURE_CHECKS
+            or value.get("parse_calls") != 0 or value.get("dump_calls") != 0
+            or value.get("emitter_calls") != 0):
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI runtime failure")
+
+
+def validate_member_abi_smoke_child(value: Mapping[str, object], *, compile_record_sha256: str,
+                                    compile_record: Mapping[str, object]) -> None:
+    if set(value) != MEMBER_ABI_SMOKE_CHILD_KEYS:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "ABI smoke child shape")
+    runtime = value.get("runtime_record")
+    if not isinstance(runtime, dict):
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "ABI smoke runtime record")
+    validate_member_abi_runtime(runtime, expected_compile_record_sha256=compile_record_sha256,
+                                expected_symbol=compile_record.get("decorated_symbol"),
+                                expected_compile_record=compile_record)
+    fixed = '{"pf3":1}'
+    expected = {
+        "schema_version": "aiwolf.pf3-dump-actual-abi-smoke.v1", "status": "ABI_COMPATIBLE",
+        "parse_calls": 1, "dump_calls": 1, "destroy_calls": 1, "input_utf8": fixed,
+        "output_utf8": fixed, "output_exact_match": True, "output_size": len(fixed),
+        "output_sha256": hashlib.sha256(fixed.encode("utf-8")).hexdigest(),
+        "compile_record_sha256": compile_record_sha256, "runtime_record": runtime,
+        "exception": False, "seh": False, "timed_out": False, "exit_code": 0,
+        "cleanup": "PENDING_POST",
+    }
+    if dict(value) != expected:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "ABI smoke child result")
+
+
+def validate_member_abi_runtime(value: Mapping[str, object], *,
+                                expected_compile_record_sha256: str | None = None,
+                                expected_symbol: str | None = None,
+                                expected_compile_record: Mapping[str, object] | None = None,
+                                synthetic: bool = False) -> None:
+    if synthetic:
+        if dict(value) != {"schema_version": MEMBER_ABI_RUNTIME_SCHEMA, "synthetic": True}:
+            raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI synthetic record")
+        return
+    if set(value) != MEMBER_ABI_RUNTIME_KEYS or value.get("schema_version") != MEMBER_ABI_RUNTIME_SCHEMA:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI runtime shape")
+    if any(value.get(key) is not True for key in MEMBER_ABI_TRUE_KEYS):
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI runtime check")
+    for key in ("_MSC_VER", "_MSC_FULL_VER", "_MSVC_LANG", "iterator_debug_level", "pmf_size",
+                "pmf_alignment", "farproc_size", "pointer_size"):
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI runtime integer")
+    if (value["pmf_size"] != 8 or value["farproc_size"] != 8 or value["pointer_size"] != 8
+            or value["iterator_debug_level"] != 0
+            or value.get("pmf_mode") != "MSVC_DEFAULT_BEST_CASE_NO_BASE"
+            or value.get("export_kind") != "DIRECT_EXECUTABLE"):
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI runtime literal")
+    sha = value.get("compile_record_sha256")
+    symbol = value.get("decorated_symbol")
+    if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{64}", sha) is None:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI compile record")
+    if not isinstance(symbol, str) or not symbol:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI symbol")
+    if expected_compile_record_sha256 is not None and sha != expected_compile_record_sha256:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI compile record")
+    if expected_symbol is not None and symbol != expected_symbol:
+        raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI symbol")
+    if expected_compile_record is not None:
+        expected_projection = {
+            "_MSC_VER": expected_compile_record.get("_MSC_VER"),
+            "_MSC_FULL_VER": expected_compile_record.get("_MSC_FULL_VER"),
+            "_MSVC_LANG": expected_compile_record.get("_MSVC_LANG"),
+            "dynamic_crt": expected_compile_record.get("dynamic_crt"),
+            "iterator_debug_level": expected_compile_record.get("iterator_debug_level"),
+            "pmf_mode": expected_compile_record.get("pmf_mode"),
+            "pmf_size": expected_compile_record.get("pmf_size"),
+            "pmf_alignment": expected_compile_record.get("pmf_alignment"),
+            "farproc_size": expected_compile_record.get("farproc_size"),
+            "pointer_size": expected_compile_record.get("pointer_size"),
+            "pmf_trivially_copyable": expected_compile_record.get("pmf_trivially_copyable"),
+            "decorated_symbol": expected_compile_record.get("decorated_symbol"),
+            "export_kind": expected_compile_record.get("export_kind"),
+        }
+        if any(value.get(key) != item for key, item in expected_projection.items()):
+            raise ProofError("UNKNOWN_ABI_IDENTITY", "member ABI compile/runtime mismatch")
+
+
 def validate_child_result(result: ChildResult, *, nonce: str, expected_raw: bytes | None = None,
-                          expected_abi: Mapping[str, int] | None = None) -> dict[str, object]:
+                          expected_abi: Mapping[str, int] | None = None,
+                          expected_member_abi: Mapping[str, object] | None = None) -> dict[str, object]:
     if result.nonce != nonce or result.status != "PROOF_COMPLETE":
         raise ProofError("UNKNOWN_RUNTIME_INVALID", "child result identity")
     checked_size(result.grammar_size, GRAMMAR_LIMIT, "grammar")
@@ -399,6 +542,13 @@ def validate_child_result(result: ChildResult, *, nonce: str, expected_raw: byte
         raise ProofError("UNKNOWN_ABI_IDENTITY", "ABI self report")
     if expected_abi is not None and dict(result.abi) != dict(expected_abi):
         raise ProofError("UNKNOWN_ABI_IDENTITY", "ABI layout")
+    validate_member_abi_runtime(
+        result.member_abi,
+        expected_compile_record_sha256=(expected_member_abi or {}).get("compile_record_sha256"),
+        expected_symbol=(expected_member_abi or {}).get("decorated_symbol"),
+        expected_compile_record=(expected_member_abi or {}).get("compile_record"),
+        synthetic=bool(result.member_abi.get("synthetic")),
+    )
     expected_calls = {
         "emitter": 1, "tokenize": 2, "detokenize": 2,
         "prefix_apply": token_count, "prefix_accept": token_count,
@@ -622,8 +772,9 @@ def parse_child_result(value: Mapping[str, object]) -> ChildResult:
                 "prefix_after_ids", "prefix_allowed", "roundtrip_exact", "decoder_b64",
                 "vocab_size", "eog_ids", "eog_before_ids", "eog_after_ids", "eog_allowed",
                 "accepted_eog", "accounted_generated_tokens",
-                "calls", "sampler_record", "abi", "status"}
-    if set(value) != expected or not isinstance(value.get("calls"), dict) or not isinstance(value.get("sampler_record"), dict):
+                "calls", "sampler_record", "abi", "member_abi", "status"}
+    if (set(value) != expected or not isinstance(value.get("calls"), dict)
+            or not isinstance(value.get("sampler_record"), dict) or not isinstance(value.get("member_abi"), dict)):
         raise ProofError("UNKNOWN_RUNTIME_INVALID", "child result shape")
     try:
         sampler = EffectiveSamplerRecord(**value["sampler_record"])
@@ -644,7 +795,8 @@ def parse_child_result(value: Mapping[str, object]) -> ChildResult:
             eog_after_ids=tuple(value["eog_after_ids"]), eog_allowed=tuple(value["eog_allowed"]),
             accepted_eog=value["accepted_eog"],
             accounted_generated_tokens=value["accounted_generated_tokens"],
-            calls=dict(value["calls"]), sampler_record=sampler, abi=dict(value["abi"]), status=value["status"])
+            calls=dict(value["calls"]), sampler_record=sampler, abi=dict(value["abi"]),
+            member_abi=dict(value["member_abi"]), status=value["status"])
     except (KeyError, TypeError, ValueError, binascii.Error) as exc:
         raise ProofError("UNKNOWN_RUNTIME_INVALID", "child result shape") from exc
 

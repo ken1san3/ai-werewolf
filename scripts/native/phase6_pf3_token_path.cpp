@@ -14,25 +14,30 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #ifndef PF3_SYNTHETIC
 #include "llama.h"
 #include "common/json.h"
 #include "common/json-schema-to-grammar.h"
+#include "phase6_pf3_member_abi.h"
 #endif
 
 #ifndef PF3_SYNTHETIC
 using pf3_json_parse_fn = common_json (__cdecl *)(const std::string &);
-using pf3_json_dump_fn = std::string (__cdecl *)(const common_json *, int);
 using pf3_json_destroy_fn = void (__cdecl *)(common_json *);
 static pf3_json_parse_fn g_common_json_parse = nullptr;
-static pf3_json_dump_fn g_common_json_dump = nullptr;
+static pf3_member_abi::dump_member_fn<common_json> g_common_json_dump{};
 static pf3_json_destroy_fn g_common_json_destroy = nullptr;
+static pf3_member_abi::Checks g_member_abi_checks{};
+static std::size_t g_json_destroy_calls = 0;
+static const char * g_member_abi_failure = nullptr;
 
 common_json::~common_json() {
     if (!g_common_json_destroy) std::terminate();
     g_common_json_destroy(this);
+    ++g_json_destroy_calls;
 }
 #endif
 
@@ -167,7 +172,7 @@ void emit_result(const Input & input, const std::string & grammar, const std::ve
                  const std::string & decoded, std::size_t vocab_size, const std::vector<std::int32_t> & eog,
                  const std::vector<std::int32_t> & eog_after, const std::vector<bool> & eog_allowed,
                  std::int32_t accepted_eog, bool roundtrip, std::size_t constant_calls,
-                 const std::string & abi_json) {
+                 const std::string & abi_json, const std::string & member_abi_json) {
     std::cout << "{\"nonce\":" << json_escape(input.nonce)
               << ",\"grammar_size\":" << grammar.size()
               << ",\"grammar_b64\":" << json_escape(base64_encode(grammar)) << ",\"token_ids\":";
@@ -191,6 +196,7 @@ void emit_result(const Input & input, const std::string & grammar, const std::ve
                  "\"server\":0,\"gpu\":0,\"game\":0,\"actions\":0,\"constant_native\":" << constant_calls << "}"
               << ",\"sampler_record\":" << input.sampler
               << ",\"abi\":" << abi_json
+              << ",\"member_abi\":" << member_abi_json
               << ",\"status\":\"PROOF_COMPLETE\"}" << std::endl;
 }
 
@@ -211,7 +217,8 @@ void prove(const Input & input) {
         "\"llama_token_data_logit_offset\":0,\"llama_token_data_p_offset\":0,"
         "\"llama_token_data_array_size\":0,\"llama_token_data_array_data_offset\":0,"
         "\"llama_token_data_array_count_offset\":0,\"llama_token_data_array_selected_offset\":0,"
-        "\"llama_token_data_array_sorted_offset\":0}");
+        "\"llama_token_data_array_sorted_offset\":0}",
+        "{\"schema_version\":\"aiwolf.pf3-dump-member-abi-runtime.v1\",\"synthetic\":true}");
     ready("POST", input.nonce);
 }
 #else
@@ -223,6 +230,52 @@ template<class T> T load_proc(HMODULE module, const char * name) {
 
 using grammar_emitter_fn = std::string (__cdecl *)(const common_json &, bool);
 grammar_emitter_fn g_grammar_emitter = nullptr;
+
+std::string member_abi_runtime_json(const std::string & symbol) {
+    const bool symbol_match = symbol == PF3_MEMBER_ABI_EXPECTED_SYMBOL;
+    const bool shape = sizeof(pf3_member_abi::dump_member_fn<common_json>) == 8
+        && sizeof(FARPROC) == 8 && sizeof(void *) == 8
+        && std::is_trivially_copyable_v<pf3_member_abi::dump_member_fn<common_json>>;
+    const bool compile_match = _MSC_VER == PF3_MEMBER_ABI_EXPECTED_MSC_VER
+        && _MSC_FULL_VER == PF3_MEMBER_ABI_EXPECTED_MSC_FULL_VER
+        && _MSVC_LANG == PF3_MEMBER_ABI_EXPECTED_MSVC_LANG
+        && _ITERATOR_DEBUG_LEVEL == PF3_MEMBER_ABI_EXPECTED_ITERATOR_DEBUG_LEVEL
+        && alignof(pf3_member_abi::dump_member_fn<common_json>) == PF3_MEMBER_ABI_EXPECTED_PMF_ALIGNMENT
+#ifdef _DLL
+        && true;
+#else
+        && false;
+#endif
+    const std::string compile_sha = PF3_MEMBER_ABI_COMPILE_RECORD_SHA;
+    auto reject = [](const char * check) -> void { g_member_abi_failure = check; fail("member ABI"); };
+    if (compile_sha.size() != 64 || !std::all_of(compile_sha.begin(), compile_sha.end(), [](char value) {
+            return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'); })) reject("COMPILE_RECORD");
+    if (!compile_match) reject("COMPILER_MACROS");
+    if (!shape) reject("PMF_SHAPE");
+    if (!symbol_match) reject("SYMBOL");
+    if (!g_member_abi_checks.export_nonforwarded) reject("EXPORT_DIRECT");
+    if (!g_member_abi_checks.address_in_pinned_module) reject("ADDRESS_MODULE");
+    if (!g_member_abi_checks.address_in_executable_section) reject("ADDRESS_SECTION");
+    if (!g_member_abi_checks.getmodule_owner_matches) reject("GETMODULE_OWNER");
+    if (!g_member_abi_checks.virtualquery_allocation_base_matches) reject("VIRTUALQUERY_BASE");
+    if (!g_member_abi_checks.pmf_roundtrip_bytes_match) reject("ROUNDTRIP_BYTES");
+    if (!g_member_abi_checks.pmf_roundtrip_pointer_match) reject("ROUNDTRIP_POINTER");
+    if (!g_member_abi_checks.binding_enabled || !pf3_member_abi::all(g_member_abi_checks)) reject("PMF_MODE");
+    return std::string("{\"_MSC_FULL_VER\":") + std::to_string(_MSC_FULL_VER)
+        + ",\"_MSC_VER\":" + std::to_string(_MSC_VER)
+        + ",\"_MSVC_LANG\":" + std::to_string(_MSVC_LANG)
+        + ",\"address_in_executable_section\":true,\"address_in_pinned_module\":true"
+          ",\"binding_enabled\":true,\"compile_record_sha256\":\"" PF3_MEMBER_ABI_COMPILE_RECORD_SHA "\""
+          ",\"decorated_symbol\":" + json_escape(symbol)
+        + ",\"dynamic_crt\":true,\"export_kind\":\"DIRECT_EXECUTABLE\",\"export_nonforwarded\":true"
+          ",\"farproc_size\":8,\"getmodule_owner_matches\":true,\"iterator_debug_level\":"
+        + std::to_string(_ITERATOR_DEBUG_LEVEL)
+        + ",\"pmf_alignment\":" + std::to_string(alignof(pf3_member_abi::dump_member_fn<common_json>))
+        + ",\"pmf_mode\":\"MSVC_DEFAULT_BEST_CASE_NO_BASE\",\"pmf_roundtrip_bytes_match\":true"
+          ",\"pmf_roundtrip_pointer_match\":true,\"pmf_size\":8,\"pmf_trivially_copyable\":true"
+          ",\"pointer_size\":8,\"schema_version\":\"aiwolf.pf3-dump-member-abi-runtime.v1\""
+          ",\"virtualquery_allocation_base_matches\":true}";
+}
 
 struct pf3_buffer_v1 { std::uint8_t * data; std::size_t capacity; std::size_t size; };
 struct pf3_error_v1 { std::uint32_t code; std::uint32_t reserved; };
@@ -238,7 +291,7 @@ extern "C" __declspec(noinline) std::int32_t pf3_emit_grammar_v1(
         // The runner supplies compact canonical JSON in the product insertion order.  Requiring the same dump
         // rejects whitespace, non-canonical spellings, and duplicate keys collapsed by
         // the DOM parser before the actual server emitter is called.
-        if (g_common_json_dump(&parsed, -1) != input_text) { error->code = 4; return -4; }
+        if ((parsed.*g_common_json_dump)(-1) != input_text) { error->code = 4; return -4; }
         if (!g_grammar_emitter) { error->code = 5; return -5; }
         const std::string grammar = g_grammar_emitter(parsed, false);
         if (grammar.empty() || grammar.size() > output->capacity) { output->size = grammar.size(); error->code = 2; return -2; }
@@ -262,8 +315,9 @@ void prove(const Input & input, const std::string & model_path, const std::strin
     if (!common) fail("common load");
     g_grammar_emitter = load_proc<grammar_emitter_fn>(common, emitter_symbol.c_str());
     g_common_json_parse = load_proc<pf3_json_parse_fn>(common, json_parse_symbol.c_str());
-    g_common_json_dump = load_proc<pf3_json_dump_fn>(common, json_dump_symbol.c_str());
+    g_common_json_dump = pf3_member_abi::bind<common_json>(common, json_dump_symbol.c_str(), g_member_abi_checks);
     g_common_json_destroy = load_proc<pf3_json_destroy_fn>(common, json_destroy_symbol.c_str());
+    const std::string member_abi = member_abi_runtime_json(json_dump_symbol);
     auto model_default = load_proc<decltype(&llama_model_default_params)>(llama, "llama_model_default_params");
     auto model_load = load_proc<decltype(&llama_model_load_from_file)>(llama, "llama_model_load_from_file");
     auto model_vocab = load_proc<decltype(&llama_model_get_vocab)>(llama, "llama_model_get_vocab");
@@ -350,11 +404,49 @@ void prove(const Input & input, const std::string & model_path, const std::strin
     std::vector<std::int32_t> out_prefix_after(prefix_after.begin(), prefix_after.end());
     std::vector<std::int32_t> out_eog_after(eog_after.begin(), eog_after.end());
     emit_result(input, grammar, out_tokens, out_prefix_after, prefix_allowed, decoded, n_vocab, out_eog,
-                out_eog_after, eog_allowed, accepted, decoded == input.raw, 14, abi);
+                out_eog_after, eog_allowed, accepted, decoded == input.raw, 14, abi, member_abi);
     ready("POST", input.nonce);
     sampler_free(sampler); model_free(model); g_grammar_emitter = nullptr;
     g_common_json_parse = nullptr; g_common_json_dump = nullptr; g_common_json_destroy = nullptr;
     FreeLibrary(common); FreeLibrary(llama); RemoveDllDirectory(cookie);
+}
+
+void prove_abi_smoke(const Input & input, const std::string & native_dir,
+                     const std::string & json_parse_symbol, const std::string & json_dump_symbol,
+                     const std::string & json_destroy_symbol) {
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+    const std::wstring native_dir_w = utf8_to_wide(native_dir);
+    const auto cookie = AddDllDirectory(native_dir_w.c_str());
+    if (!cookie) fail("dll directory");
+    const auto common = LoadLibraryExW((native_dir_w + L"\\llama-common.dll").c_str(), nullptr,
+                                       LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+    if (!common) fail("common load");
+    g_common_json_parse = load_proc<pf3_json_parse_fn>(common, json_parse_symbol.c_str());
+    g_common_json_dump = pf3_member_abi::bind<common_json>(common, json_dump_symbol.c_str(), g_member_abi_checks);
+    g_common_json_destroy = load_proc<pf3_json_destroy_fn>(common, json_destroy_symbol.c_str());
+    const std::string runtime = member_abi_runtime_json(json_dump_symbol);
+    ready("PRE", input.nonce);
+    constexpr std::string_view fixed = "{\"pf3\":1}";
+    std::string returned;
+    {
+        const auto parsed = g_common_json_parse(std::string(fixed));
+        returned = (parsed.*g_common_json_dump)(-1);
+    }
+    const bool exact = returned == fixed && g_json_destroy_calls == 1;
+    std::cout << "{\"cleanup\":\"PENDING_POST\",\"compile_record_sha256\":\"" PF3_MEMBER_ABI_COMPILE_RECORD_SHA "\""
+              << ",\"destroy_calls\":" << g_json_destroy_calls
+              << ",\"dump_calls\":1,\"exception\":false,\"exit_code\":0"
+              << ",\"input_utf8\":\"{\\\"pf3\\\":1}\",\"output_exact_match\":" << (exact ? "true" : "false")
+              << ",\"output_sha256\":\"67eab7d64b4b478e4079fce23f1d287a0798a77a3b76d91ba92ac6a2e15c4590\""
+              << ",\"output_size\":" << returned.size() << ",\"output_utf8\":\"{\\\"pf3\\\":1}\""
+              << ",\"parse_calls\":1,\"runtime_record\":" << runtime
+              << ",\"schema_version\":\"aiwolf.pf3-dump-actual-abi-smoke.v1\""
+              << ",\"seh\":false,\"status\":\"" << (exact ? "ABI_COMPATIBLE" : "UNKNOWN_ABI_IDENTITY")
+              << "\",\"timed_out\":false}" << std::endl;
+    if (!exact) fail("ABI smoke mismatch");
+    ready("POST", input.nonce);
+    g_common_json_parse = nullptr; g_common_json_dump = {}; g_common_json_destroy = nullptr;
+    FreeLibrary(common); RemoveDllDirectory(cookie);
 }
 #endif
 } // namespace
@@ -399,13 +491,27 @@ int main(int argc, char ** argv) {
         (void) json_parse_symbol; (void) json_dump_symbol; (void) json_destroy_symbol;
         prove(values);
 #else
+#ifdef PF3_ABI_SMOKE_ONLY
+        if (native_dir.empty() || json_parse_symbol.empty() || json_dump_symbol.empty() || json_destroy_symbol.empty())
+            fail("native paths");
+        prove_abi_smoke(values, native_dir, json_parse_symbol, json_dump_symbol, json_destroy_symbol);
+#else
         if (model_path.empty() || native_dir.empty() || emitter_symbol.empty() || json_parse_symbol.empty()
                 || json_dump_symbol.empty() || json_destroy_symbol.empty()) fail("native paths");
         prove(values, model_path, native_dir, emitter_symbol, json_parse_symbol, json_dump_symbol,
               json_destroy_symbol);
 #endif
+#endif
         return 0;
     } catch (const std::exception & error) {
+#ifndef PF3_SYNTHETIC
+        if (g_member_abi_failure) {
+            std::cout << "{\"dump_calls\":0,\"emitter_calls\":0,\"failing_check\":"
+                      << json_escape(g_member_abi_failure)
+                      << ",\"parse_calls\":0,\"schema_version\":\"aiwolf.pf3-dump-member-abi-runtime-failure.v1\""
+                         ",\"status\":\"UNKNOWN_ABI_IDENTITY\"}" << std::endl;
+        }
+#endif
         std::cerr << "PF3_CHILD_FAILED " << error.what() << std::endl;
         return 70;
     } catch (...) {
