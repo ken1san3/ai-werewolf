@@ -57,13 +57,25 @@ proof implementation source、C++ shim source、compiler/linker executable、Win
 生成したproof childもmanifestへ追加し、実装taskでactual SHAをfreezeする。MSVC toolchain
 `18.9.12105.275`は発見事実であり、設計時点ではcompiler binary SHA未確定なので`UNKNOWN`をPASSへ変えない。
 
-保存source/headerの安全なrepo内locatorは`logs/t348-sampler/upstream/`である。これは静的API照合用の部分inventoryであり、
-build-complete header treeではない。実際に`include/llama.h`がincludeする`gguf.h`と、`common__common.h`が要求する
-`llama-cpp.h`は現inventoryに存在しないため、このlocatorだけからのbuildを許可しない。後続toolはpinned official archive
-`1011cb18e52b2a8b0548eed8242299f85f57862fac237c0d258dadbb1ec4fdbc`から、build manifestが列挙する相対pathの
-header/source closureをprivate build directoryへ展開し、archive memberの重複、absolute/親移動path、reparse、欠落を拒否する。
-展開した各fileの相対path、size、SHAをbuild前後に照合し、保存partial inventoryの対応fileとも一致させる。archiveに必要closureが
-ない、またはinclude closureを列挙できない場合は`UNKNOWN_ABI_IDENTITY`であり、network/package取得や別headerで補完しない。
+保存source/headerの安全なrepo内locatorは`logs/t348-sampler/upstream/`である。これは静的API照合用の部分inventoryであり、build-complete header treeではない。
+上表のofficial archiveは**binary archive**であり、source/headerの取得元とはしない。DLL identityは変更しない。
+別dependencyとして、同一commit `093adb242e6d205d06979a390d4f4f690dd87bf1` の公式source archiveを固定する。
+
+- URL: `https://codeload.github.com/ggml-org/llama.cpp/zip/093adb242e6d205d06979a390d4f4f690dd87bf1`
+- SHA-256: `a4106fcef27497924fdf5cc1f511c8ccc80e5edaa24e8dd0161cc35eaaf743c0`
+- size: `39072439` bytes。root prefix: `llama.cpp-093adb242e6d205d06979a390d4f4f690dd87bf1/`。
+- 最小compile include closure: `include/llama.h`, `ggml/include/ggml.h`, `ggml/include/ggml-cpu.h`,
+  `ggml/include/ggml-backend.h`, `ggml/include/ggml-opt.h`, `ggml/include/ggml-alloc.h`,
+  `ggml/include/gguf.h`, `common/json.h`, `common/json-schema-to-grammar.h`。
+- manifest-only source: `common/json.cpp`, `common/json-schema-to-grammar.cpp`, `common/chat.cpp`,
+  `common/sampling.cpp`, `tools/server/server-common.cpp`, `tools/server/server-context.cpp`,
+  `src/llama-grammar.cpp`, `src/llama-grammar.h`。
+
+事前取得したこのarchive以外をruntime/build中にnetwork/packageから補完しない。全memberについて重複、absolute/親移動path、backslash、symlink/reparseを拒否し、root prefixを照合する。
+必要closureのrelative path/size/SHAをmanifestで固定し、private build directoryへの展開前後とbuild前後に照合する。保存partial inventoryの対応fileとも一致させる。
+現childがincludeしない`common/common.h`/`llama-cpp.h`を必須としないが、実際のtransitive includeが増えれば同じpinned source archive内のclosureへ追加し、manifestを再承認する。
+欠落、commit不一致、generated/submodule header不足、unsafe member、別header補完は`UNKNOWN_ABI_IDENTITY`。
+モデル/DLLのダウンロード・変更、新しいllama runtimeのbuildは行わない。`.lib`を追加生成せず、既存DLLの`GetProcAddress`境界を維持する。
 absolute deployment pathはpublic evidenceへ保存しない。
 
 ### 2.2 witness
@@ -353,7 +365,7 @@ private sealを保持し、PF3 canonical stateはUNKNOWNのままとする。
 
 12. C shimのsingle-call/copy、buffer不足、invalid UTF-8、duplicate key、C++ exception、allocator非越境。
 13. exact export positiveと、各export欠落、header/DLL/compiler/CRT drift negative。partial saved inventoryだけでbuildせず、pinned archiveの
-    exact include closure positiveと、`gguf.h`/`llama-cpp.h`欠落、unsafe archive member、member SHA driftをUNKNOWNにする。
+    exact include closure positiveと、必須`gguf.h`/`ggml-alloc.h`欠落、unsafe archive member、member SHA driftをUNKNOWNにする。
 14. model params by-value layoutをcompile-time `sizeof/offsetof` manifestとruntime shim self-reportで一致させる。
 15. process開始からのmodule event ledger、pre/post一致、foreign non-system、unopenable、一時load/unload、late load、
     snapshot race、PID再利用をUNKNOWNにする。
