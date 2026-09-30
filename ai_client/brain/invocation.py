@@ -238,6 +238,8 @@ class BrainInvocationArbiter:
                 or type(pending) is not _PendingInvocation):
             raise OfferCompositionError("OFFER_PREPARING_DRIVER_MISMATCH")
         current = asyncio.current_task()
+        if composition.exact_discussion_store._lease_bundle_cell_v2 is not None:
+            raise OfferCompositionError("PREPARING_CAS_MISMATCH")
         _prepare_next_idle_generation_v2(composition.exact_caller_port)
         async with self._lock:
             if (current is None or self._admission_driver is not None
@@ -249,6 +251,7 @@ class BrainInvocationArbiter:
             self._admission_state = "WAITING_ADMISSION"
             pending.execution_complete.clear()
         source = None
+        finalize_terminal_held = False
         try:
             ticket = await _issue_initial_ticket_owned_v2(
                 composition.exact_caller_port, pending)
@@ -273,15 +276,19 @@ class BrainInvocationArbiter:
             self._admission_state = "V2_PREPARING"
             _publish_preparing_from_offer_v2(
                 composition.exact_caller_port, ticket, result, receipt)
-            self._admission_state = "V2_PREPARING_HELD"
-            terminal = ticket.terminal_candidates.preparing_complete
-            try:
-                self._finish(pending, terminal)
-            except BaseException:
-                object.__setattr__(source, "state", "TERMINAL_HELD")
-                composition.flow_state = "PREPARING_TERMINAL_HELD"
-                composition.initial_invocation_slot = "PREPARING_HELD"
+            from ai_client.discussion.reserved_finalize_v2 import (
+                _finalize_preparing_owned_v2,
+            )
+            preparing_owner = composition.exact_discussion_store._preparing_lease_owner_receipt_v2
+            from ai_client.discussion.reserved_finalize_v2 import _notify_finalized_owned_v2
+            finalized = _finalize_preparing_owned_v2(composition.exact_caller_port, preparing_owner)
+            reserved = None if finalized is None else finalized[2]
+            terminal = _notify_finalized_owned_v2(preparing_owner, reserved)
+            if terminal is None:
+                finalize_terminal_held = True
                 await asyncio.Future()
+            self._admission_state = ("V2_RESERVED_HELD" if reserved is not None
+                                     else "V2_INVALIDATED_HELD")
             return terminal
         except BaseException as error:
             if isinstance(error, asyncio.CancelledError):
@@ -292,7 +299,10 @@ class BrainInvocationArbiter:
                 # The wakeup shape is unknown.  Retain the exact active owner;
                 # only existing runtime cancellation may end this wait.
                 await asyncio.Future()
-            if composition.flow_state == "PREPARING_TERMINAL_HELD":
+            if composition.flow_state in {
+                    "PREPARING_TERMINAL_HELD", "RESERVED_TERMINAL_HELD",
+                    "FINALIZE_NOTIFICATION_UNKNOWN", "RESERVED_NOTIFICATION_UNKNOWN",
+                    "RESERVED_POSTCHECK_UNKNOWN", "FINALIZE_CONFLICT_HELD", "FINALIZE_RETIRED_HELD"}:
                 await asyncio.Future()
             code = error.code if type(error) is OfferCompositionError else None
             if composition.flow_state == "OFFER_CLEANUP_UNKNOWN":
@@ -317,8 +327,11 @@ class BrainInvocationArbiter:
             return terminal
         finally:
             async with self._lock:
-                owner_held = composition.flow_state in {
+                owner_held = finalize_terminal_held or composition.flow_state in {
                     "OFFER_NOTIFICATION_UNKNOWN", "PREPARING_TERMINAL_HELD",
+                    "RESERVED_TERMINAL_HELD", "FINALIZE_NOTIFICATION_UNKNOWN",
+                    "RESERVED_NOTIFICATION_UNKNOWN", "RESERVED_POSTCHECK_UNKNOWN",
+                    "FINALIZE_CONFLICT_HELD", "FINALIZE_RETIRED_HELD",
                 }
                 if self._active is pending and not owner_held:
                     self._active = None

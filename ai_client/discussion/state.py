@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from weakref import WeakKeyDictionary
 from dataclasses import dataclass, fields, is_dataclass, replace
 from hashlib import sha256
 from threading import get_ident
@@ -507,7 +508,8 @@ class DiscussionStateStore:
         self._capture_read_port_v2 = None
         self._offer_preparing_composition_v2 = None
         self._offer_preparing_mode_v2 = False
-        self._preparing_lease_bundle_v2 = None
+        self._lease_bundle_cell_v2 = None
+        self._lease_bundle_cells_v2 = WeakKeyDictionary()
         self._reset_reason = (
             DiscussionResetReason.PROCESS_RESTART if process_restart else None
         )
@@ -575,9 +577,15 @@ class DiscussionStateStore:
         if self._closed:
             raise DiscussionStateError("discussion store is closed")
 
+    @property
+    def _preparing_lease_bundle_v2(self):
+        cell = self._lease_bundle_cell_v2
+        from .reserved_finalize_v2 import LeaseBundleCellV2
+        return cell.exact_tuple if type(cell) is LeaseBundleCellV2 else None
+
     def _publish_preparing_lease_v2(
         self, composition: object, expected_capture: object,
-        lease: object, owner_receipt: object, bundle: object,
+        lease: object, owner_receipt: object, cell: object,
     ) -> None:
         """Private owner CAS; all candidate allocation precedes this method."""
         from .capture_v2 import StateGenerationLeaseV2
@@ -585,6 +593,10 @@ class DiscussionStateStore:
             OfferPreparingCompositionV2, PreparingLeaseOwnerReceiptV2,
         )
         self._require_open()
+        from .reserved_finalize_v2 import _valid_cell_v2
+        if not _valid_cell_v2(self, cell) or cell.stage != "PREPARING":
+            raise DiscussionStateError("PREPARING_CAS_MISMATCH")
+        bundle = cell.exact_tuple
         if (type(composition) is not OfferPreparingCompositionV2
                 or composition.exact_discussion_store is not self
                 or self._offer_preparing_composition_v2 is not composition
@@ -598,23 +610,125 @@ class DiscussionStateStore:
                 or self._current_capture is not expected_capture
                 or lease.base_revision != self._revision
                 or lease.fact_revision != self._fact_revision
-                or self._preparing_lease_bundle_v2 is not None
+                or self._lease_bundle_cell_v2 is not None
                 or self._staged is not None or self._committed is not None
                 or self._dispatch is not None or self._delivery is not None):
             raise DiscussionStateError("PREPARING_CAS_MISMATCH")
         # One already-allocated tuple reference is the complete publication.
         # Readers never observe just one half of the lease/owner pair.
-        self._preparing_lease_bundle_v2 = bundle
+        self._lease_bundle_cell_v2 = cell
+
+    def _cas_reserved_lease_v2(
+        self, composition: object, expected_cell: object, reserved_cell: object,
+    ) -> None:
+        """Publish an already-built RESERVED tuple with one identity CAS."""
+        from .capture_v2 import GenerationCaptureV2, StateGenerationLeaseV2
+        from .offer_composition_v2 import OfferPreparingCompositionV2
+        from .reserved_finalize_v2 import ReservedCaptureOwnerReceiptV2
+        self._require_open()
+        from .reserved_finalize_v2 import _valid_cell_v2
+        if (self._lease_bundle_cell_v2 is not expected_cell or not _valid_cell_v2(self, expected_cell)
+                or not _valid_cell_v2(self, reserved_cell) or expected_cell.stage != "PREPARING"
+                or reserved_cell.stage != "RESERVED"):
+            raise DiscussionStateError("RESERVED_CAS_MISMATCH")
+        expected_bundle = expected_cell.exact_tuple
+        reserved_bundle = reserved_cell.exact_tuple
+        if (type(composition) is not OfferPreparingCompositionV2
+                or composition.exact_discussion_store is not self
+                or self._offer_preparing_composition_v2 is not composition
+                or self._preparing_lease_bundle_v2 is not expected_bundle
+                or type(expected_bundle) is not tuple or len(expected_bundle) != 2
+                or type(reserved_bundle) is not tuple or len(reserved_bundle) != 3):
+            raise DiscussionStateError("RESERVED_CAS_MISMATCH")
+        lease, capture, receipt = reserved_bundle
+        if (type(lease) is not StateGenerationLeaseV2 or lease.status != "RESERVED"
+                or type(capture) is not GenerationCaptureV2
+                or type(receipt) is not ReservedCaptureOwnerReceiptV2
+                or receipt.exact_lease is not lease or receipt.exact_capture is not capture
+                or receipt.exact_preparing_receipt is not expected_bundle[1]
+                or lease.capture_id != capture.capture_id
+                or self._current_capture is not expected_bundle[1].exact_store_capture_tuple[0]
+                or self._revision != lease.base_revision
+                or self._fact_revision != lease.fact_revision
+                or self._epoch != expected_bundle[1].exact_store_capture_tuple[3]
+                or self._staged is not None or self._committed is not None
+                or self._dispatch is not None or self._delivery is not None):
+            raise DiscussionStateError("RESERVED_CAS_MISMATCH")
+        from .reserved_finalize_v2 import _validate_reserved_candidate_v2
+        _validate_reserved_candidate_v2(composition.exact_caller_port, expected_bundle[1], reserved_cell)
+        self._lease_bundle_cell_v2 = reserved_cell
+
+    def _cas_invalidated_lease_v2(self, expected_cell, owner, abort_bundle):
+        from .reserved_finalize_v2 import _validate_abort_candidate_v2
+        if self._lease_bundle_cell_v2 is not expected_cell:
+            return False
+        _validate_abort_candidate_v2(self, expected_cell, owner, abort_bundle)
+        self._lease_bundle_cell_v2 = abort_bundle.candidate_cell
+        return True
 
     @property
     def _state_generation_lease_v2(self):
         bundle = self._preparing_lease_bundle_v2
-        return None if bundle is None else bundle[0]
+        if self._known_generation_bundle_v2(bundle):
+            self._read_generation_row_v2()
+        return bundle[0] if self._known_generation_bundle_v2(bundle) else None
+
+    def _read_generation_row_v2(self):
+        from .reserved_finalize_v2 import _validate_published_row_v2
+        self._check_owner()
+        _validate_published_row_v2(self._offer_preparing_composition_v2)
+        return self._preparing_lease_bundle_v2
 
     @property
     def _preparing_lease_owner_receipt_v2(self):
         bundle = self._preparing_lease_bundle_v2
-        return None if bundle is None else bundle[1]
+        if not self._known_generation_bundle_v2(bundle):
+            return None
+        self._read_generation_row_v2()
+        return bundle[1] if len(bundle) == 2 else bundle[2]
+
+    @staticmethod
+    def _known_generation_bundle_v2(bundle):
+        from .capture_v2 import StateGenerationLeaseV2, GenerationCaptureV2
+        from .offer_composition_v2 import PreparingLeaseOwnerReceiptV2
+        from .reserved_finalize_v2 import (
+            ReservedCaptureOwnerReceiptV2, PreCaptureInvalidatedOwnerReceiptV2,
+            ReservedInvalidatedOwnerReceiptV2,
+        )
+        if type(bundle) is not tuple or len(bundle) not in (2, 3):
+            return False
+        lease, owner = bundle[0], bundle[-1]
+        if type(lease) is not StateGenerationLeaseV2:
+            return False
+        if len(bundle) == 2:
+            return ((type(owner) is PreparingLeaseOwnerReceiptV2
+                     and lease.status == "PREPARING" and lease.lease_revision == 0)
+                    or (type(owner) is PreCaptureInvalidatedOwnerReceiptV2
+                        and lease is owner.invalidated_lease and lease.status == "INVALIDATED"
+                        and lease.lease_revision == 1 and lease.capture_id is None))
+        if type(bundle[1]) is not GenerationCaptureV2:
+            return False
+        return ((type(owner) is ReservedCaptureOwnerReceiptV2
+                 and owner.exact_lease is lease and owner.exact_capture is bundle[1]
+                 and lease.status == "RESERVED" and lease.lease_revision == 1)
+                or (type(owner) is ReservedInvalidatedOwnerReceiptV2
+                    and owner.invalidated_lease is lease and owner.exact_capture is bundle[1]
+                    and lease.status == "INVALIDATED" and lease.lease_revision == 2))
+
+    @property
+    def _reserved_capture_owner_receipt_v2(self):
+        bundle = self._preparing_lease_bundle_v2
+        if self._known_generation_bundle_v2(bundle) and bundle[0].status == "RESERVED":
+            self._read_generation_row_v2()
+            return bundle[2]
+        return None
+
+    @property
+    def _generation_capture_v2(self):
+        bundle = self._preparing_lease_bundle_v2
+        if self._known_generation_bundle_v2(bundle):
+            self._read_generation_row_v2()
+        return bundle[1] if self._known_generation_bundle_v2(bundle) and len(bundle) == 3 else None
 
     def _freeze_terminal(self) -> None:
         if self._offer_preparing_composition_v2 is not None:

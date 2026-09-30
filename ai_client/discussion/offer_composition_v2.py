@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from dataclasses import dataclass
 from threading import get_ident
 from types import MappingProxyType
 
@@ -14,6 +15,15 @@ from .authority_capture_bridge_v2 import (
 )
 
 _ISSUER = object()
+PHASE6_V2_SYSTEM_INSTRUCTION_VERSION = "phase6-v2-system-instruction.v1"
+
+
+@dataclass(frozen=True)
+class GenerationProfileBundleV2:
+    schema_version: str
+    generation_profile: str
+    system_instruction_version: str
+    generation_config_fingerprint: str
 
 
 class OfferCompositionError(RuntimeError):
@@ -58,7 +68,7 @@ class PreTicketAbortBundleV2(_Opaque):
 
 class OfferPreparingCallerPortV2(_Opaque):
     __slots__ = ("_composition", "_arbiter", "_issuer", "_initial_slot_identity", "_capability",
-                 "_abort_bundle", "_abort_failure_result")
+                 "_abort_bundle", "_abort_failure_result", "generation_profile_bundle_v2")
 
     def __init__(self, token: object, arbiter: object) -> None:
         if token is not _ISSUER:
@@ -71,6 +81,7 @@ class OfferPreparingCallerPortV2(_Opaque):
         self._abort_failure_result = _new_pre_ticket_failure_result_v2()
         self._abort_bundle = PreTicketAbortBundleV2(
             _ISSUER, self._initial_slot_identity, self._abort_failure_result)
+        self.generation_profile_bundle_v2 = None
 
     def validate_idle(self) -> None:
         """Read guard only. No request, ticket or provider API is available."""
@@ -91,7 +102,8 @@ class OfferPreparingCompositionV2(_Opaque):
         "initial_invocation_slot", "initial_slot_identity", "initial_pending_or_null",
         "active_ticket_build_attempt_or_null",
         "active_initial_ticket_or_null", "active_offer_source_or_null",
-        "prebuilt_pre_ticket_abort_bundle", "issuer_capability", "_issuer",
+        "prebuilt_pre_ticket_abort_bundle", "generation_profile_bundle_v2",
+        "issuer_capability", "_issuer",
     )
 
     def __init__(self, token: object, session: object, bridge: AuthorityCaptureBridgeV2,
@@ -121,6 +133,9 @@ class OfferPreparingCompositionV2(_Opaque):
         self.active_initial_ticket_or_null = None
         self.active_offer_source_or_null = None
         self.prebuilt_pre_ticket_abort_bundle = port._abort_bundle
+        self.generation_profile_bundle_v2 = GenerationProfileBundleV2(
+            "aiwolf.generation-profile-bundle.v2", "phase6_v2",
+            PHASE6_V2_SYSTEM_INSTRUCTION_VERSION, session.identity.config_fingerprint)
         self.issuer_capability = port._capability
         self._issuer = _ISSUER
 
@@ -321,6 +336,7 @@ def _bind_offer_composition_v2(session: object, bridge: object, arbiter: object,
     store._offer_preparing_composition_v2 = composition
     arbiter._offer_preparing_composition_v2 = composition
     port._composition = composition
+    port.generation_profile_bundle_v2 = composition.generation_profile_bundle_v2
     session._offer_preparing_mode_v2 = True
     store._offer_preparing_mode_v2 = True
     arbiter._offer_preparing_mode_v2 = True
@@ -332,6 +348,9 @@ def _retire_offer_composition_v2(owner: object) -> None:
     if type(c) is OfferPreparingCompositionV2 and (
             owner is c.exact_broker_session or owner is c.exact_discussion_store
             or owner is c.exact_arbiter):
+        from .reserved_finalize_v2 import _retire_finalized_owned_v2
+        if _retire_finalized_owned_v2(c):
+            return
         c.lifecycle = "RETIRED"
         ticket = c.active_initial_ticket_or_null
         if type(ticket) is InitialOfferTicketV2 and ticket.state == "ACTIVE":
@@ -462,7 +481,7 @@ class PreparingLeaseOwnerReceiptV2(_Opaque):
         "exact_session", "exact_control_lane", "exact_client_lease", "exact_request",
         "exact_dispatch_deadline", "exact_prepared_material", "exact_hidden_owner_receipt",
         "exact_store_capture_tuple", "raw_deadline", "expires_at_monotonic_us",
-        "state", "_issuer",
+        "state", "_issuer", "preparing_identity", "abort_bundle", "cell_identity", "cell_weakref", "__weakref__",
     )
 
     def __init__(self, token: object, **values: object) -> None:
@@ -1407,6 +1426,8 @@ def _publish_preparing_from_offer_v2(
         exact_store_capture_tuple=store_tuple, raw_deadline=deadline.not_after_monotonic,
         expires_at_monotonic_us=expires_us, state="PREPARING")
     preparing_bundle = (snapshot, owner)
+    from .reserved_finalize_v2 import _prepare_abort_owned_v2
+    preparing_cell = _prepare_abort_owned_v2(owner, preparing_bundle)
     _validate_offer_runtime_owner_v2(composition, source, ticket, receipt, result)
     final_deadline = composition.exact_world.transport_observations().current_deadline
     if ((capture, store._revision, store._fact_revision, store._epoch) != store_tuple
@@ -1422,7 +1443,7 @@ def _publish_preparing_from_offer_v2(
             or session._activated_invocation is not None):
         raise OfferCompositionError("PREPARING_SESSION_MISMATCH")
     store._publish_preparing_lease_v2(
-        composition, capture, snapshot, owner, preparing_bundle)
+        composition, capture, snapshot, owner, preparing_cell)
     object.__setattr__(receipt, "state", "CONSUMED_PREPARING")
     object.__setattr__(ticket, "state", "CONSUMED_PREPARING")
     object.__setattr__(source, "state", "PREPARING")

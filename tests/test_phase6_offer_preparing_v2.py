@@ -32,7 +32,7 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_actual_private_driver_routes_offer_and_publishes_preparing(graph):
+async def test_actual_private_driver_routes_offer_and_publishes_reserved(graph):
     g = graph
     port = bind(g)
     pending = make_pending(g)
@@ -52,19 +52,20 @@ async def test_actual_private_driver_routes_offer_and_publishes_preparing(graph)
     assert result.outcome.status is DecisionStatus.CANCELLED
     assert pending.result.done() and pending.result.result() is result
     assert pending.execution_complete.is_set()
-    assert composition.flow_state == "PREPARING"
-    assert composition.initial_invocation_slot == "PREPARING_HELD"
-    assert ticket.state == "CONSUMED_PREPARING"
-    assert source.state == "PREPARING"
+    assert composition.flow_state == "RESERVED"
+    assert composition.initial_invocation_slot == "RESERVED_HELD"
+    assert ticket.state == "CONSUMED_RESERVED"
+    assert source.state == "RESERVED"
     assert type(receipt) is BrokerOfferOwnershipReceiptV2
-    assert receipt.state == "CONSUMED_PREPARING"
+    assert receipt.state == "CONSUMED_RESERVED"
     assert type(snapshot) is StateGenerationLeaseV2
-    assert snapshot.status == "PREPARING" and snapshot.lease_revision == 0
+    assert snapshot.status == "RESERVED" and snapshot.lease_revision == 1
     assert snapshot.state_lease_id == ticket.exact_request.invocation_id
     assert snapshot.broker_lease_ids == (snapshot.state_lease_id,)
-    assert type(owner) is PreparingLeaseOwnerReceiptV2
-    assert owner.exact_offer_receipt is receipt
-    assert owner.exact_prepared_material.status == "UNLEASED"
+    from ai_client.discussion.reserved_finalize_v2 import ReservedCaptureOwnerReceiptV2
+    assert type(owner) is ReservedCaptureOwnerReceiptV2
+    assert owner.exact_preparing_receipt.exact_offer_receipt is receipt
+    assert owner.exact_preparing_receipt.exact_prepared_material.status == "UNLEASED"
     assert not g.backend.calls and not g.brain.calls
     assert g.session._claimed_invocation is None
     assert g.session._activated_invocation is None
@@ -149,7 +150,7 @@ async def test_second_private_driver_is_blocked_by_preparing_hold(graph):
     second = make_pending(g)
     with pytest.raises(OfferCompositionError):
         await g.arbiter._run_offer_preparing_offline_v2(second)
-    assert g.store._state_generation_lease_v2.status == "PREPARING"
+    assert g.store._state_generation_lease_v2.status == "RESERVED"
     assert not g.backend.calls and not g.brain.calls
 
 
@@ -306,11 +307,13 @@ async def test_owner_stop_after_preparing_preserves_placeholder_and_marks_held(g
     owner = g.store._preparing_lease_owner_receipt_v2
     await g.arbiter.stop()
     assert port._composition.lifecycle == "RETIRED"
-    assert port._composition.flow_state == "PREPARING_TERMINAL_HELD"
-    assert port._composition.initial_invocation_slot == "PREPARING_HELD"
-    assert port._composition.active_offer_source_or_null.state == "TERMINAL_HELD"
-    assert g.store._state_generation_lease_v2 is snapshot
-    assert g.store._preparing_lease_owner_receipt_v2 is owner
+    assert port._composition.flow_state == "FINALIZE_RETIRED_HELD"
+    assert port._composition.initial_invocation_slot == "INVALIDATED_HELD"
+    assert port._composition.active_offer_source_or_null.state == "RETIRED_HELD"
+    assert g.store._state_generation_lease_v2 is owner.abort_bundle.invalidated_lease
+    assert g.store._state_generation_lease_v2.lease_revision == 2
+    assert g.store._state_generation_lease_v2.capture_id == snapshot.capture_id
+    assert g.store._preparing_lease_owner_receipt_v2 is owner.abort_bundle.invalidated_receipt
 
 
 @pytest.mark.anyio
@@ -331,18 +334,18 @@ async def test_pending_notification_failure_after_preparing_holds_owner(graph):
     )
     task = asyncio.create_task(g.arbiter._run_offer_preparing_offline_v2(pending))
     for _ in range(100):
-        if port._composition.flow_state == "PREPARING_TERMINAL_HELD":
+        if port._composition.flow_state == "RESERVED_NOTIFICATION_UNKNOWN":
             break
         await asyncio.sleep(0)
-    assert port._composition.flow_state == "PREPARING_TERMINAL_HELD"
-    assert port._composition.active_offer_source_or_null.state == "TERMINAL_HELD"
-    assert g.store._state_generation_lease_v2.status == "PREPARING"
+    assert port._composition.flow_state == "RESERVED_NOTIFICATION_UNKNOWN"
+    assert port._composition.active_offer_source_or_null.state == "RESERVED"
+    assert g.store._state_generation_lease_v2.status == "RESERVED"
     assert g.arbiter._active is pending and g.arbiter._admission_driver is task
     assert not pending.execution_complete.is_set()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert g.store._state_generation_lease_v2.status == "PREPARING"
+    assert g.store._state_generation_lease_v2.status == "RESERVED"
 
 
 @pytest.mark.anyio
@@ -432,7 +435,7 @@ async def test_post_publish_identity_mismatch_holds_complete_placeholder(graph, 
 
     def corrupt_after_publish(*args, **kwargs):
         original(*args, **kwargs)
-        g.store._preparing_lease_bundle_v2 = (object(), object())
+        g.store._lease_bundle_cell_v2 = object()
 
     monkeypatch.setattr(g.store, "_publish_preparing_lease_v2", corrupt_after_publish)
     task = asyncio.create_task(g.arbiter._run_offer_preparing_offline_v2(pending))

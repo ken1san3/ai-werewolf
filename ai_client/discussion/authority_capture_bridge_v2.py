@@ -593,11 +593,13 @@ class DiscussionCaptureReadPortV2:
 
 
 class _PrivateMaterial:
-    __slots__ = ("_values", "_hidden_owner_receipt")
+    __slots__ = ("_values", "_hidden_owner_receipt", "_origin_ref", "__weakref__")
     def __init__(self, token: object, values: Mapping[str, object], hidden: object) -> None:
         if token is not _ISSUER: raise TypeError("prepared material is opaque")
         object.__setattr__(self, "_values", _freeze(dict(values)))
         object.__setattr__(self, "_hidden_owner_receipt", hidden)
+        import weakref
+        object.__setattr__(self, "_origin_ref", weakref.ref(self))
     def __getattr__(self, name: str) -> object:
         try: return self._values[name]
         except KeyError: raise AttributeError(name) from None
@@ -607,6 +609,30 @@ class _PrivateMaterial:
 
 
 PreparedAuthorityCaptureMaterialV2 = _PrivateMaterial
+
+
+class OwnedFinalCaptureSourceV2:
+    """Private, immutable second read used by the RESERVED CAS."""
+    __slots__ = ("exact_bridge", "exact_prepared_material", "exact_capture_read",
+                 "exact_inbound_read", "stable_fingerprint", "_issuer", "_origin_ref", "__weakref__")
+    def __init__(self, token: object, bridge: object, material: object,
+                 capture_read: object, inbound_read: object, fingerprint: object) -> None:
+        if token is not _ISSUER:
+            raise TypeError("final capture source is opaque")
+        object.__setattr__(self, "exact_bridge", bridge)
+        object.__setattr__(self, "exact_prepared_material", material)
+        object.__setattr__(self, "exact_capture_read", capture_read)
+        object.__setattr__(self, "exact_inbound_read", inbound_read)
+        object.__setattr__(self, "stable_fingerprint", fingerprint)
+        object.__setattr__(self, "_issuer", _ISSUER)
+        import weakref
+        object.__setattr__(self, "_origin_ref", weakref.ref(self))
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("final capture source is immutable")
+    def __repr__(self) -> str:
+        return "OwnedFinalCaptureSourceV2(<redacted>)"
+    def __reduce_ex__(self, _protocol: int):
+        raise TypeError("final capture source cannot be serialized")
 
 
 def _freeze(value: object) -> object:
@@ -1062,6 +1088,45 @@ class AuthorityCaptureBridgeV2:
                 or check.source_retention_fingerprint != inbound.source_retention_fingerprint):
             raise AuthorityCaptureBridgeError("STALE_OWNER_READ")
         return _PrivateMaterial(_ISSUER, stable, (self._token, inbound, capture_read))
+
+    def _read_final_capture_source_v2(
+        self, prepared_material: object, hidden_owner_receipt: object,
+    ) -> OwnedFinalCaptureSourceV2:
+        """Re-read the exact registered owners without consuming authority."""
+        if (type(prepared_material) is not _PrivateMaterial
+                or prepared_material._origin_ref() is not prepared_material
+                or prepared_material._hidden_owner_receipt is not hidden_owner_receipt
+                or not isinstance(hidden_owner_receipt, tuple)
+                or len(hidden_owner_receipt) != 3
+                or hidden_owner_receipt[0] is not self._token):
+            raise AuthorityCaptureBridgeError("FINAL_SOURCE_OWNER_MISMATCH")
+        current = self.prepare_current()
+        capture_read = current._hidden_owner_receipt[2]
+        inbound_read = current._hidden_owner_receipt[1]
+        stable_names = tuple(prepared_material._values)
+        if (stable_names != tuple(current._values)
+                or prepared_material.prepared_material_sha256 != current.prepared_material_sha256
+                or hidden_owner_receipt[1].world_snapshot is not inbound_read.world_snapshot
+                or hidden_owner_receipt[1].authority_snapshot is not inbound_read.authority_snapshot
+                or hidden_owner_receipt[1].current_actions_view.actions is not inbound_read.current_actions_view.actions
+                or hidden_owner_receipt[2].capture is not capture_read.capture
+                or hidden_owner_receipt[2].state is not capture_read.state
+                or hidden_owner_receipt[2].bound is not capture_read.bound
+                or not _same_capture_tuple(hidden_owner_receipt[2]._tuple, capture_read._tuple)):
+            raise AuthorityCaptureBridgeError("FINAL_SOURCE_STALE")
+        for name in stable_names:
+            old, new = prepared_material._values[name], current._values[name]
+            if name in {"action_bindings", "public_channel_authorities", "disclosure_candidates"}:
+                old = tuple(item._projection() for item in old)
+                new = tuple(item._projection() for item in new)
+            if _sha(old) != _sha(new):
+                raise AuthorityCaptureBridgeError("FINAL_SOURCE_STALE")
+        fingerprint = _sha((current.prepared_material_sha256,
+                            capture_read.fingerprint,
+                            inbound_read.network_fingerprint,
+                            inbound_read.source_retention_fingerprint))
+        return OwnedFinalCaptureSourceV2(
+            _ISSUER, self, prepared_material, capture_read, inbound_read, fingerprint)
 
 
 def _create_world_authority_read_port_v2(world: object,
