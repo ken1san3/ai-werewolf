@@ -104,6 +104,10 @@ class OfferPreparingCompositionV2(_Opaque):
         "active_initial_ticket_or_null", "active_offer_source_or_null",
         "prebuilt_pre_ticket_abort_bundle", "generation_profile_bundle_v2",
         "issuer_capability", "_issuer",
+        "claim_activate_port", "claim_activate_owner_or_null",
+        "claim_activate_prepublication_hold_or_null", "claim_activate_cancel_event",
+        "claim_activate_outcome_or_null", "claim_activate_retire_task_or_null",
+        "claim_activate_preclaim_hold_or_null", "__weakref__",
     )
 
     def __init__(self, token: object, session: object, bridge: AuthorityCaptureBridgeV2,
@@ -138,6 +142,14 @@ class OfferPreparingCompositionV2(_Opaque):
             PHASE6_V2_SYSTEM_INSTRUCTION_VERSION, session.identity.config_fingerprint)
         self.issuer_capability = port._capability
         self._issuer = _ISSUER
+        from .claim_activate_v2 import _new_port_v2
+        self.claim_activate_port = _new_port_v2(self)
+        self.claim_activate_owner_or_null = None
+        self.claim_activate_prepublication_hold_or_null = None
+        self.claim_activate_cancel_event = asyncio.Event()
+        self.claim_activate_outcome_or_null = None
+        self.claim_activate_retire_task_or_null = None
+        self.claim_activate_preclaim_hold_or_null = None
 
 
 def _validate_edges(session: object, bridge: object, arbiter: object, clock: object) -> None:
@@ -348,6 +360,12 @@ def _retire_offer_composition_v2(owner: object) -> None:
     if type(c) is OfferPreparingCompositionV2 and (
             owner is c.exact_broker_session or owner is c.exact_discussion_store
             or owner is c.exact_arbiter):
+        if (c.claim_activate_owner_or_null is not None
+                or c.claim_activate_prepublication_hold_or_null is not None
+                or c.claim_activate_preclaim_hold_or_null is not None
+                or c.claim_activate_outcome_or_null is not None):
+            c.claim_activate_cancel_event.set()
+            return
         from .reserved_finalize_v2 import _retire_finalized_owned_v2
         if _retire_finalized_owned_v2(c):
             return

@@ -1694,6 +1694,9 @@ class BrainInvocationArbiter:
                     self._fatal_error = error
 
     async def _stop_owned(self) -> None:
+        if self._offer_preparing_composition_v2 is not None:
+            from ai_client.discussion.claim_activate_v2 import _stop_claim_activate_owned_v2
+            await _stop_claim_activate_owned_v2(self._offer_preparing_composition_v2)
         async with self._lock:
             self._stopped = True
             pending = tuple(self._pending.values())

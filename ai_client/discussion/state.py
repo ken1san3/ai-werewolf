@@ -666,6 +666,22 @@ class DiscussionStateStore:
         self._lease_bundle_cell_v2 = abort_bundle.candidate_cell
         return True
 
+    def _cas_active_lease_v2(self, expected_cell, active_cell):
+        from .claim_activate_v2 import _validate_active_cas_v2
+        self._require_open()
+        _validate_active_cas_v2(self, expected_cell, active_cell)
+        self._lease_bundle_cell_v2 = active_cell
+        return True
+
+    def _cas_claim_invalidated_v2(self, expected_cell, candidate_cell, owner):
+        from .claim_activate_v2 import _validate_invalidated_cas_v2
+        self._check_owner()
+        if self._lease_bundle_cell_v2 is not expected_cell:
+            return False
+        _validate_invalidated_cas_v2(self, expected_cell, candidate_cell, owner)
+        self._lease_bundle_cell_v2 = candidate_cell
+        return True
+
     @property
     def _state_generation_lease_v2(self):
         bundle = self._preparing_lease_bundle_v2
@@ -676,7 +692,14 @@ class DiscussionStateStore:
     def _read_generation_row_v2(self):
         from .reserved_finalize_v2 import _validate_published_row_v2
         self._check_owner()
-        _validate_published_row_v2(self._offer_preparing_composition_v2)
+        c = self._offer_preparing_composition_v2
+        if (c.claim_activate_owner_or_null is not None or c.claim_activate_outcome_or_null is not None
+                or c.claim_activate_prepublication_hold_or_null is not None
+                or c.claim_activate_preclaim_hold_or_null is not None):
+            from .claim_activate_v2 import _validate_claim_row_v2
+            _validate_claim_row_v2(c)
+        else:
+            _validate_published_row_v2(c)
         return self._preparing_lease_bundle_v2
 
     @property
@@ -695,6 +718,7 @@ class DiscussionStateStore:
             ReservedCaptureOwnerReceiptV2, PreCaptureInvalidatedOwnerReceiptV2,
             ReservedInvalidatedOwnerReceiptV2,
         )
+        from .claim_activate_v2 import ActiveCaptureOwnerReceiptV2, ActiveInvalidatedOwnerReceiptV2
         if type(bundle) is not tuple or len(bundle) not in (2, 3):
             return False
         lease, owner = bundle[0], bundle[-1]
@@ -713,7 +737,13 @@ class DiscussionStateStore:
                  and lease.status == "RESERVED" and lease.lease_revision == 1)
                 or (type(owner) is ReservedInvalidatedOwnerReceiptV2
                     and owner.invalidated_lease is lease and owner.exact_capture is bundle[1]
-                    and lease.status == "INVALIDATED" and lease.lease_revision == 2))
+                    and lease.status == "INVALIDATED" and lease.lease_revision == 2)
+                or (type(owner) is ActiveCaptureOwnerReceiptV2
+                    and owner.exact_lease is lease and owner.exact_capture is bundle[1]
+                    and lease.status == "ACTIVE" and lease.lease_revision == 2)
+                or (type(owner) is ActiveInvalidatedOwnerReceiptV2
+                    and owner.invalidated_lease is lease and owner.exact_capture is bundle[1]
+                    and lease.status == "INVALIDATED" and lease.lease_revision == 3))
 
     @property
     def _reserved_capture_owner_receipt_v2(self):

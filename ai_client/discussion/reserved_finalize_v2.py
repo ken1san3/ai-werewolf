@@ -100,6 +100,14 @@ class ReservedInvalidatedBundleIdentityV2(_PrivateRecord):
     __slots__ = ()
 
 
+class ActiveBundleIdentityV2(_PrivateRecord):
+    __slots__ = ()
+
+
+class ActiveInvalidatedBundleIdentityV2(_PrivateRecord):
+    __slots__ = ()
+
+
 class LeaseBundleCellV2(_PrivateRecord):
     __slots__ = ("stage", "bundle_identity", "exact_tuple")
 
@@ -108,6 +116,8 @@ _CELL_IDENTITY_TYPES = MappingProxyType({
     "PREPARING": PreparingBundleIdentityV2, "RESERVED": ReservedBundleIdentityV2,
     "PRECAPTURE_INVALIDATED": PreCaptureInvalidatedBundleIdentityV2,
     "RESERVED_INVALIDATED": ReservedInvalidatedBundleIdentityV2,
+    "ACTIVE": ActiveBundleIdentityV2,
+    "ACTIVE_INVALIDATED": ActiveInvalidatedBundleIdentityV2,
 })
 
 
@@ -116,11 +126,7 @@ def _issue_bundle_cell_v2(store, stage, identity, exact_tuple):
     registry = store._lease_bundle_cells_v2
     if identity in registry:
         raise ReservedFinalizeError("FINALIZE_CELL_IDENTITY_REUSED")
-    allowed = {
-        "PREPARING": PreparingBundleIdentityV2, "RESERVED": ReservedBundleIdentityV2,
-        "PRECAPTURE_INVALIDATED": PreCaptureInvalidatedBundleIdentityV2,
-        "RESERVED_INVALIDATED": ReservedInvalidatedBundleIdentityV2,
-    }
+    allowed = _CELL_IDENTITY_TYPES
     if (type(identity) is not allowed.get(stage) or type(exact_tuple) is not tuple
             or not store._known_generation_bundle_v2(exact_tuple)):
         raise ReservedFinalizeError("FINALIZE_CELL_SHAPE_MISMATCH")
@@ -389,6 +395,8 @@ def _validate_published_row_v2(c, expected_owner=None, *, selecting=False):
 
 def _validate_published_row_contents_v2(c, expected_owner=None, *, selecting=False):
     """Read-only closed-row check; a mismatch never repairs any owner or state."""
+    if c.claim_activate_preclaim_hold_or_null is not None:
+        _row_error()
     store = c.exact_discussion_store
     cell = store._lease_bundle_cell_v2
     flow = c.flow_state
@@ -1269,8 +1277,13 @@ def _validate_abort_candidate_v2(store, expected_cell, owner, bundle):
         raise ReservedFinalizeError("FINALIZE_ABORT_OWNER_MISMATCH")
     expected = expected_cell.exact_tuple
     preparing_owner = owner.exact_preparing_receipt if type(owner) is ReservedCaptureOwnerReceiptV2 else owner
-    _validate_published_row_v2(preparing_owner.exact_composition, preparing_owner,
-        selecting=type(owner) is PreparingLeaseOwnerReceiptV2 and bundle.abort_selection.state == "SELECTED_UNPUBLISHED")
+    c = preparing_owner.exact_composition
+    if type(owner) is ReservedCaptureOwnerReceiptV2 and c.claim_activate_owner_or_null is not None:
+        from .claim_activate_v2 import _validate_i2_entry
+        _validate_i2_entry(c.claim_activate_owner_or_null)
+    else:
+        _validate_published_row_v2(c, preparing_owner,
+            selecting=type(owner) is PreparingLeaseOwnerReceiptV2 and bundle.abort_selection.state == "SELECTED_UNPUBLISHED")
     reserved = type(owner) is ReservedCaptureOwnerReceiptV2
     if not reserved and type(owner) is not PreparingLeaseOwnerReceiptV2:
         raise ReservedFinalizeError("FINALIZE_ABORT_OWNER_MISMATCH")
