@@ -180,18 +180,23 @@ prepare cacheはrun前に一度作り、run中はread-onlyで再利用する。H
 probeは順序も含めて `G01-1/seed 4242027`、`G15-1/seed 4242027` の2行に固定する。前者でT/P、後者で
 CO_OPPORTUNITYを観測する。各stageは最大2 sampleだが、length、structure/guard拒否、sample exhausted、timeout、
 transport/ownership異常、integrity falseのいずれかを一度でも観測した時点でprobeを停止し、96行を開始しない。
-特にTのlengthは即時停止である。各attemptのprovider latency、prompt/completion token、finish reasonを保存する。
+特にTのlengthは即時停止である。attempt clockはbody/schema準備の直前に開始し、provider call、structure/guard検査、
+outcomeのdurable記録が完了した直後に終了する。各attemptについてこのfull elapsed、内包するprovider latency、
+prompt/completion token、finish reasonを保存する。
 
-成功した各stageの最大attempt latencyを `L_T,L_P,L_CO`、未観測のPRE_VOTEはrequest hard timeoutの60秒を
-`L_PRE` とする。2 probe行の各row elapsedからprovider latency合計を引いた非負値の最大を `H_ROW`、runtime起動、
-cache load、開始・終了identity照合、cleanupを実測した合計を `H_FIXED` とする。96行の保守見積り秒は次で固定する。
+成功した各stageの最大full attempt elapsedを `A_T,A_P,A_CO` とする。観測済みattemptごとの
+`full attempt elapsed - provider latency` の非負値の最大を `H_ATTEMPT` とし、未観測PRE_VOTEには
+`A_PRE = 60 + H_ATTEMPT` を使う。2 probe行の各row elapsedから、そのrowのfull attempt elapsed合計を引いた
+非負値の最大を `H_ROW` とする。runtime起動、cache load、開始・終了identity照合、cleanupのうちrow/attempt clock外を
+実測した合計を `H_FIXED` とし、各区間は重複計上しない。96行の保守見積り秒は次で固定する。
 
 ```text
 ESTIMATE_96 = H_FIXED + 96 * H_ROW
-            + 2 * (84 * L_T + 84 * L_P + 6 * L_PRE + 6 * L_CO)
+            + 2 * (84 * A_T + 84 * A_P + 6 * A_PRE + 6 * A_CO)
 ```
 
-係数2は各stage最大2 sample、84は28 chat case×3 seed、各6はG13/G15の2 case×3 seedである。
+probeで1 sampleだけが実行されたstageも係数2を掛ける。係数2は各stage最大2 sample、84は28 chat case×3 seed、
+各6はG13/G15の2 case×3 seedである。
 PはT accepted時だけだが、見積りでは全chat行がPへ進む。測定値欠測、負のoverhead、clock不整合、
 `ESTIMATE_96 > 3600` のいずれかなら停止する。2行からp95は算出せず、この値を `SMOKE_ESTIMATE_ONLY` と記録する。
 
@@ -262,8 +267,10 @@ runtime/model loadとHTTP utility callを別counterで記録し、completion end
 7. invalid raw、length、guard reject、2 sample使い切りが行失敗・沈黙へ一意に集計されること。
 8. full/light ownershipの正常系、process終了、PID再利用、第二listener、listener欠測、暗黙reconnect、runtime/model drift、
    cache driftで、異常後request callが0かつintegrity falseになること。
-9. probe対象と順序が固定され、PRE_VOTE=60秒、最大2 sample、96行stage数、row/fixed overheadから同じ見積りが再現され、
-   各停止事象と3600秒超過が96行開始を拒否すること。
+9. probe対象と順序が固定され、attempt準備または検査・記録だけを遅らせるclock fixtureもfull elapsedと
+   `H_ATTEMPT`へ反映されること。PRE_VOTEが `60+H_ATTEMPT`、全stageが2 sample、row/fixed overheadが非重複で、
+   96行stage数から同じ見積りが再現されること。provider latencyだけ、1 sampleだけ、row elapsed全体の二重加算では
+   小さくならないこと、および各停止事象と3600秒超過が96行開始を拒否すること。
 
 独立Reviewerが本書を承認し、WP2 toolの独立reviewとoffline preflightが全PASSになるまで、2行probeを開始しない。
 同じ成果物が3回目のreviewへ入る場合、または別設計文書が必要になった場合は停止してユーザーへ選択肢を示す。
