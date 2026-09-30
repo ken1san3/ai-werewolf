@@ -127,6 +127,18 @@ class ProofError(RuntimeError):
         self.detail = detail
 
 
+def failure_observation(error: BaseException) -> dict[str, object]:
+    """Closed metadata only; exception text can contain private paths or input."""
+    known = {"control timeout", "child deadline", "child start deadline", "spawn deadline",
+             "child timeout", "debug owner", "child exit", "control EOF", "ready protocol",
+             "stream overflow", "stream read", "reader cleanup", "owned child cleanup",
+             "owned child exit unconfirmed", "unhandled child exception", "child RIP event"}
+    return {"aggregate": error.aggregate if isinstance(error, ProofError) else "UNKNOWN_RUNTIME_INVALID",
+            "code": error.detail if isinstance(error, ProofError) and error.detail in known else "UNCLASSIFIED",
+            "exception_kind": "ProofError" if isinstance(error, ProofError) else "OSError" if isinstance(error, OSError) else "OTHER",
+            "win32_error": (getattr(error, "winerror", None) or error.errno) if isinstance(error, OSError) else None}
+
+
 class State(str, Enum):
     NEW = "NEW"
     CLAIMED = "CLAIMED"
@@ -500,8 +512,12 @@ class SyntheticBackend:
 def run_backend(backend: ChildBackend, *, nonce: str, schema: bytes, raw: bytes,
                 sampler_input: Mapping[str, object], approved_modules: Mapping[str, str],
                 expected_abi: Mapping[str, int] | None = None,
-                run_deadline: float | None = None) -> tuple[dict[str, object], StateMachine]:
+                run_deadline: float | None = None,
+                observation: dict[str, object] | None = None) -> tuple[dict[str, object], StateMachine]:
     state = StateMachine()
+    observation = {} if observation is None else observation
+    operation = "START"
+    primary_error = None
     child_deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
     if run_deadline is not None:
         child_deadline = min(child_deadline, run_deadline - CHILD_CLEANUP_RESERVE_SECONDS)
@@ -518,14 +534,18 @@ def run_backend(backend: ChildBackend, *, nonce: str, schema: bytes, raw: bytes,
         remaining()
         backend.start(envelope, nonce, child_deadline)
         state.advance(State.CHILD_STARTED)
+        operation = "WAIT_READY_PRE"
         backend.wait_ready("PRE", remaining())
         state.advance(State.NATIVE_LOADED)
+        operation = "VERIFY_MODULE_PRE"
         backend.verify_static("PRE")
         pre = backend.snapshot()
         validate_module_sets(pre, pre, backend.events(), approved_modules)
         state.advance(State.MODULE_PRE_VERIFIED)
         backend.continue_child("PRE", nonce)
+        operation = "WAIT_RESULT"
         result = backend.result(remaining())
+        operation = "VALIDATE_RESULT"
         remaining()
         state.advance(State.GRAMMAR_EMITTED)
         validate_sampler_record(result.sampler_record)
@@ -542,12 +562,15 @@ def run_backend(backend: ChildBackend, *, nonce: str, schema: bytes, raw: bytes,
         summary = validate_child_result(result, nonce=nonce, expected_raw=raw, expected_abi=expected_abi)
         remaining()
         state.advance(State.ACCOUNTING_VERIFIED)
+        operation = "WAIT_READY_POST"
         backend.wait_ready("POST", remaining())
+        operation = "VERIFY_MODULE_POST"
         backend.verify_static("POST")
         post = backend.snapshot()
         validate_module_sets(pre, post, backend.events(), approved_modules)
         state.advance(State.MODULE_POST_VERIFIED)
         backend.continue_child("POST", nonce)
+        operation = "REAP"
         backend.reap(remaining())
         backend.verify_static("REAPED")
         remaining()
@@ -576,11 +599,22 @@ def run_backend(backend: ChildBackend, *, nonce: str, schema: bytes, raw: bytes,
             "process_identity": getattr(backend, "process_identity", None),
         }
         return summary, state
-    except ProofError as error:
-        state.fail(error.aggregate)
+    except BaseException as error:
+        primary_error = failure_observation(error)
+        if isinstance(error, ProofError) and error.detail in {"child deadline", "child start deadline", "spawn deadline"}:
+            if hasattr(backend, "timed_out"):
+                backend.timed_out = True
+        state.fail(primary_error["aggregate"])
         raise
     finally:
-        backend.close()
+        observation.update(last_operation=operation, last_state=state.state.value,
+                           state_history=list(state.history), failure=primary_error,
+                           cleanup_failure=None)
+        try:
+            backend.close()
+        except BaseException as error:
+            observation["cleanup_failure"] = failure_observation(error)
+            raise
 
 
 def parse_child_result(value: Mapping[str, object]) -> ChildResult:

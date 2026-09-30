@@ -553,3 +553,322 @@ def test_compile_and_run_model_free_native_child(tmp_path: Path) -> None:
         assert process.wait(timeout=30) == 0
     finally:
         os.close(fd)
+
+
+# T538: all process objects below are synthetic; no model/runtime is loaded.
+def io_backend():
+    import time
+    return windows_proof.WindowsDebugBackend(Path("synthetic-child"), -1, {},
+        model_path=Path("synthetic-model"), native_dir=Path("."), symbols={},
+        static_verify=lambda phase: None, run_deadline=time.monotonic() + 5)
+
+
+def test_stderr_pipe_drains_beyond_pipe_capacity_without_native():
+    import io
+    import threading
+    from types import SimpleNamespace
+    backend = io_backend()
+    read_fd, write_fd = os.pipe()
+    payload = b"synthetic-private-stderr" * 32768
+    stream = os.fdopen(read_fd, "rb")
+    backend.proc = SimpleNamespace(stderr=stream)
+    def write():
+        with os.fdopen(write_fd, "wb") as target:
+            target.write(payload)
+    writer = threading.Thread(target=write, daemon=True)
+    reader = threading.Thread(target=backend._drain_stream, args=("stderr",), daemon=True)
+    reader.start(); writer.start()
+    writer.join(3); reader.join(3)
+    assert not writer.is_alive() and not reader.is_alive()
+    assert backend.stderr_bytes() == payload and backend._stderr_eof
+    assert backend._io_error is None
+    stream.close()
+
+
+@pytest.mark.parametrize("name", ["stdout", "stderr"])
+def test_stream_overflow_drains_but_retains_only_bound(monkeypatch, name):
+    import io
+    from types import SimpleNamespace
+    monkeypatch.setattr(windows_proof, "STREAM_LIMIT", 128)
+    monkeypatch.setattr(windows_proof, "STREAM_CHUNK", 64)
+    backend = io_backend()
+    stream = io.BytesIO(b"private" * 200)
+    backend.proc = SimpleNamespace(**{name: stream})
+    backend._drain_stream(name)
+    assert stream.tell() == 1400
+    assert backend._stream_counts[name] == 129
+    assert len(backend.stderr_bytes()) <= 128
+    with pytest.raises(proof.ProofError, match="stream overflow") as caught:
+        backend._line(1)
+    assert caught.value.aggregate == "UNKNOWN_RESOURCE_BOUND"
+
+
+def test_debug_error_wakes_existing_control_wait():
+    import threading
+    import time
+    backend = io_backend()
+    result = []
+    entered = threading.Event()
+    original_get = backend._lines.get
+    def get(*args, **kwargs):
+        entered.set()
+        return original_get(*args, **kwargs)
+    backend._lines.get = get
+    def wait():
+        try: backend._line(4)
+        except proof.ProofError as error: result.append(error)
+    waiter = threading.Thread(target=wait, daemon=True)
+    waiter.start(); assert entered.wait(1)
+    backend._debug_error = OSError(5, "synthetic-private-path")
+    backend._wake_control()
+    waiter.join(1)
+    assert not waiter.is_alive()
+    assert result[0].detail == "debug owner" and not backend.timed_out
+    assert backend.private_observation()["debug_failure"]["win32_error"] == 5
+
+
+def test_control_timeout_sets_flag_and_eof_does_not():
+    backend = io_backend()
+    with pytest.raises(proof.ProofError, match="control timeout"): backend._line(0)
+    assert backend.timed_out
+    backend = io_backend(); backend._stdout_eof = True
+    with pytest.raises(proof.ProofError, match="control EOF"): backend._line(1)
+    assert not backend.timed_out
+
+
+def test_stdout_protocol_is_bounded_and_preserves_lines():
+    import io
+    from types import SimpleNamespace
+    backend = io_backend()
+    backend.proc = SimpleNamespace(stdout=io.BytesIO(b"READY_PRE x\r\n{\"status\":1}\nREADY_POST x\n"))
+    backend._drain_stream("stdout")
+    assert [backend._line(1) for _ in range(3)] == [b"READY_PRE x", b'{"status":1}', b"READY_POST x"]
+    with pytest.raises(proof.ProofError, match="control EOF"): backend._line(1)
+
+
+def test_failure_observation_preserves_actual_stage_and_redacts_text():
+    class Failing(proof.SyntheticBackend):
+        def wait_ready(self, phase, timeout):
+            raise OSError(5, "synthetic-private-path-and-raw")
+    module, event, allow = one_module()
+    backend = Failing(good_result(), (module,), (event,))
+    observation = {}
+    schema, raw = proof.build_witness()
+    with pytest.raises(OSError):
+        proof.run_backend(backend, nonce="a" * 32, schema=schema, raw=raw,
+            sampler_input=sampler_values(), approved_modules=allow, observation=observation)
+    assert observation["last_operation"] == "WAIT_READY_PRE"
+    assert observation["last_state"] == "CHILD_STARTED"
+    assert observation["state_history"] == ["NEW", "CLAIMED", "INPUT_BOUND", "TOOL_BOUND", "CHILD_STARTED"]
+    assert observation["failure"]["exception_kind"] == "OSError"
+    assert "synthetic-private" not in json.dumps(observation)
+
+
+def test_cleanup_failure_preserves_primary_failure():
+    class Failing(proof.SyntheticBackend):
+        def wait_ready(self, phase, timeout): raise proof.ProofError("UNKNOWN_RUNTIME_INVALID", "control timeout")
+        def close(self): raise proof.ProofError("UNKNOWN_RUNTIME_INVALID", "owned child cleanup")
+    module, event, allow = one_module(); observation = {}
+    backend = Failing(good_result(), (module,), (event,))
+    schema, raw = proof.build_witness()
+    with pytest.raises(proof.ProofError, match="owned child cleanup"):
+        proof.run_backend(backend, nonce="a" * 32, schema=schema, raw=raw,
+            sampler_input=sampler_values(), approved_modules=allow, observation=observation)
+    assert observation["failure"]["code"] == "control timeout"
+    assert observation["cleanup_failure"]["code"] == "owned child cleanup"
+
+
+def test_private_runtime_keeps_loader_observation_but_public_does_not():
+    backend = io_backend(); module, event, allow = one_module()
+    backend._events.append(event)
+    backend.process_identity = {"synthetic-private-process": 1}
+    backend._stderr.extend(b"synthetic-private-raw")
+    runtime = backend.private_observation()
+    assert runtime["module_events"][0]["module"]["final_path"] == module.final_path
+    assert runtime["process_identity"] == backend.process_identity
+    public = windows_proof._public_report({"run_id": "synthetic", "approved_non_system": allow},
+        {"_child_count": 1, "_private": runtime}, "UNKNOWN_RUNTIME_INVALID", 0.1)
+    assert "synthetic-private" not in json.dumps(public)
+    assert "module_events" not in public and "process_identity" not in public
+
+
+@pytest.mark.parametrize("seal_failure", [False, True])
+def test_runner_failure_seals_stage_stream_and_cleanup_without_public_leak(tmp_path, monkeypatch, seal_failure):
+    from contextlib import contextmanager, ExitStack
+    from types import SimpleNamespace
+    import time
+    directory = tmp_path / "private"; directory.mkdir()
+    @contextmanager
+    def locked(path, **kwargs):
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_BINARY)
+        try: yield fd
+        finally: os.close(fd)
+    class Evidence:
+        def __init__(self): self.directory=directory; self.files={}; self.stack=ExitStack()
+        def write(self, name, raw):
+            if seal_failure and name == "seal.json":
+                raise proof.ProofError("UNKNOWN_EVIDENCE_INVALID", "synthetic seal failure")
+            fd=self.stack.enter_context(locked(directory/name)); self.files[name]=fd
+            assert os.write(fd, raw) == len(raw)
+        def names(self): return [p.name for p in directory.iterdir()]
+    @contextmanager
+    def claim(*args):
+        evidence=Evidence()
+        with evidence.stack:
+            evidence.write("claim.json", b"{}")
+            yield evidence
+    module,event,allow=one_module()
+    class Backend(proof.SyntheticBackend):
+        def __init__(self):
+            super().__init__(good_result(),(module,),(event,))
+            self.started_count=0; self.started_at_monotonic=1; self.ended_at_monotonic=None
+            self.exit_code=None; self.timed_out=False; self.cleanup_result="NOT_STARTED"
+        def start(self,*args): self.started_count+=1
+        def wait_ready(self,*args):
+            self.timed_out=True
+            raise proof.ProofError("UNKNOWN_RUNTIME_INVALID","control timeout")
+        def close(self):
+            self.exit_code=1; self.ended_at_monotonic=2; self.cleanup_result="REAPED"
+        def private_observation(self): return {"module_events":[event.kind], "termination_requested":True}
+        def stderr_bytes(self): return b"synthetic-private-stderr"
+    backend=Backend()
+    pins={key:{"path":str(tmp_path/key),"file_identity":[1,2,3]} for key in ("proof_child","model","llama.dll")}
+    monkeypatch.setattr(windows_proof,"_claim_private_v2",claim)
+    monkeypatch.setattr(windows_proof.t527,"_locked_path",locked)
+    monkeypatch.setattr(windows_proof,"_pin_configured",lambda *args:(pins,{}))
+    monkeypatch.setattr(windows_proof,"_verify_configured_pins",lambda *args:None)
+    monkeypatch.setattr(windows_proof,"_validate_certificate_bundle",lambda *args:{})
+    monkeypatch.setattr(windows_proof,"WindowsDebugBackend",lambda *args,**kwargs:backend)
+    monkeypatch.setattr(windows_proof,"_publish_public",lambda path,raw,deadline:path.write_bytes(raw))
+    args=SimpleNamespace(private=directory,output=tmp_path/"public.json")
+    config={"run_id":"synthetic","nonce":"a"*32,"approved_non_system":allow,
+            "sampler_record":sampler_values(),"symbols":{},"expected_abi":{}}
+    if seal_failure:
+        with pytest.raises(proof.ProofError,match="synthetic seal failure"):
+            windows_proof._run_claimed_real_proof(args,config,time.monotonic(),time.monotonic()+60)
+        assert not args.output.exists()
+    else:
+        assert windows_proof._run_claimed_real_proof(args,config,time.monotonic(),time.monotonic()+60)==0
+        public=args.output.read_text()
+        assert "synthetic-private-stderr" not in public
+        assert json.loads(public)["aggregate"]=="UNKNOWN_RUNTIME_INVALID"
+        seal=json.loads((directory/"seal.json").read_text())
+        manifest=json.loads((directory/"manifest.json").read_text())
+        assert seal["manifest_sha256"]==proof.digest((directory/"manifest.json").read_bytes())
+        assert "child-stderr.bin" in {entry["name"] for entry in manifest["files"]}
+    detail=json.loads((directory/"detail.json").read_text())
+    assert detail["backend_observation"]["last_state"]=="CHILD_STARTED"
+    assert detail["backend_observation"]["failure"]["code"]=="control timeout"
+    assert detail["state_history"][-2:]==["CHILD_STARTED","UNKNOWN_SEALED"]
+    assert detail["child_lifecycle"]["cleanup_result"]=="REAPED"
+    assert (directory/"child-stderr.bin").read_bytes()==b"synthetic-private-stderr"
+    assert backend.started_count==1
+
+
+def test_reader_cleanup_unknown_is_fail_closed():
+    import io
+    from types import SimpleNamespace
+    backend=io_backend()
+    class Reader:
+        def join(self,timeout): pass
+        def is_alive(self): return True
+    backend._readers=[Reader()]
+    with pytest.raises(proof.ProofError,match="reader cleanup"):
+        backend.close()
+    assert backend.cleanup_result=="UNKNOWN_READERS"
+
+
+def test_debug_ledger_is_bounded_and_retains_exit_and_exception(monkeypatch):
+    backend=io_backend()
+    event=windows_proof._DEBUG_EVENT(); event.dwDebugEventCode=windows_proof.EXCEPTION_DEBUG_EVENT
+    event.u.Exception.ExceptionRecord.ExceptionCode=0xC0000005; event.u.Exception.dwFirstChance=0
+    backend._record_debug_event(event)
+    event=windows_proof._DEBUG_EVENT(); event.dwDebugEventCode=windows_proof.EXIT_PROCESS_DEBUG_EVENT
+    event.u.ExitProcess.dwExitCode=1
+    backend._record_debug_event(event)
+    monkeypatch.setattr(proof,"MODULE_EVENT_LIMIT",2)
+    with pytest.raises(proof.ProofError,match="module events"): backend._record_debug_event(event)
+    ledger=backend.private_observation()["debug_events"]
+    assert ledger[0]["exception_code"]==0xC0000005 and ledger[0]["first_chance"]==0
+    assert ledger[1]["exit_code"]==1 and len(ledger)==2
+
+
+def test_evidence_limit_rejects_before_write(monkeypatch):
+    import time
+    monkeypatch.setattr(windows_proof,"STREAM_LIMIT",8)
+    class Evidence:
+        files={}
+        called=False
+        def write(self,*args):self.called=True
+    evidence=Evidence()
+    with pytest.raises(proof.ProofError,match="private evidence"):
+        windows_proof._evidence_write(evidence,"synthetic",b"x"*9,time.monotonic()+1)
+    assert not evidence.called
+
+
+def test_model_free_child_uses_actual_debug_and_io_owner(tmp_path, monkeypatch):
+    import time
+    child=tmp_path/"pf3-owner.exe"
+    build_tool.build("synthetic",proof.ROOT/"scripts/native/phase6_pf3_token_path.cpp",child,tmp_path/"build.json")
+    allow={child.name:proof.digest(child.read_bytes())}
+    path=tmp_path/"input.bin";path.write_bytes(b"")
+    fd=os.open(path,os.O_RDWR|os.O_BINARY)
+    backend=windows_proof.WindowsDebugBackend(child,fd,allow,model_path=tmp_path/"unused",
+        native_dir=tmp_path,symbols={key:"unused" for key in ("emitter","json_parse","json_dump","json_destroy")},
+        static_verify=lambda phase:None,run_deadline=time.monotonic()+30)
+    monkeypatch.setattr(proof,"CHILD_TIMEOUT_SECONDS",5)
+    schema,raw=proof.build_witness(); observation={}
+    try:
+        summary,state=proof.run_backend(backend,nonce="a"*32,schema=schema,raw=raw,
+            sampler_input=sampler_values(),approved_modules=allow,observation=observation)
+        assert summary["aggregate"]=="FAIL_BUDGET" and backend.started_count==1
+        assert backend.cleanup_result=="REAPED" and backend.exit_code==0
+        assert backend._stdout_eof and backend._stderr_eof
+        assert all(not reader.is_alive() for reader in backend._readers)
+        assert backend.private_observation()["debug_events"]
+    except BaseException:
+        runtime=backend.private_observation()
+        pytest.fail(json.dumps({"observation":observation,"debug_operation":runtime["debug_operation"],
+            "debug_failure":runtime["debug_failure"],"cleanup_result":backend.cleanup_result,
+            "debug_event_count":len(runtime["debug_events"])}))
+    finally:
+        os.close(fd)
+
+
+
+def test_debug_process_thread_handles_remain_os_owned(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    backend=io_backend()
+    closed=[]; continued=[]; pinned=[]
+    created=windows_proof._DEBUG_EVENT()
+    created.dwDebugEventCode=windows_proof.CREATE_PROCESS_DEBUG_EVENT
+    created.u.CreateProcessInfo.hFile=11
+    created.u.CreateProcessInfo.hProcess=22
+    created.u.CreateProcessInfo.hThread=33
+    exited=windows_proof._DEBUG_EVENT()
+    exited.dwDebugEventCode=windows_proof.EXIT_PROCESS_DEBUG_EVENT
+    events=iter([created,exited])
+    class Function:
+        def __init__(self,fn):self.fn=fn
+        def __call__(self,*args):return self.fn(*args)
+    def wait(ptr,timeout):
+        event=next(events)
+        ctypes.memmove(ptr,ctypes.byref(event),ctypes.sizeof(event))
+        return True
+    kernel=SimpleNamespace(WaitForDebugEvent=Function(wait),
+        ContinueDebugEvent=Function(lambda *args:continued.append(args) or True),
+        CloseHandle=Function(lambda handle:closed.append(handle) or True))
+    monkeypatch.setattr(windows_proof.ctypes,"WinDLL",lambda *args,**kwargs:kernel)
+    process=SimpleNamespace()
+    monkeypatch.setattr(windows_proof.subprocess,"Popen",lambda *args,**kwargs:process)
+    monkeypatch.setattr(backend,"_assign_job",lambda proc:None)
+    monkeypatch.setattr(windows_proof.t527,"creation_identity",lambda *args:{"synthetic":1})
+    module,_,_=one_module()
+    monkeypatch.setattr(backend,"_pin_debug_handle",lambda handle:pinned.append(handle) or module)
+    backend.symbols={key:"unused" for key in ("emitter","json_parse","json_dump","json_destroy")}
+    backend._debug_owner(44,(1,2,3))
+    assert backend._debug_error is None
+    assert pinned==[11] and closed==[11]
+    assert len(continued)==2
+    assert [event["event_code"] for event in backend.private_observation()["debug_events"]]==[3,5]

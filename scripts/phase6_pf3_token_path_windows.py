@@ -37,6 +37,8 @@ LIST_MODULES_ALL = 0x03
 JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+STREAM_LIMIT = 16 * 1024 * 1024  # Existing single-allocation hard maximum.
+STREAM_CHUNK = 64 * 1024
 
 
 class _IO_COUNTERS(ctypes.Structure):
@@ -297,12 +299,21 @@ class WindowsDebugBackend:
         self.lock = threading.Lock()
         self._events: list[core.ModuleEvent] = []
         self._unloads: list[int] = []
-        self._lines: queue.Queue[bytes] = queue.Queue()
+        self._lines: queue.Queue[bytes | None] = queue.Queue(maxsize=4)
+        self._readers: list[threading.Thread] = []
+        self._stdout_eof = False
+        self._stderr_eof = False
+        self._io_error: BaseException | None = None
+        self._stderr = bytearray()
+        self._stream_counts = {"stdout": 0, "stderr": 0}
+        self.termination_requested = False
         self._proc_queue: queue.Queue[object] = queue.Queue(maxsize=1)
         self._thread: threading.Thread | None = None
         self.proc: subprocess.Popen[bytes] | None = None
         self.nonce = ""
         self._debug_error: BaseException | None = None
+        self._debug_operation = "NOT_STARTED"
+        self._debug_events: list[dict[str, object]] = []
         self._start_cancel = threading.Event()
         self._snapshot_pins: dict[tuple[object, ...], core.ModuleIdentity] = {}
         self.process_identity: Mapping[str, object] | None = None
@@ -378,7 +389,7 @@ class WindowsDebugBackend:
             raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "spawn") from item
         if item is not self.proc:
             raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "spawn ownership")
-        threading.Thread(target=self._read_lines, name="pf3-control-reader", daemon=True).start()
+        self._start_readers()
 
     def _debug_owner(self, input_handle: int, input_identity: tuple[int, int, int]) -> None:
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -392,6 +403,7 @@ class WindowsDebugBackend:
         try:
             if self._start_cancel.is_set():
                 raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "spawn cancelled")
+            self._debug_operation = "CREATE_PROCESS"
             proc = subprocess.Popen([str(self.child), "--input-handle", str(input_handle),
                                      "--input-volume", str(input_identity[0]),
                                      "--input-file-id", str(input_identity[1]),
@@ -409,10 +421,13 @@ class WindowsDebugBackend:
                 self.proc = proc
                 self.started_at_monotonic = time.monotonic()
                 self.started_count = 1
+            self._debug_operation = "ASSIGN_JOB"
             self._assign_job(proc)
+            self._debug_operation = "PROCESS_IDENTITY"
             self.process_identity = t527.creation_identity(proc, self.child)
             self._proc_queue.put(proc)
             while True:
+                self._debug_operation = "WAIT_DEBUG_EVENT"
                 event = _DEBUG_EVENT()
                 if not kernel.WaitForDebugEvent(ctypes.byref(event), 100):
                     error = ctypes.get_last_error()
@@ -422,13 +437,14 @@ class WindowsDebugBackend:
                         continue
                     raise OSError(error, "WaitForDebugEvent")
                 code = event.dwDebugEventCode
+                self._record_debug_event(event)
                 continue_status = DBG_CONTINUE
                 module_handle = None
                 if code == CREATE_PROCESS_DEBUG_EVENT:
                     info = event.u.CreateProcessInfo
                     module_handle = info.hFile
-                    kernel.CloseHandle(info.hThread)
-                    kernel.CloseHandle(info.hProcess)
+                    # Debug process/thread handles belong to the OS until the
+                    # EXIT_PROCESS continuation. Only hFile is debugger-owned.
                 elif code == LOAD_DLL_DEBUG_EVENT:
                     module_handle = event.u.LoadDll.hFile
                 elif code == UNLOAD_DLL_DEBUG_EVENT:
@@ -440,23 +456,38 @@ class WindowsDebugBackend:
                     continue_status = DBG_CONTINUE if exception_code == 0x80000003 else DBG_EXCEPTION_NOT_HANDLED
                     if exception_code != 0x80000003 and event.u.Exception.dwFirstChance == 0:
                         self._debug_error = core.ProofError("UNKNOWN_RUNTIME_INVALID", "unhandled child exception")
+                        self._wake_control()
                 elif code == 9:  # RIP_EVENT
                     self._debug_error = core.ProofError("UNKNOWN_RUNTIME_INVALID", "child RIP event")
+                    self._wake_control()
                 if module_handle:
                     try:
+                        self._debug_operation = "PIN_MODULE"
                         identity = self._pin_debug_handle(module_handle)
                         kind = "CREATE_PROCESS" if code == CREATE_PROCESS_DEBUG_EVENT else "LOAD_DLL"
                         self._record_event(kind, identity)
                     finally:
                         kernel.CloseHandle(module_handle)
+                self._debug_operation = "CONTINUE_DEBUG_EVENT"
                 if not kernel.ContinueDebugEvent(event.dwProcessId, event.dwThreadId, continue_status):
                     raise OSError("ContinueDebugEvent")
                 if code == EXIT_PROCESS_DEBUG_EVENT:
                     break
         except BaseException as exc:
             self._debug_error = exc
+            self._wake_control()
             try: self._proc_queue.put_nowait(exc)
             except queue.Full: pass
+
+    def _record_debug_event(self, event: _DEBUG_EVENT) -> None:
+        with self.lock:
+            if len(self._debug_events) >= core.MODULE_EVENT_LIMIT:
+                raise core.ProofError("UNKNOWN_RESOURCE_BOUND", "module events")
+            code = int(event.dwDebugEventCode)
+            self._debug_events.append({"ordinal": len(self._debug_events), "event_code": code,
+                "exception_code": int(event.u.Exception.ExceptionRecord.ExceptionCode) if code == EXCEPTION_DEBUG_EVENT else None,
+                "first_chance": int(event.u.Exception.dwFirstChance) if code == EXCEPTION_DEBUG_EVENT else None,
+                "exit_code": int(event.u.ExitProcess.dwExitCode) if code == EXIT_PROCESS_DEBUG_EVENT else None})
 
     def _pin_debug_handle(self, handle: int) -> core.ModuleIdentity:
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -485,16 +516,89 @@ class WindowsDebugBackend:
             raise core.ProofError("UNKNOWN_MODULE_SET", "event path race")
         return identity
 
-    def _read_lines(self) -> None:
-        assert self.proc is not None and self.proc.stdout is not None
-        for line in iter(self.proc.stdout.readline, b""):
-            self._lines.put(line.rstrip(b"\r\n"))
+    def _wake_control(self) -> None:
+        try:
+            self._lines.put_nowait(None)
+        except queue.Full:
+            pass  # Queued data already wakes the consumer, which checks errors first.
+
+    def _stream_failure(self, error: BaseException) -> None:
+        with self.lock:
+            if self._io_error is None:
+                self._io_error = error
+        self._wake_control()
+
+    def _start_readers(self) -> None:
+        for name in ("stdout", "stderr"):
+            reader = threading.Thread(target=self._drain_stream, args=(name,),
+                                      name="pf3-" + name, daemon=True)
+            self._readers.append(reader)
+            reader.start()
+
+    def _drain_stream(self, name: str) -> None:
+        assert self.proc is not None
+        stream = getattr(self.proc, name)
+        pending = bytearray()
+        try:
+            if stream is None:
+                raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "stream read")
+            read = getattr(stream, "read1", stream.read)
+            while True:
+                chunk = read(STREAM_CHUNK)
+                if not chunk:
+                    break
+                with self.lock:
+                    total = min(STREAM_LIMIT + 1, self._stream_counts[name] + len(chunk))
+                    self._stream_counts[name] = total
+                if total > STREAM_LIMIT:
+                    self._stream_failure(core.ProofError("UNKNOWN_RESOURCE_BOUND", "stream overflow"))
+                    continue  # Keep draining until owned-child cleanup, without retaining more.
+                if name == "stderr":
+                    with self.lock:
+                        self._stderr.extend(chunk)
+                    continue
+                pending.extend(chunk)
+                while b"\n" in pending:
+                    line, _, rest = pending.partition(b"\n")
+                    pending = bytearray(rest)
+                    try:
+                        self._lines.put_nowait(bytes(line).rstrip(b"\r"))
+                    except queue.Full:
+                        self._stream_failure(core.ProofError("UNKNOWN_RESOURCE_BOUND", "stream overflow"))
+            if name == "stdout" and pending:
+                self._stream_failure(core.ProofError("UNKNOWN_RUNTIME_INVALID", "control EOF"))
+        except BaseException as error:
+            self._stream_failure(error if isinstance(error, core.ProofError) else
+                                 core.ProofError("UNKNOWN_RUNTIME_INVALID", "stream read"))
+        finally:
+            if name == "stdout":
+                self._stdout_eof = True
+            else:
+                self._stderr_eof = True
+            self._wake_control()
 
     def _line(self, timeout: float) -> bytes:
-        if self._debug_error is not None:
-            raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "debug owner") from self._debug_error
-        try: return self._lines.get(timeout=timeout)
-        except queue.Empty as exc: raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "control timeout") from exc
+        deadline = min(self.run_deadline, time.monotonic() + timeout)
+        while True:
+            if self._debug_error is not None:
+                raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "debug owner") from self._debug_error
+            if self._io_error is not None:
+                raise self._io_error
+            if self._stdout_eof and self._lines.empty():
+                raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "control EOF")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.timed_out = True
+                raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "control timeout")
+            try:
+                line = self._lines.get(timeout=remaining)
+            except queue.Empty:
+                self.timed_out = True
+                raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "control timeout") from None
+            if self._debug_error is not None or self._io_error is not None:
+                continue
+            if line is not None:
+                return line
 
     def wait_ready(self, phase: str, timeout: float) -> None:
         expected = f"READY_{phase} {self.nonce}".encode("ascii")
@@ -553,6 +657,7 @@ class WindowsDebugBackend:
         try: code = self.proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self.timed_out = True
+            self.termination_requested = True
             self.proc.terminate()
             try: self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired as exc: raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "unreaped child") from exc
@@ -567,6 +672,7 @@ class WindowsDebugBackend:
                 raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "debug thread")
 
     def _cleanup_owned(self, deadline: float) -> None:
+        self.cleanup_result = "CLEANUP_PENDING"
         def remaining() -> float:
             return max(0.0, deadline - time.monotonic())
         thread = self._thread
@@ -574,6 +680,7 @@ class WindowsDebugBackend:
             thread.join(timeout=min(0.05, remaining()))
         proc = self.proc
         if proc is not None and proc.poll() is None:
+            self.termination_requested = True
             proc.terminate()
             try:
                 proc.wait(timeout=min(5.0, remaining()))
@@ -596,8 +703,30 @@ class WindowsDebugBackend:
         try:
             self._start_cancel.set()
             self._cleanup_owned(self.run_deadline)
+            for reader in self._readers:
+                reader.join(timeout=max(0.0, min(5.0, self.run_deadline - time.monotonic())))
+            if any(reader.is_alive() for reader in self._readers):
+                self.cleanup_result = "UNKNOWN_READERS"
+                raise core.ProofError("UNKNOWN_RUNTIME_INVALID", "reader cleanup")
+            if self._io_error is not None:
+                raise self._io_error
         finally:
             self.stack.close()
+
+    def private_observation(self) -> dict[str, object]:
+        with self.lock:
+            return {"debug_failure": None if self._debug_error is None else core.failure_observation(self._debug_error),
+                    "debug_operation": self._debug_operation, "debug_events": list(self._debug_events),
+                    "io_failure": None if self._io_error is None else core.failure_observation(self._io_error),
+                    "stream_counts": dict(self._stream_counts), "stdout_eof": self._stdout_eof,
+                    "stderr_eof": self._stderr_eof, "termination_requested": self.termination_requested,
+                    "process_identity": self.process_identity,
+                    "module_events": [{"ordinal": item.ordinal, "kind": item.kind,
+                        "module": None if item.module is None else item.module.__dict__} for item in self._events]}
+
+    def stderr_bytes(self) -> bytes:
+        with self.lock:
+            return bytes(self._stderr)
 
     def verify_static(self, phase: str) -> None:
         self.static_verify(phase)
@@ -822,6 +951,8 @@ def _evidence_size(evidence, deadline: float) -> int:
 
 def _evidence_write(evidence, name: str, raw: bytes, deadline: float) -> None:
     _check_deadline(deadline)
+    if len(raw) > STREAM_LIMIT or _evidence_size(evidence, deadline) + len(raw) > core.PRIVATE_EVIDENCE_LIMIT:
+        raise core.ProofError("UNKNOWN_RESOURCE_BOUND", "private evidence")
     evidence.write(name, raw)
     _check_deadline(deadline)
 
@@ -923,6 +1054,8 @@ def run_real_proof(args, namespace: Mapping[str, object]) -> int:
 
 def _run_claimed_real_proof(args, config: Mapping[str, object], started: float, deadline: float) -> int:
     state = core.StateMachine(); summary: dict[str, object] = {}
+    backend_observation: dict[str, object] = {}
+    caught_failure = None
     runner_source = Path(core.__file__)
     aggregate = "UNKNOWN_RUNTIME_INVALID"
     with _claim_private_v2(args.private.resolve(), config, deadline) as evidence, ExitStack() as stack:
@@ -952,18 +1085,26 @@ def _run_claimed_real_proof(args, config: Mapping[str, object], started: float, 
                 static_verify=verify_static, run_deadline=deadline)
             summary, state = core.run_backend(backend, nonce=config["nonce"], schema=schema, raw=raw,
                 sampler_input=config["sampler_record"], approved_modules=approved_modules,
-                expected_abi=config["expected_abi"], run_deadline=deadline)
+                expected_abi=config["expected_abi"], run_deadline=deadline,
+                observation=backend_observation)
             aggregate = summary["aggregate"]
         except core.ProofError as error:
+            caught_failure = core.failure_observation(error)
             aggregate = error.aggregate; state.fail(aggregate)
-        except Exception:
+        except Exception as error:
+            caught_failure = core.failure_observation(error)
             aggregate = "UNKNOWN_RUNTIME_INVALID"; state.fail(aggregate)
+        if backend_observation:
+            state = core.StateMachine(core.State(backend_observation["last_state"]),
+                                      list(backend_observation["state_history"]),
+                                      None if aggregate == "FAIL_BUDGET" else aggregate)
         summary["_child_count"] = backend.started_count if backend is not None else 0
         if pins:
             try:
                 _verify_configured_pins(pins, identities, deadline)
                 static_snapshots.append({"phase": "FINAL", "hashes": dict(identities)})
             except core.ProofError as error:
+                caught_failure = core.failure_observation(error)
                 aggregate = error.aggregate; state.fail(aggregate)
         planned_history = list(state.history)
         if aggregate == "FAIL_BUDGET" and state.state == core.State.CHILD_REAPED:
@@ -978,6 +1119,9 @@ def _run_claimed_real_proof(args, config: Mapping[str, object], started: float, 
                   "candidate_id": core.CANDIDATE_ID,
                   "schema_bytes": schema.decode("utf-8") if schema else None,
                   "raw_hex": raw.hex() if raw else None, "summary": summary,
+                  "failure": caught_failure,
+                  "backend_observation": backend_observation,
+                  "backend_runtime": None if backend is None else backend.private_observation(),
                   "observed_pre_seal_history": list(state.history),
                   "child_lifecycle": None if backend is None else {
                       "started_at_monotonic": backend.started_at_monotonic,
@@ -985,6 +1129,8 @@ def _run_claimed_real_proof(args, config: Mapping[str, object], started: float, 
                       "exit_code": backend.exit_code, "timed_out": backend.timed_out,
                       "cleanup_result": backend.cleanup_result,
                   }}
+        if backend is not None:
+            _evidence_write(evidence, "child-stderr.bin", backend.stderr_bytes(), deadline)
         _evidence_write(evidence, "detail.json", core.canonical_bytes(detail), deadline)
         _evidence_size(evidence, deadline)
         manifest = {"schema_version": "aiwolf.pf3-token-path-manifest.v1",
