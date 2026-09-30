@@ -698,25 +698,16 @@ def test_runner_failure_seals_stage_stream_and_cleanup_without_public_leak(tmp_p
     from types import SimpleNamespace
     import time
     directory = tmp_path / "private"; directory.mkdir()
-    @contextmanager
-    def locked(path, **kwargs):
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_BINARY)
-        try: yield fd
-        finally: os.close(fd)
-    class Evidence:
-        def __init__(self): self.directory=directory; self.files={}; self.stack=ExitStack()
-        def write(self, name, raw):
-            if seal_failure and name == "seal.json":
+    import scripts.phase6_private_review as private_helper
+    # ACL policy has its own tests; keep real handles, writer, rename and seal here.
+    monkeypatch.setattr(private_helper, "_windows_private_path", lambda *a, **kw: True)
+    original_write = windows_proof.TokenPathPrivateEvidence.write
+    if seal_failure:
+        def reject_seal(self, name, raw, **kwargs):
+            if name == "seal.json":
                 raise proof.ProofError("UNKNOWN_EVIDENCE_INVALID", "synthetic seal failure")
-            fd=self.stack.enter_context(locked(directory/name)); self.files[name]=fd
-            assert os.write(fd, raw) == len(raw)
-        def names(self): return [p.name for p in directory.iterdir()]
-    @contextmanager
-    def claim(*args):
-        evidence=Evidence()
-        with evidence.stack:
-            evidence.write("claim.json", b"{}")
-            yield evidence
+            return original_write(self, name, raw, **kwargs)
+        monkeypatch.setattr(windows_proof.TokenPathPrivateEvidence, "write", reject_seal)
     module,event,allow=one_module()
     class Backend(proof.SyntheticBackend):
         def __init__(self):
@@ -733,8 +724,6 @@ def test_runner_failure_seals_stage_stream_and_cleanup_without_public_leak(tmp_p
         def stderr_bytes(self): return b"synthetic-private-stderr"
     backend=Backend()
     pins={key:{"path":str(tmp_path/key),"file_identity":[1,2,3]} for key in ("proof_child","model","llama.dll")}
-    monkeypatch.setattr(windows_proof,"_claim_private_v2",claim)
-    monkeypatch.setattr(windows_proof.t527,"_locked_path",locked)
     monkeypatch.setattr(windows_proof,"_pin_configured",lambda *args:(pins,{}))
     monkeypatch.setattr(windows_proof,"_verify_configured_pins",lambda *args:None)
     monkeypatch.setattr(windows_proof,"_validate_certificate_bundle",lambda *args:{})
@@ -742,7 +731,9 @@ def test_runner_failure_seals_stage_stream_and_cleanup_without_public_leak(tmp_p
     monkeypatch.setattr(windows_proof,"_publish_public",lambda path,raw,deadline:path.write_bytes(raw))
     args=SimpleNamespace(private=directory,output=tmp_path/"public.json")
     config={"run_id":"synthetic","nonce":"a"*32,"approved_non_system":allow,
-            "sampler_record":sampler_values(),"symbols":{},"expected_abi":{}}
+            "sampler_record":sampler_values(),"symbols":{},"expected_abi":{},
+            "hashes":{key:"a"*64 for key in ("runner_source","windows_source","child_source",
+                "build_helper_source","build_manifest","proof_child")}}
     if seal_failure:
         with pytest.raises(proof.ProofError,match="synthetic seal failure"):
             windows_proof._run_claimed_real_proof(args,config,time.monotonic(),time.monotonic()+60)
@@ -756,6 +747,10 @@ def test_runner_failure_seals_stage_stream_and_cleanup_without_public_leak(tmp_p
         manifest=json.loads((directory/"manifest.json").read_text())
         assert seal["manifest_sha256"]==proof.digest((directory/"manifest.json").read_bytes())
         assert "child-stderr.bin" in {entry["name"] for entry in manifest["files"]}
+        for entry in manifest["files"]:
+            saved = (directory / entry["name"]).read_bytes()
+            assert entry["sha256"] == proof.digest(saved)
+            assert entry["size"] == len(saved)
     detail=json.loads((directory/"detail.json").read_text())
     assert detail["backend_observation"]["last_state"]=="CHILD_STARTED"
     assert detail["backend_observation"]["failure"]["code"]=="control timeout"
@@ -872,3 +867,45 @@ def test_debug_process_thread_handles_remain_os_owned(monkeypatch):
     assert pinned==[11] and closed==[11]
     assert len(continued)==2
     assert [event["event_code"] for event in backend.private_observation()["debug_events"]]==[3,5]
+
+
+@pytest.mark.parametrize("failure", ["extra", "duplicate", "claim", "limit", "write", "rename", "read"])
+def test_token_path_private_blob_closed_contract(tmp_path, monkeypatch, failure):
+    from contextlib import ExitStack
+    import scripts.phase6_private_review as private_helper
+    monkeypatch.setattr(private_helper, "_windows_private_path", lambda *a, **kw: True)
+    with ExitStack() as stack:
+        store = windows_proof.TokenPathPrivateEvidence(tmp_path, stack)
+        raw = b"private-stderr"
+        if failure == "extra":
+            with pytest.raises(ValueError): store.write("other.bin", raw)
+        elif failure == "claim":
+            with pytest.raises(ValueError): store.write("child-stderr.bin", raw, claim=True)
+        elif failure == "duplicate":
+            store.write("child-stderr.bin", raw)
+            assert store.read("child-stderr.bin") == raw
+            with pytest.raises(ValueError): store.write("child-stderr.bin", raw)
+        elif failure == "limit":
+            monkeypatch.setattr(windows_proof, "STREAM_LIMIT", len(raw)-1)
+            with pytest.raises(proof.ProofError): store.write("child-stderr.bin", raw)
+        else:
+            if failure == "write":
+                monkeypatch.setattr(windows_proof.os, "write", lambda fd, data: len(data)-1)
+            elif failure == "rename":
+                def rejected(*args): raise OSError("synthetic rename")
+                monkeypatch.setattr(windows_proof.t527, "rename_open_file", rejected)
+            else:
+                monkeypatch.setattr(windows_proof.t527, "descriptor_bytes", lambda fd: b"wrong")
+            with pytest.raises(OSError): store.write("child-stderr.bin", raw)
+        if failure != "duplicate":
+            assert "child-stderr.bin" not in store.files
+        assert not (tmp_path / "manifest.json").exists()
+        assert not (tmp_path / "seal.json").exists()
+
+
+def test_shared_private_evidence_contract_is_unchanged(tmp_path):
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        shared = windows_proof.t527.PrivateEvidence(tmp_path, stack)
+        with pytest.raises(ValueError): shared.write("child-stderr.bin", b"private")
+    assert not list(tmp_path.iterdir())

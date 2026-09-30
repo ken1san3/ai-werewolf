@@ -877,6 +877,29 @@ def _validate_certificate_bundle(config: Mapping[str, object], pins: Mapping[str
             "product_certificate": core.strict_json(product_raw)}
 
 
+class TokenPathPrivateEvidence(t527.PrivateEvidence):
+    """Keep the shared JSON contract; add only this tool's private stderr blob."""
+    def write(self, name, raw, *, claim=False):
+        if name != "child-stderr.bin":
+            return super().write(name, raw, claim=claim)
+        if claim or name in self.files:
+            raise ValueError("closed evidence name")
+        if (len(raw) > STREAM_LIMIT
+                or sum(os.fstat(fd).st_size for fd in self.files.values()) + len(raw)
+                > core.PRIVATE_EVIDENCE_LIMIT):
+            raise core.ProofError("UNKNOWN_RESOURCE_BOUND", "private evidence")
+        path = self.directory / name
+        temporary = self.directory / (name + ".partial")
+        fd = self.stack.enter_context(t527._locked_path(temporary, create=True))
+        if os.write(fd, raw) != len(raw):
+            raise OSError("short private write")
+        os.fsync(fd)
+        t527.rename_open_file(fd, path)
+        if t527.descriptor_bytes(fd) != raw:
+            raise OSError("private write verification")
+        self.files[name] = fd
+
+
 @contextmanager
 def _claim_private_v2(directory: Path, config: Mapping[str, object], deadline: float):
     """Claim before any static hashing while retaining T527's private ACL/lock rules."""
@@ -896,7 +919,7 @@ def _claim_private_v2(directory: Path, config: Mapping[str, object], deadline: f
         if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
                for value in expected.values()):
             raise core.ProofError("UNKNOWN_INPUT_INVALID", "claim identities")
-        store = t527.PrivateEvidence(target, stack)
+        store = TokenPathPrivateEvidence(target, stack)
         info = target.stat()
         claim = {"schema_version": "aiwolf.pf3-private-claim.v1", "run_id": config["run_id"],
                  "nonce": config["nonce"], "expected_tool_sha256": expected,
