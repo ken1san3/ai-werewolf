@@ -219,34 +219,66 @@ Windowsの `GetExtendedTcpTable` はowner PID付きTCP endpoint表を返せる�
 
 ### 5.2 full check、light check、transport世代
 
-開始時のfull checkは、保持中process handleからPID、creation time、alive、executable SHAを取り、runtime/model identityと、
-loopbackのexact address/portに対するlistener owner集合がそのPID一件だけであることを確認する。その後にHTTP clientを一個だけ
-作り、`transport_generation=1` とする。full checkはrun開始、run終了、通信異常、接続再確立の直前と直後に行う。
+run開始時は、HTTP transportを作る前に境界full checkを行う。保持中process handleのPID、creation time、alive、実行file、
+model file、runtime file、config、source SHAを開始時snapshotと照合し、exact loopback address/portのlistener owner集合が
+そのPID一件だけであることを確認する。大容量のmodel/runtime/config hashは、この最初の接続前と、run終了時に全transportを
+closeした後の二回だけ計算する。hash実行中にHTTP接続がopenまたはconnect中であってはならない。開始時runtime identityは、
+最初のtransportを張った後に `/props` と `/slots` から一度取得して固定する。以後の照合対象は、この固定値、開始時process
+snapshot、開始時source SHAであり、path文字列だけをidentityの代用にしない。runtime identityのfield集合と正規化は既存
+`Runtime.identity()` 契約を変えず、`generation_settings` を含む返値全体をcanonical bytesで比較する。slotの処理中/空きなど、
+既存契約がidentity外で検査する一時状態を新しいidentity fieldへ昇格させない。
 
-HTTP adapterは接続生成を観測する必須transport recorderを持つ。full check後、generation前のutility requestで一度だけ
-接続を確立してimmutableなconnection identityと `transport_generation=1` を固定する。recorderは新規connect開始を
-request body送信前に通知し、generation固定後の二度目のconnectを例外で止める。接続identity/open/reuse/close eventを
-観測できないadapterはpreflight UNKNOWN、generation request 0で停止し、full checkで代用しない。
+HTTP adapterは接続のopen/reuse/close、新規connect開始、peerの `Connection: close`、通信例外を観測できる必須
+`TransportRecorder` を持つ。最初の接続を `transport_generation=1` とし、再接続のたびに単調に1増やす。一つのgenerationには
+一つのconnection identityしか許さない。観測不能、generationの逆行・重複、同一generation内のconnection identity変更は
+`run_integrity=false` で停止する。
 
-毎callのlight checkは次をno-subprocessで行う。
+毎requestの直前と、応答を受理する直前のlight checkはno-subprocessで次を行う。
 
-1. 保持中process handleがsignalされておらず、PIDとcreation timeが開始時snapshotと一致する。
+1. 保持中process handleがaliveで、PIDとcreation timeを含むsnapshotが開始時と一致する。
 2. `GetExtendedTcpTable` のIPv4/IPv6 listener行を読み、exact loopback endpointのowner PID集合が開始時PID一件だけである。
-3. recorderのconnection identityとgenerationが固定値で、前callからdisconnect、新規connect、reconnect eventがない。
+3. 使用中transportのgeneration、connection identity、open/close event列がrecorderの期待状態と一致する。
 
-keep-alive中でも1と2を省略しない。disconnect、connection ID変化、reconnect attempt、owner表の複数/欠測、API access errorは
-通信異常として現在attemptを受理せずrunを終了する。同じrun内で新clientを作らず、attemptを再送しない。
+idle timeout、最大request数、peerの `Connection: close`、通信例外、新規connect開始を観測した場合は旧transportをcloseして捨てる。
+応答bytesを最後まで受領し検査できたrequestは、その応答に `Connection: close` が付いていても当該attemptの通常結果として処理し、
+次request前に再接続する。応答完了前に接続を失ったgeneration requestは受理せず、そのsampleの失敗attemptとしてdurableに記録し、
+同じattemptを再送しない。次の既定sampleが残る場合だけ、既存の導出seedとsample番号で次sampleへ進む。transport再送と
+次の既定sampleを同一視しない。実装上も一般的なExceptionによる即時integrity破棄とは分け、回復可能なのは
+`handle/snapshot/listener/source/runtime` が全て一致したgeneration切断の専用固定kindだけとする。probeではこの失敗attemptも
+非`ACCEPTED`一件なので既定どおり即停止し、次sampleまたは96行へ進めない。
+
+再接続は次の有限な状態遷移一回で行う。
+
+1. 旧transportをcloseし、recorderでclose済みを確定する。
+2. HTTP接続がない状態で、保持handleのaliveと開始時snapshot、listener ownerが所有process一件だけ、source SHAが開始時と同じ、
+   executableの軽量file identityが開始時と同じであることを照合する。一つでも欠測・不一致なら停止する。
+3. 新しいclient/transportを一個だけ作り、次generationの最初のconnectを開始する。暗黙に再利用された旧connectionを拒否する。
+4. 新transport上のutility requestでruntime identityを開始時固定値へ照合し、直後にhandle/snapshot/listener/source SHAを再照合する。
+   全て一致したときだけ次の未送信requestへ進む。
+
+各再接続について `transport_generation`、UTC時刻、直前generation、固定reason code
+（`IDLE_CLOSE`、`MAX_REQUEST_CLOSE`、`PEER_CONNECTION_CLOSE`、`TRANSPORT_ERROR`、`NEW_CONNECT_OBSERVED`）、照合結果を
+private evidenceへdurableに記録し、公開側には回数とreason別件数を記録する。理由を自由文だけで記録しない。
+再接続検証のutility request自身がclose・通信例外・新たなconnectを起こした場合、その再接続を失敗として即停止し、検証中の
+再接続を入れ子にしない。したがって一つの切断観測につき再接続試行は最大一回である。run全体の再接続試行数は、送信を開始した
+utility request数とgeneration attempt数の合計を超えてはならず、超過、counter不整合、同一requestの再送を検出したら停止する。
+通常の測定・identity照合を含むutility requestが応答途中で失われた場合も同じutilityを再送せず、必要な測定値が欠けるためrunを
+停止する。完全応答後のcloseだけは結果を受理し、次の未送信requestの前に上記一回の再接続へ進める。
+
+候補witness、96入力、schema、request bodyの決定論的precomputeは最初の接続前に完了し、immutable cacheとして保持する。
+再接続を理由に再project・再構築しない。source SHA再照合も接続前に行い、大容量file hashは再接続時に行わない。
 
 ### 5.3 脅威別の検出理由
 
 | 脅威 | 観測 | 検出できる理由 | 異常時 |
 |---|---|---|---|
 | provider停止 | 毎callのprocess handle alive | PID文字列でなく開始時に開いたprocess objectを照合するためPID再利用と分離できる | 即停止 |
-| 別processのport共有・乗取り | 毎callのowner PID表、異常/reconnect時full check | Windowsは共有bindが可能なのでowner集合の変化を直接検出する | request送信前停止 |
-| 暗黙reconnect | transport connection/generation観測 | client object同一性を接続同一性の代用にしない | clientを捨てfull check。現在attemptは再送しない |
-| runtime差替え | 開始・終了のbuild/template/runtime照合 | run境界のidentity変化を検出する | integrity false |
-| model差替え | 開始・終了のmodel path、file identity、runtime報告照合 | path文字列だけでなく固定file identityとruntime選択を照合する | integrity false |
-| cache/source差替え | prepare前後とrun終了のhash照合 | 96入力とschemaを再生成せず同じbytesへ束縛する | integrity false |
+| 別processのport共有・乗取り | 毎requestのowner PID表、再接続前後の照合 | Windowsは共有bindが可能なのでowner集合の変化を直接検出する | 新transport/request送信前停止 |
+| 正常なidle・最大request数close | recorderのclose理由、再接続前後のhandle/snapshot/listener照合 | 旧transportを捨てても所有process一件と開始時snapshotへの束縛を継続する | 照合後に次generationへ進む |
+| 暗黙reconnect・connection差替え | connect event、connection identity、単調なgeneration | client object同一性を接続同一性の代用にせず、明示状態遷移外のconnectを検出する | 現attemptを再送せず停止 |
+| runtime差替え | 開始時固定identity、各再接続の新transport上のidentity、終了照合 | transportを替えても同じruntimeのbuild/model/template/settings/slotへ束縛する | integrity false |
+| model/runtime/config差替え | 最初の接続前と全接続close後のfile identity/hash | 接続を保持したまま大容量hashをせず、両run境界の実体を照合する | integrity false |
+| cache/source差替え | 接続前precompute、各再接続前後と終了時のsource/cache hash | 96入力とwitnessを再生成せず同じbytesへ束縛する | integrity false |
 
 いずれかの観測が欠ける場合も安全側にUNKNOWNとして停止し、`run_integrity=false` とする。ownedでないprocessをkillしない。
 cleanupは保持handleのprocessだけを対象とし、process終了とlistener消失の両方が確認できなければ完了扱いしない。
@@ -266,11 +298,28 @@ runtime/model loadとHTTP utility callを別counterで記録し、completion end
 6. forbidden P input各fieldの注入、別channel record、未選択disclosure、旧planを拒否すること。
 7. invalid raw、length、guard reject、2 sample使い切りが行失敗・沈黙へ一意に集計されること。
 8. full/light ownershipの正常系、process終了、PID再利用、第二listener、listener欠測、暗黙reconnect、runtime/model drift、
-   cache driftで、異常後request callが0かつintegrity falseになること。
+   cache driftで、異常後の次requestが0かつintegrity falseになること。file/source hashの実行時にopenまたはconnect中のHTTP接続が
+   0であり、大容量hashが最初の接続前と全接続close後だけであること。
 9. probe対象と順序が固定され、attempt準備または検査・記録だけを遅らせるclock fixtureもfull elapsedと
    `H_ATTEMPT`へ反映されること。PRE_VOTEが `60+H_ATTEMPT`、全stageが2 sample、row/fixed overheadが非重複で、
    96行stage数から同じ見積りが再現されること。provider latencyだけ、1 sampleだけ、row elapsed全体の二重加算では
    小さくならないこと、および各停止事象と3600秒超過が96行開始を拒否すること。
+10. モデルを使わないfake HTTP serverで、idle timeoutによるcloseと固定request数到達によるcloseを別々に起こし、
+    `全96行の既定処理完了`、単調なtransport generation、再接続回数・UTC時刻・固定reason、attempt非再送を検査すること。
+    再接続前または直後にlistener ownerを変更したfixtureはfail closedとし、検証utility自身のcloseは一回で停止して無限再試行しない。
+    応答途中で失われたgeneration attemptの失敗と、次の既定sampleの開始を別counter・別seedとして検査すること。
 
-独立Reviewerが本書を承認し、WP2 toolの独立reviewとoffline preflightが全PASSになるまで、2行probeを開始しない。
-同じ成果物が3回目のreviewへ入る場合、または別設計文書が必要になった場合は停止してユーザーへ選択肢を示す。
+判断6の新しい実測は、既存canonical claim SHA-256
+`23a589f0c3969d78f58135c22aee271dbf7b9c344dd90925ffb1620000f301a8` と旧public result SHA-256
+`fec2e8e2bdc00481a3c3a615361de887ba4acd0ab53ea4ee90bc3ab4a4937576`、旧run identity、旧source/profile/design/tool approval hash、
+旧証拠を変更せず保持する。この旧canonical claimが存在し、内容hashが上記値と一致することを新claim作成の必須preconditionとする。
+新run identityは、旧runのcanonical claim record全体のSHA-256と、判断6で承認された訂正設計・tool review・source/profile hashを含む
+専用のexclusive one-shot claimへ束縛する。caller指定output pathはidentityにも実行済み判定にも用いず、path変更、別directory、
+旧claimの削除・改名で回避できないようにする。旧claimが欠けた場合は新runを開始しない。旧runの補完・resume・同条件retryは禁止し、
+新枠の `retry=0` 一回だけを許す。
+claim作成後に開始前失敗しても枠は消費済みであり、自動再試行しない。旧approvalは同一source SHAへの判定として保存するが、
+判断6の差分または新runへ拡張して承認済みとは扱わない。
+
+判断6の本書訂正reviewは一回だけ、対応tool reviewも一回だけとする。いずれかで追加審査が必要なら実装・実測へ進まずMainへ返す。
+独立Reviewerが訂正後の本書を承認し、WP2 toolの独立reviewと上記offline preflightが全PASSになるまで新runを開始しない。
+別設計文書が必要になった場合も停止してMainへ返す。
