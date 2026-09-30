@@ -8,8 +8,8 @@ Status: DRAFT
 測定器v2の7節にある普遍的なtoken上界証明を、fixture実測による予算決定へ置き換える。また、
 製品capture/leaseを通らないtest-only経路と、その経路で使うprovider所有権検査を定める。
 
-製品の `GenerationCatalogV2`、`build_generation_v2_schema`、
-`parse_and_validate_generation_v2_candidate_structure` は変更せず再利用する。製品既定はv1のままとし、
+製品の `build_generation_v2_schema` と `parse_and_validate_generation_v2_candidate_structure` は再利用する。
+`GenerationCatalogV2` は2.1節のprior validationだけを変更する。製品既定はv1のままとし、
 game、action送信、通常brain、capture/lease、PF3 native proof、APIは呼ばない。TとPは品質測定用の候補を返すだけで、
 製品stateへcommitしない。
 
@@ -17,38 +17,22 @@ game、action送信、通常brain、capture/lease、PF3 native proof、APIは呼
 任意の合法raw、任意のUnicode本文、grammar全体の上界を意味しない。予算内に収まらない実出力は安全違反ではなく、
 当該行の検出済み失敗である。
 
-## 2. 実装前に解決が必要な正本不整合
+## 2. D089で確定した入力境界
 
-### 2.1 G04-1の既存prior
+### 2.1 G04-1の既存priorを保持する限定製品変更
 
-G04-1の保存入力は `suspicion=80, credibility=20` を持つ。一方、現製品の `OpinionBasisV2` はpriorを
-`0,25,50,75,100` のいずれかに限定し、`allowed_current` をその補集合に固定する。したがって入力を変えず、
-hostで丸めず、製品型を使うという三条件の下ではG04-1用OPINION_CHANGE候補を構築できず、PF2はFAILになる。
+G04-1の保存入力 `suspicion=80, credibility=20` は丸めず保持する。製品 `OpinionBasisV2.prior` は
+`type(prior) is int` かつ0以上100以下を受理し、bool、範囲外、他の数値型を拒否する。
+モデルが選ぶ `opinion_current` の語彙は `0,25,50,75,100` のまま変えない。
+`allowed_current` の正規値は、この5値からpriorと同値の値だけを除いた順序付きtupleとする。
+従ってprior 80/20では5値全部、prior 75では75以外の4値になる。fixture、baseline、schema上のcurrent語彙を
+変更せず、製品変更はこのvalidationと対応testに限る。
 
-次のいずれかの明示判断が必要であり、本設計は選択を代行しない。
+### 2.2 非chatの4ケースは元triggerで測る
 
-1. 推奨: 製品型のpriorだけを0以上100以下の整数へ広げ、`allowed_current` は固定5値のうちpriorと異なる値を
-   元の順序で持たせる。80/20を改変せず、currentの出力語彙も増やさない。ただしT550の製品変更禁止を一箇所だけ
-   解除する製品契約変更である。
-2. fixtureを75/25へ変える。baseline入力不変の条件に反するため、この測定では採用しない。
-3. G04-1を除外またはbasisなしにする。96行とPF2の条件に反するため、この測定では採用しない。
-
-判断が固定されるまで、WP2のG04-1 catalog構築は `BLOCKED_PRIOR_DOMAIN`、preflight全体はFAIL、生成callは0とする。
-
-### 2.2 非chatの4ケース
-
-現fixtureではG13-1/2がPRE_VOTE、G15-1/2がCO_OPPORTUNITYであり、ChatActionではない。
-「全32ケースがchatでT/Pだけ」と「同じ96入力を除外なく使う」は同時に満たせない。
-
-次のいずれかの明示判断が必要である。
-
-1. 推奨: 28 chatケースはT→P、G13の2ケースは製品 `pre_vote` schemaによる1段、G15の2ケースは製品
-   `co_opportunity` schemaによる1段として、元triggerを維持する。品質評価では同じcase/seed対応を保つ。
-2. 4ケースをchatへ変換する。baseline入力不変に反するため、この測定では採用しない。
-3. 4ケースを除外する。96行の条件に反するため、この測定では採用しない。
-
-判断が固定されるまで4ケースは `BLOCKED_TRIGGER_DOMAIN`、preflight全体はFAIL、生成callは0とする。
-この2件の解決に別設計文書は作らない。採用判断を本書のstatusと固定値へ反映し、独立reviewを受ける。
+28 chatケースはT→Pの2段、G13-1/2は製品 `pre_vote` schemaの1段、G15-1/2は製品
+`co_opportunity` schemaの1段とする。元trigger、入力、32 case×3 seedの96行分母を維持し、chatへの変換、除外、
+未実施扱いをしない。非chatはP入力adapterを通さず、製品schemaとcatalog束縛、製品structure validatorで検査する。
 
 ## 3. fixture実測による予算
 
@@ -66,14 +50,15 @@ messages、request bodyを一度だけ構築し、SHA-256とsource SHAをcache�
 private evidenceだけへ保存し、公開結果はhash、件数、token数、status、reasonだけにする。identity欠測、cache不一致、
 生成前後のsource変化はUNKNOWNとして生成call 0で停止する。
 
-### 3.2 plan予算
+### 3.2 chat plan予算
 
-各実catalogから製品 `build_generation_v2_schema("chat_plan", catalog)` を作る。schemaの有限なenum、const、nullable、
-array boundを辿り、全schema-valid logical planを列挙する。object keyは製品schemaの挿入順、配列はcatalog順を用い、
+84 chat行の各実catalogから製品 `build_generation_v2_schema("chat_plan", catalog)` を作る。schemaのenum、const、nullable、
+array boundを辿り、oneOfの各branchについて配列を最大件数まで満たし、各scalar enum値を少なくとも一度その位置へ置く
+決定論的な最大形candidate集合を作る。Cartesian積や全raw表現の列挙はしない。object keyは製品schemaの挿入順、配列はcatalog順を用い、
 UTF-8、`ensure_ascii=false`、空白なしの一意serializerでraw witnessを作る。各witnessを製品structure validatorへ戻し、
 合格したbytesだけをnative `/tokenize` で数える。手書きschemaや旧T510 plan schemaは使わない。
 
-96行の観測最大を `plan_fixture_max_tokens` とし、余裕は固定32 tokenとする。
+84 chat行のcandidate集合の観測最大を `plan_fixture_max_tokens` とし、余裕は固定32 tokenとする。
 
 ```text
 PLAN_BUDGET = plan_fixture_max_tokens + 32
@@ -92,8 +77,8 @@ message schemaは製品builderから作る。次の200文字logical textを固�
 - SHA-256のlowercase hexを循環した200文字列
 - 4-byte Unicode scalarとASCIIを組み合わせ、200文字かつUTF-8 600 bytes以下にしたもの
 
-全候補は製品structure validatorを通し、200文字・600 UTF-8 bytes以下を再確認する。compact rawに加え、
-JSON escapeを用いる `ensure_ascii=true` rawも同じlogical valueとして数える。観測最大を
+全候補は製品structure validatorを通し、200文字・600 UTF-8 bytes以下を再確認する。予算witnessは3.2節と同じ
+`ensure_ascii=false` のcompact serializerだけで作る。観測最大を
 `speech_fixture_max_tokens`、余裕を固定32 tokenとする。
 
 ```text
@@ -101,18 +86,31 @@ SPEECH_BUDGET = speech_fixture_max_tokens + 32
 ```
 
 `SPEECH_BUDGET > 512` または候補/count欠測ならPF3実測はFAILである。これはstress corpus内最大であり、
-任意200文字rawの上界ではない。実行時にこれを超えればlengthとして検出する。
+任意200文字rawの上界ではない。providerが異なるescapeや空白を生成して予算を使い切った場合は、実行時のlengthとして
+検出して失敗集計し、事前に代替raw表現を列挙しない。
 
-### 3.4 context測定と許可endpoint
+### 3.4 PRE_VOTEとCO_OPPORTUNITYの予算
+
+G13の各実catalogから `pre_vote` schema、G15から `co_opportunity` schemaを作る。PRE_VOTEは各branchの配列を最大件数で
+満たし、各scalar enum値を少なくとも一度その位置へ置く3.2節と同じ決定論的candidate集合を使う。COのSILENCE/DEFERは各1件、DECLAREの自由commentには
+3.3節の200文字stress corpusを適用する。各witnessを対応する製品structure validatorへ戻してからnative countする。
+
+```text
+PRE_VOTE_BUDGET = pre_vote_fixture_max_tokens + 32
+CO_BUDGET       = co_fixture_max_tokens + 32
+```
+
+いずれかが512を超える、列挙・validation・countが欠ける場合はPF3実測FAILとし、512へ丸めない。
+
+### 3.5 context測定と許可endpoint
 
 prepareのtoken測定は、承認済みローカルruntimeを起動してmodel/tokenizerをloadし、既存runtimeの
 `/apply-template` と `/tokenize` だけを使う。これはHTTP utility callであり、runtime loadとHTTP callは0ではない。
 `/v1/chat/completions`、sampling、model inference、GPU generationは0である。旧native DLL proof toolは使わない。
 
 実行時と同じrequest bodyから実schemaを含むmessagesを `/apply-template` へ渡し、その返却文字列を
-`add_special=true, parse_special=true` の `/tokenize` で数える。planは96実入力、speechは各行のplan選択に依存するため、
-その行の合法plan witnessのうち、発話段allowlist入力を最大にするfixture planを全件構築して数える。
-採用されたtrigger判断により1段となるケースはその実stageだけを数える。
+`add_special=true, parse_special=true` の `/tokenize` で数える。84 chat行では3.2節の最大形plan candidateごとに
+発話段allowlist入力を構築して数える。G13/G15の各6行は元triggerの実入力だけを数える。
 
 各callで次を満たさなければPF3実測はFAILである。EOS/special reserveは既存経路と同じ1 tokenを別加算する。
 
@@ -124,7 +122,7 @@ prepareのruntime起動にも4節の完全所有権検査を適用する。測�
 同じidentity、同じcache、同じbudgetを再照合する。prepare countを生成callとは数えない一方、utility call数、load回数、
 durationは明示して隠さない。
 
-### 3.5 実行時の判定
+### 3.6 実行時の判定
 
 各stageは固定budgetを `max_tokens` に設定する。`finish_reason=length`、completion token超過、応答欠測はparseせず、
 当該attemptを失敗にする。同じimmutable input/schemaで最大2 sample、異なる導出seedを使う。2回とも不受理なら
@@ -145,7 +143,8 @@ chat planのroot `oneOf` 全branchについて先頭 `reply_to`、後続 `act`�
 Python上のschemaだけの検査は代用にならない。
 
 PF2はcaseごとの期待selectorをfixtureへ固定し、reply/fact/basis/claim/optionが同じprojectionとactor/channelに一意に
-束縛されることだけを検査する。モデルが選ぶ確率や意味的十分性は主張しない。2節の2件はfallbackや既定値で補わない。
+束縛されることだけを検査する。モデルが選ぶ確率や意味的十分性は主張しない。priorは2.1節どおりexactに保持し、
+triggerは2.2節どおり分岐する。fallbackや既定値で補わない。
 
 ### 4.2 v2 planからspeech入力への薄いadapter
 
@@ -172,8 +171,29 @@ P入力のclosed top-level keyは
 ### 4.3 run境界
 
 prepare cacheはrun前に一度作り、run中はread-onlyで再利用する。HTTP clientも一個だけ作る。caseごとにschemaやfixtureを
-再projectしない。1行はplan最大2 call、そのaccepted後だけspeech最大2 callとする。通常game/action/state commitは0。
+再projectしない。chat行はplan最大2 call、そのaccepted後だけspeech最大2 call、非chat行は対応stage最大2 callとする。
+通常game/action/state commitは0。
 通信timeoutまたは受理不明では同じattemptを再送しない。
+
+### 4.4 2行probeと96行見積り
+
+probeは順序も含めて `G01-1/seed 4242027`、`G15-1/seed 4242027` の2行に固定する。前者でT/P、後者で
+CO_OPPORTUNITYを観測する。各stageは最大2 sampleだが、length、structure/guard拒否、sample exhausted、timeout、
+transport/ownership異常、integrity falseのいずれかを一度でも観測した時点でprobeを停止し、96行を開始しない。
+特にTのlengthは即時停止である。各attemptのprovider latency、prompt/completion token、finish reasonを保存する。
+
+成功した各stageの最大attempt latencyを `L_T,L_P,L_CO`、未観測のPRE_VOTEはrequest hard timeoutの60秒を
+`L_PRE` とする。2 probe行の各row elapsedからprovider latency合計を引いた非負値の最大を `H_ROW`、runtime起動、
+cache load、開始・終了identity照合、cleanupを実測した合計を `H_FIXED` とする。96行の保守見積り秒は次で固定する。
+
+```text
+ESTIMATE_96 = H_FIXED + 96 * H_ROW
+            + 2 * (84 * L_T + 84 * L_P + 6 * L_PRE + 6 * L_CO)
+```
+
+係数2は各stage最大2 sample、84は28 chat case×3 seed、各6はG13/G15の2 case×3 seedである。
+PはT accepted時だけだが、見積りでは全chat行がPへ進む。測定値欠測、負のoverhead、clock不整合、
+`ESTIMATE_96 > 3600` のいずれかなら停止する。2行からp95は算出せず、この値を `SMOKE_ESTIMATE_ONLY` と記録する。
 
 ## 5. 軽量な所有権確認
 
@@ -198,16 +218,19 @@ Windowsの `GetExtendedTcpTable` はowner PID付きTCP endpoint表を返せる�
 loopbackのexact address/portに対するlistener owner集合がそのPID一件だけであることを確認する。その後にHTTP clientを一個だけ
 作り、`transport_generation=1` とする。full checkはrun開始、run終了、通信異常、接続再確立の直前と直後に行う。
 
+HTTP adapterは接続生成を観測する必須transport recorderを持つ。full check後、generation前のutility requestで一度だけ
+接続を確立してimmutableなconnection identityと `transport_generation=1` を固定する。recorderは新規connect開始を
+request body送信前に通知し、generation固定後の二度目のconnectを例外で止める。接続identity/open/reuse/close eventを
+観測できないadapterはpreflight UNKNOWN、generation request 0で停止し、full checkで代用しない。
+
 毎callのlight checkは次をno-subprocessで行う。
 
 1. 保持中process handleがsignalされておらず、PIDとcreation timeが開始時snapshotと一致する。
 2. `GetExtendedTcpTable` のIPv4/IPv6 listener行を読み、exact loopback endpointのowner PID集合が開始時PID一件だけである。
-3. HTTP transportが前callからdisconnect/reconnectを報告していない。connection identityを観測できない実装では、各call前に
-   full checkを行い、軽い推定へ降格しない。
+3. recorderのconnection identityとgenerationが固定値で、前callからdisconnect、新規connect、reconnect eventがない。
 
 keep-alive中でも1と2を省略しない。disconnect、connection ID変化、reconnect attempt、owner表の複数/欠測、API access errorは
-通信異常として新しいrequestを送らずfull checkへ移る。full check合格後にだけ新clientを一回作り、transport generationを増やす。
-暗黙reconnectを許さない。
+通信異常として現在attemptを受理せずrunを終了する。同じrun内で新clientを作らず、attemptを再送しない。
 
 ### 5.3 脅威別の検出理由
 
@@ -225,19 +248,22 @@ cleanupは保持handleのprocessだけを対象とし、process終了とlistener
 
 ## 6. offline testと受入条件
 
-WP2はprovider generation 0で次を両Python環境で検査する。3.4節のutility endpointを使う統合preflightは、
+WP2はprovider generation 0で次を両Python環境で検査する。3.5節のutility endpointを使う統合preflightは、
 runtime/model loadとHTTP utility callを別counterで記録し、completion endpoint call 0をassertする。
 
 1. 96入力cacheの一意性、source/hash freeze、同入力を1回だけ構築すること。
 2. product catalog/schema/structure validatorを実際に呼び、mock同名関数で代用しないこと。
-3. plan有限列挙の全witnessがschema-validで、送信bytesのkey順とPF1 partitionが一致すること。
-4. PF2の必須候補が同じprojection/sourceへ一意に束縛されること。G04-1は2.1節解決前に必ずFAILすること。
-5. speech stress corpus、固定32 token余裕、各budget 512以下、全実入力のcontext式が成立すること。
+3. plan最大形candidate集合の全witnessがschema-validで、送信bytesのkey順とPF1 partitionが一致すること。
+4. PF2の必須候補が同じprojection/sourceへ一意に束縛されること。prior 80/20、current 5値、prior 75の同値除外、
+   prior範囲・exact int拒否境界を検査すること。
+5. speech/CO stress corpus、固定32 token余裕、T/P/PRE_VOTE/COの各budget 512以下、全96実入力のcontext式が
+   成立し、G13/G15が元triggerの製品schemaを使うこと。
 6. forbidden P input各fieldの注入、別channel record、未選択disclosure、旧planを拒否すること。
 7. invalid raw、length、guard reject、2 sample使い切りが行失敗・沈黙へ一意に集計されること。
 8. full/light ownershipの正常系、process終了、PID再利用、第二listener、listener欠測、暗黙reconnect、runtime/model drift、
    cache driftで、異常後request callが0かつintegrity falseになること。
+9. probe対象と順序が固定され、PRE_VOTE=60秒、最大2 sample、96行stage数、row/fixed overheadから同じ見積りが再現され、
+   各停止事象と3600秒超過が96行開始を拒否すること。
 
-2節の2判断が未解決なら本書はDRAFTのまま、WP1は未承認、WP2実装とprovider生成は開始しない。
-解決後も、独立Reviewerが本書を承認し、WP2 toolの独立reviewとoffline preflightが全PASSになるまで、2行probeを開始しない。
+独立Reviewerが本書を承認し、WP2 toolの独立reviewとoffline preflightが全PASSになるまで、2行probeを開始しない。
 同じ成果物が3回目のreviewへ入る場合、または別設計文書が必要になった場合は停止してユーザーへ選択肢を示す。
