@@ -284,13 +284,33 @@ class Runtime:
         self.client.close()
 
 
-def measure(fixtures, rows, runtime, private):
-    maxima = {s: 0 for s in q.STAGES}
-    witness_sets = {}
+def prepare_witnesses(fixtures):
+    """Complete deterministic CPU work before opening the runtime connection.
+
+    q.witnesses returns the same canonical bytes and performs every product
+    validation. No native count or provider operation belongs to this step.
+    """
+    values = {}
     for f in fixtures:
         for stage in ((f.stage, 'message') if f.stage == 'chat_plan' else (f.stage,)):
-            values = q.witnesses(stage, f)
-            witness_sets[f.case.case_id, stage] = values
+            key = (f.case.case_id, stage)
+            if key in values:
+                raise ValueError('WITNESS_DUPLICATE')
+            values[key] = q.witnesses(stage, f)
+    return MappingProxyType(values)
+
+
+def measure(fixtures, rows, runtime, private, *, witness_sets):
+    maxima = {s: 0 for s in q.STAGES}
+    expected = {(f.case.case_id, s) for f in fixtures
+                for s in ((f.stage, 'message') if f.stage == 'chat_plan' else (f.stage,))}
+    if set(witness_sets) != expected:
+        raise ValueError('WITNESS_DOMAIN')
+    for f in fixtures:
+        for stage in ((f.stage, 'message') if f.stage == 'chat_plan' else (f.stage,)):
+            values = witness_sets[f.case.case_id, stage]
+            if type(values) is not tuple or not values or any(type(raw) is not bytes for raw in values):
+                raise ValueError('WITNESS_BYTES')
             counted = []
             for raw in values:
                 count = runtime.count(raw.decode())
@@ -641,6 +661,7 @@ def run(profile_path, public_path):
     profile = load_profile(profile_path)
     frozen_sources = source_hashes()
     fixtures, rows = q.prepare()
+    witness_sets = prepare_witnesses(fixtures)
     claim = claim_experiment(public_path, profile, frozen_sources)
     private = create_private_evidence_container(ROOT / 'logs/phase6-private-evidence',
         evidence_kind='synthetic', task_id='T550', created_at_utc=datetime.now(timezone.utc))
@@ -662,7 +683,7 @@ def run(profile_path, public_path):
         identity = owner.runtime_identity
         write_once(private / 'identity.json', identity)
         startup_elapsed = time.monotonic() - start
-        budgets, records = measure(fixtures, rows, runtime, private)
+        budgets, records = measure(fixtures, rows, runtime, private, witness_sets=witness_sets)
         records_bytes = q.wire(records)
         cache_load_start = time.monotonic()
         probe_cache = RequestCache(json.loads(records_bytes))

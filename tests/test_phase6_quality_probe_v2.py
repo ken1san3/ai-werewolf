@@ -31,9 +31,10 @@ def test_suite_original_96_domain_and_prior(suite):
 
 def test_all_maximal_witnesses_use_real_product_validator(suite):
     fs, _ = suite
+    prepared = r.prepare_witnesses(fs)
     for f in fs:
         for stage in ((f.stage, 'message') if f.stage == 'chat_plan' else (f.stage,)):
-            raws = q.witnesses(stage, f)
+            raws = prepared[f.case.case_id, stage]
             assert raws and len(raws) == len(set(raws))
             for raw in raws:
                 parsed = q.product.parse_and_validate_generation_v2_candidate_structure(stage, raw, f.catalog)
@@ -254,7 +255,8 @@ def test_pf3_budget_and_context_fail_before_generation(suite, tmp_path, monkeypa
     runtime = SimpleNamespace(count=lambda raw: 481 if fault == 'budget' else 1,
                               input_count=lambda body: (8191, 'a' * 64))
     with pytest.raises(ValueError, match='PF3_' + fault.upper()):
-        r.measure(fixtures, [(f, 4242027) for f in fixtures], runtime, tmp_path)
+        r.measure(fixtures, [(f, 4242027) for f in fixtures], runtime, tmp_path,
+                  witness_sets=r.prepare_witnesses(fixtures))
 
 
 @pytest.mark.parametrize('fault', ['runtime', 'file', 'source'])
@@ -488,6 +490,7 @@ def test_run_never_reports_probe_rows_as_actual(suite, tmp_path, monkeypatch, sc
         return {'v': 'changed' if scenario == 'cache_failure_after_claim' and len(reads) >= 3 else 'fixed'}
     monkeypatch.setattr(r, 'source_hashes', sources)
     monkeypatch.setattr(q, 'prepare', lambda: suite)
+    monkeypatch.setattr(r, 'prepare_witnesses', lambda fixtures: {})
     monkeypatch.setattr(r, 'create_private_evidence_container', lambda *a, **k: private)
     monkeypatch.setattr(r, 'listener_owners', lambda port: ())
     monkeypatch.setattr(r.existing, 'cleanup_owned', lambda *a: {'owned_processes_remaining': 0})
@@ -499,7 +502,7 @@ def test_run_never_reports_probe_rows_as_actual(suite, tmp_path, monkeypatch, sc
                                   generation_calls=0, utility_calls=0, close=lambda: None)
         return object(), owner, runtime
     monkeypatch.setattr(r, 'launch', launch)
-    monkeypatch.setattr(r, 'measure', lambda *a: ({stage: 100 for stage in q.STAGES}, []))
+    monkeypatch.setattr(r, 'measure', lambda *a, **k: ({stage: 100 for stage in q.STAGES}, []))
     monkeypatch.setattr(r, 'estimate', lambda *a: {'seconds': 4000 if scenario == 'estimate_stop' else 1000,
                                                   'proceed': scenario != 'estimate_stop'})
     def run_rows(rows, runtime, *args, probe, cache):
@@ -518,3 +521,97 @@ def test_run_never_reports_probe_rows_as_actual(suite, tmp_path, monkeypatch, sc
     if scenario in ('actual_start_failure', 'cache_failure_after_claim'):
         assert (private / 'actual' / 'claim.json').exists()
         assert value['status'] == 'UNKNOWN'
+
+
+def test_prepared_witnesses_are_exact_immutable_bytes(suite, monkeypatch):
+    fixtures = tuple(next(f for f in suite[0] if f.stage == stage)
+                     for stage in ('chat_plan', 'pre_vote', 'co_opportunity'))
+    original, observed = q.witnesses, {}
+    def record(stage, fixture):
+        value = original(stage, fixture)
+        observed[fixture.case.case_id, stage] = value
+        return value
+    monkeypatch.setattr(q, 'witnesses', record)
+    prepared = r.prepare_witnesses(fixtures)
+    assert len(prepared) == 4
+    assert all(prepared[k] is value for k, value in observed.items())
+    with pytest.raises(TypeError):
+        prepared[('foreign', 'message')] = ()
+    class FirstCount(Exception):
+        pass
+    class Counter:
+        def count(self, raw):
+            assert raw.encode() == prepared[fixtures[0].case.case_id, 'chat_plan'][0]
+            raise FirstCount
+    monkeypatch.setattr(q, 'witnesses', lambda *a: (_ for _ in ()).throw(AssertionError('CONNECTED_CPU_REBUILD')))
+    with pytest.raises(FirstCount):
+        r.measure(fixtures, (), Counter(), None, witness_sets=prepared)
+
+
+@pytest.mark.parametrize('late_cpu,expected', [(True, 'RECONNECT_FORBIDDEN'), (False, 'COUNT_OK')])
+def test_idle_close_negative_and_prepared_witness_control(suite, monkeypatch, late_cpu, expected):
+    # The delayed source simulates the measured >1s product witness validation.
+    # The HTTP idle timeout stays identical in both arms; reconnect stays forbidden.
+    f = suite[0][0]
+    values = {stage: q.witnesses(stage, f) for stage in ('chat_plan', 'message')}
+    started = threading.Event()
+    seen = []
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(.2)
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            self.reply({'tokens': [1]})
+        def do_GET(self):
+            self.reply({'status': 'ok'})
+        def reply(self, value):
+            seen.append(self.path)
+            raw = q.wire(value)
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            started.set()
+        def log_message(self, *args):
+            pass
+    def cpu(stage, fixture):
+        if stage == 'chat_plan':
+            r.time.sleep(.35)
+        return values[stage]
+    monkeypatch.setattr(q, 'witnesses', cpu)
+    prepared = None if late_cpu else r.prepare_witnesses((f,))
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(r.existing, 'PORT', server.server_port)
+    owner = SimpleNamespace(integrity=True, light=lambda: None, full=lambda *a: None)
+    runtime = r.Runtime(owner)
+    class CountFinished(Exception):
+        pass
+    original_count = runtime.count
+    def count(raw):
+        original_count(raw)
+        raise CountFinished
+    runtime.count = count
+    try:
+        runtime.wait_ready(r.time.monotonic() + 5)
+        assert started.wait(1)
+        if late_cpu:
+            prepared = r.prepare_witnesses((f,))
+        try:
+            r.measure((f,), (), runtime, None, witness_sets=prepared)
+        except CountFinished:
+            status = 'COUNT_OK'
+        except RuntimeError as error:
+            status = str(error)
+        assert status == expected
+        assert runtime.generation_calls == 0 and runtime.recorder.connects == 1
+        assert seen == (['/health'] if late_cpu else ['/health', '/tokenize'])
+        assert owner.integrity is not late_cpu
+    finally:
+        runtime.close()
+        server.shutdown()
+        server.server_close()
+        thread.join()
