@@ -9,7 +9,7 @@ import argparse
 from collections import Counter
 import ctypes
 from ctypes import wintypes
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 import math
@@ -19,6 +19,7 @@ import socket
 import subprocess
 import threading
 import time
+from types import MappingProxyType
 
 import httpx
 
@@ -189,7 +190,11 @@ class Runtime:
         self.utility_calls = self.generation_calls = 0
         self.token_cache = {}
 
-    def request(self, endpoint, body=None, *, generation=False):
+    def request(self, endpoint, body=None, *, generation=False, readiness=False, timeout=60, wire_payload=None):
+        if readiness and (endpoint != '/health' or generation or body is not None):
+            raise ValueError('READINESS_ENDPOINT')
+        if wire_payload is not None and (body is None or wire_payload != q.wire(body)):
+            raise ValueError('REQUEST_WIRE')
         self.owner.light()
         if self.recorder.closed or (generation and (not self.recorder.fixed or self.recorder.connection is None)):
             self.owner.integrity = False
@@ -207,16 +212,27 @@ class Runtime:
                 # trickling response; httpx's per-read timeout is not total.
                 if self.owner.process.poll() is None:
                     self.owner.process.kill()
-            watchdog = threading.Timer(60, abort_timeout)
+            watchdog = threading.Timer(min(60, timeout), abort_timeout)
             watchdog.daemon = True
             watchdog.start()
             response = self.client.request('GET' if body is None else 'POST',
-                f'http://127.0.0.1:{existing.PORT}{endpoint}', content=None if body is None else q.wire(body),
-                headers={'Content-Type': 'application/json'}, extensions={'trace': self.recorder.trace})
+                f'http://127.0.0.1:{existing.PORT}{endpoint}', content=None if body is None else (wire_payload if wire_payload is not None else q.wire(body)),
+                headers={'Content-Type': 'application/json'}, extensions={'trace': self.recorder.trace}, timeout=min(60, timeout))
             self.recorder.observe(response)
+            # Even a known not-ready response fixes the one allowed connection.
+            self.recorder.fixed = True
             self.owner.light()
             if expired.is_set():
                 raise RuntimeError('REQUEST_TIMEOUT')
+            if readiness:
+                value = response.json()
+                if response.status_code == 200 and value == {'status': 'ok'}:
+                    return True
+                if response.status_code == 503 and value in (
+                        {'status': 'loading model'},
+                        {'error': {'code': 503, 'message': 'Loading model', 'type': 'unavailable_error'}}):
+                    return False
+                raise RuntimeError('READINESS_RESPONSE')
             response.raise_for_status()
             return response.json()
         except Exception:
@@ -236,6 +252,16 @@ class Runtime:
         return dict(build=props['build_info'], model_path=props['model_path'],
                     template_sha256=q.digest(props['chat_template']), n_ctx=8192,
                     generation_settings=props['default_generation_settings'])
+
+    def wait_ready(self, deadline, *, clock=time.monotonic, sleep=time.sleep):
+        while True:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                self.owner.integrity = False
+                raise RuntimeError('LOAD_TIMEOUT')
+            if self.request('/health', readiness=True, timeout=min(2, remaining)):
+                return
+            sleep(min(.1, max(0, deadline - clock())))
 
     def count(self, raw, *, prompt=False):
         key = (raw, prompt)
@@ -282,17 +308,112 @@ def measure(fixtures, rows, runtime, private):
                        for raw in witness_sets[f.case.case_id, 'chat_plan']]
         measured = []
         for stage, candidate in stages:
-            request = q.body(stage, f, seed, budgets[stage], candidate)
-            tokens, rendered_sha = runtime.input_count(request)
-            if tokens + budgets[stage] + 1 > 8192:
-                raise ValueError('PF3_CONTEXT')
-            measured.append(dict(stage=stage, body=request, wire_sha256=q.digest(q.wire(request)),
-                input_tokens=tokens, rendered_sha256=rendered_sha))
+            for ordinal in ((1,) if candidate is not None else (1, 2)):
+                request = q.body(stage, f, derived_seed(seed, stage, ordinal), budgets[stage], candidate)
+                tokens, rendered_sha = runtime.input_count(request)
+                if tokens + budgets[stage] + 1 > 8192:
+                    raise ValueError('PF3_CONTEXT')
+                measured.append(dict(stage=stage, ordinal=ordinal,
+                    plan_sha256=q.digest(q.thaw(candidate.value)) if candidate else None,
+                    wire=q.wire(request).decode(), wire_sha256=q.digest(q.wire(request)),
+                    input_tokens=tokens, rendered_sha256=rendered_sha))
         record = dict(case_id=f.case.case_id, seed=seed, projection_sha256=q.digest(f.source_bytes),
             catalog=asdict(f.catalog), bindings=f.bindings, measured=measured)
         write_once(private / f'cache-{f.case.case_id}-{seed}.json', record)
         cache.append(record)
     return budgets, cache
+
+
+def derived_seed(seed, stage, ordinal):
+    if ordinal not in (1, 2) or stage not in q.STAGES or seed not in q.SEEDS:
+        raise ValueError('REQUEST_KEY')
+    return seed + ordinal * 100003 + q.STAGES.index(stage) * 1000003
+
+
+@dataclass(frozen=True)
+class CachedRequest:
+    key: tuple
+    wire: bytes
+    wire_sha256: str
+    input_tokens: int
+    rendered_sha256: str
+
+
+class RequestCache:
+    """Frozen non-P exact requests plus one sealed P pair per accepted plan.
+
+    Budget witnesses never delimit the set of accepted runtime plans.
+    """
+    def __init__(self, records):
+        entries = {}
+        for row in records:
+            for item in row['measured']:
+                if item['stage'] == 'message':
+                    continue  # Context/budget witnesses, not runtime plan membership.
+                key = (row['case_id'], row['seed'], item['stage'], item['ordinal'], None)
+                if key in entries:
+                    raise ValueError('CACHE_DUPLICATE')
+                entries[key] = CachedRequest(key, item['wire'].encode(), item['wire_sha256'],
+                                            item['input_tokens'], item['rendered_sha256'])
+        self._entries = MappingProxyType(entries)
+        self._p_pairs = {}
+        self._p_semantic = {}
+        self._p_roots = {}
+        self._root = self._digest(entries)
+
+    @staticmethod
+    def _digest(entries):
+        return q.digest([dict(key=list(k), wire_sha256=q.digest(e.wire), expected=e.wire_sha256,
+                             tokens=e.input_tokens, rendered=e.rendered_sha256)
+                         for k, e in sorted(entries.items())])
+
+    def lookup(self, key):
+        if self._digest(self._entries) != self._root:
+            raise ValueError('CACHE_DRIFT')
+        table = self._p_pairs.get(key[:2], self._entries) if key[2] == 'message' else self._entries
+        if key[2] == 'message' and self._digest(table) != self._p_roots.get(key[:2]):
+            raise ValueError('CACHE_DRIFT')
+        try:
+            entry = table[key]
+        except KeyError:
+            raise ValueError('CACHE_KEY') from None
+        if entry.key != key or q.digest(entry.wire) != entry.wire_sha256:
+            raise ValueError('CACHE_WIRE')
+        body = json.loads(entry.wire)
+        if body['seed'] != derived_seed(key[1], key[2], key[3]):
+            raise ValueError('CACHE_SEED')
+        if key[2] == 'message' and q.digest({k: body[k] for k in ('messages', 'response_format')}) != self._p_semantic[key[:2]]:
+            raise ValueError('CACHE_SEMANTIC')
+        return entry
+
+    def prepare_message(self, fixture, seed, plan, budget, runtime, private):
+        slot = (fixture.case.case_id, seed)
+        plan_hash = q.digest(q.thaw(plan.value))
+        if slot in self._p_pairs:
+            self.lookup((*slot, 'message', 1, plan_hash))
+            return
+        # Exactly once for this accepted immutable plan, including witness-external
+        # legal combinations. The second sample changes only request identity/seed.
+        body = q.body('message', fixture, derived_seed(seed, 'message', 1), budget, plan)
+        q.verify_presenter(json.loads(body['messages'][1]['content']), plan, fixture)
+        tokens, rendered = runtime.input_count(body)
+        if tokens + budget + 1 > 8192:
+            raise ValueError('P_CONTEXT_PREFLIGHT_MISS')
+        semantic = q.digest({k: body[k] for k in ('messages', 'response_format')})
+        entries = {}
+        for ordinal in (1, 2):
+            request = json.loads(q.wire(body))
+            request['seed'] = derived_seed(seed, 'message', ordinal)
+            raw = q.wire(request)
+            key = (*slot, 'message', ordinal, plan_hash)
+            entries[key] = CachedRequest(key, raw, q.digest(raw), tokens, rendered)
+        write_once(private / f'p-cache-{fixture.case.case_id}-{seed}.json',
+                   dict(plan_sha256=plan_hash, semantic_sha256=semantic, entries=[
+                       dict(key=list(k), wire=e.wire.decode(), wire_sha256=e.wire_sha256,
+                            input_tokens=tokens, rendered_sha256=rendered) for k, e in entries.items()]))
+        self._p_semantic[slot] = semantic
+        self._p_pairs[slot] = MappingProxyType(entries)
+        self._p_roots[slot] = self._digest(entries)
 
 
 def estimate(attempts, row_times, fixed):
@@ -316,22 +437,31 @@ def estimate(attempts, row_times, fixed):
                 H_ATTEMPT=overhead, H_ROW=max(row_overhead), H_FIXED=fixed, A_PRE=60 + overhead, **maxima)
 
 
-def attempt(runtime, fixture, seed, stage, budget, ordinal, private, *, plan=None, clock=time.monotonic):
+def attempt(runtime, fixture, seed, stage, budget, ordinal, private, *, cache, plan=None, clock=time.monotonic):
     started = clock()
     outcome = dict(case_id=fixture.case.case_id, seed=seed, stage=stage, ordinal=ordinal,
-                   status='MISSING_RESPONSE', provider_latency=0)
+                   status='MISSING_RESPONSE', provider_latency=0, generation_sent=False)
     stem = f'{fixture.case.case_id}-{seed}-{stage}-{ordinal}'
-    request = q.body(stage, fixture, seed + ordinal * 100003 + q.STAGES.index(stage) * 1000003, budget, plan)
-    write_once(private / (stem + '-request.json'), request)
     parsed = None
     try:
-        prompt_tokens, rendered_sha = runtime.input_count(request)
-        write_once(private / (stem + '-input-count.json'), {'tokens': prompt_tokens, 'rendered_sha256': rendered_sha})
+        if stage == 'message':
+            cache.prepare_message(fixture, seed, plan, budget, runtime, private)
+        key = (fixture.case.case_id, seed, stage, ordinal, q.digest(q.thaw(plan.value)) if plan else None)
+        entry = cache.lookup(key)
+        request = json.loads(entry.wire)
+        prompt_tokens = entry.input_tokens
+        write_once(private / (stem + '-request.json'), entry.wire)
+        write_once(private / (stem + '-input-count.json'), {'tokens': prompt_tokens,
+                   'rendered_sha256': entry.rendered_sha256, 'wire_sha256': entry.wire_sha256})
         if prompt_tokens + budget + 1 > 8192:
             raise ValueError('CONTEXT_OVERFLOW')
         t = clock()
-        response = runtime.request('/v1/chat/completions', request, generation=True)
-        outcome['provider_latency'] = clock() - t
+        before = runtime.generation_calls
+        try:
+            response = runtime.request('/v1/chat/completions', request, generation=True, wire_payload=entry.wire)
+        finally:
+            outcome['provider_latency'] = clock() - t
+            outcome['generation_sent'] = runtime.generation_calls > before
         write_once(private / (stem + '-response.json'), response)
         choice, usage = response['choices'][0], response['usage']
         outcome.update(finish_reason=choice['finish_reason'], prompt_tokens=usage['prompt_tokens'], completion_tokens=usage['completion_tokens'])
@@ -366,16 +496,16 @@ def attempt(runtime, fixture, seed, stage, budget, ordinal, private, *, plan=Non
                 except ValueError:
                     parsed = None
                     outcome['status'] = 'GUARD_REJECT'
-    except Exception:
+    except Exception as error:
         runtime.owner.integrity = False
-        outcome['status'] = 'TRANSPORT_OR_OWNERSHIP'
+        outcome['status'] = 'P_CONTEXT_PREFLIGHT_MISS' if str(error) == 'P_CONTEXT_PREFLIGHT_MISS' else 'TRANSPORT_OR_OWNERSHIP'
     write_once(private / (stem + '-outcome.json'), outcome)
     outcome['elapsed'] = clock() - started
     write_once(private / (stem + '-clock.json'), {'elapsed': outcome['elapsed']})
     return parsed, outcome
 
 
-def run_rows(rows, runtime, budgets, private, *, probe, clock=time.monotonic):
+def run_rows(rows, runtime, budgets, private, *, cache, probe, clock=time.monotonic):
     deadline = clock() + (5400 if not probe else 600)
     attempts, results = [], []
     for fixture, seed in rows:
@@ -387,7 +517,7 @@ def run_rows(rows, runtime, budgets, private, *, probe, clock=time.monotonic):
             for ordinal in (1, 2):
                 if clock() + 60 > deadline or not runtime.owner.integrity:
                     return attempts, results, False
-                accepted, outcome = attempt(runtime, fixture, seed, stage, budgets[stage], ordinal, private, plan=plan, clock=clock)
+                accepted, outcome = attempt(runtime, fixture, seed, stage, budgets[stage], ordinal, private, cache=cache, plan=plan, clock=clock)
                 attempts.append(outcome)
                 if probe and outcome['status'] != 'ACCEPTED':
                     return attempts, results, False
@@ -415,6 +545,18 @@ def run_rows(rows, runtime, budgets, private, *, probe, clock=time.monotonic):
 
 
 DEFAULT_FREEZE = ROOT / 'logs/t507-choice-budget/formal-binary-v2/freeze.json'
+CANONICAL_CLAIM = ROOT / 'logs/t550-quality-v2.claim.json'
+
+
+def claim_experiment(public_path, profile, sources):
+    """One durable task claim, independent of caller-selected output spelling."""
+    output = Path(public_path).resolve()
+    if output == CANONICAL_CLAIM.resolve() or output.exists() or CANONICAL_CLAIM.exists():
+        raise ValueError('TASK_ALREADY_CLAIMED')
+    record = dict(task='T550', public_path=str(output), source_sha256=q.digest(sources),
+                  profile_sha256=q.digest(profile), retry=0)
+    write_once(CANONICAL_CLAIM, record)  # Exclusive create is the concurrency gate.
+    return record
 
 
 def load_profile(path):
@@ -463,6 +605,7 @@ def launch(profile, private, label):
         owner = Owner(process, profile)
         owner.full()
         runtime = Runtime(owner)
+        runtime.wait_ready(limit)
         identity = runtime.identity()
         owner.full(identity)
         runtime.recorder.fixed = True
@@ -476,102 +619,106 @@ def launch(profile, private, label):
         raise
 
 
+def actual_summary(attempts, results, generation_calls=None):
+    counts = {s: dict(Counter(a['status'] for a in attempts if a['stage'] == s)) for s in q.STAGES}
+    for stage in q.STAGES:
+        counts[stage]['sample_exhausted'] = sum(row['sample_exhausted'] for row in results if row['terminal_stage'] == stage)
+        counts[stage]['silence'] = sum(row['silence'] for row in results if row['terminal_stage'] == stage)
+    return dict(rows=len(results), expected_rows=96, unrun=96 - len(results), counts=counts,
+                silence=sum(r['silence'] for r in results), sample_exhausted=sum(r['sample_exhausted'] for r in results),
+                actual_generation_calls=(sum(a.get('generation_sent', False) for a in attempts)
+                                         if generation_calls is None else generation_calls))
+
+
+def probe_summary(attempts, results):
+    values = actual_summary(attempts, results)
+    return {'probe_' + k: v for k, v in values.items() if k not in ('expected_rows', 'unrun', 'actual_generation_calls')}
+
+
 def run(profile_path, public_path):
     """One invocation owns utility preflight, probe, and the gated one-shot run."""
-    public_path = Path(public_path)
-    if public_path.exists() or public_path.with_suffix('.claim').exists():
-        raise ValueError('PUBLIC_REUSE')
+    public_path = Path(public_path).resolve()
     profile = load_profile(profile_path)
     frozen_sources = source_hashes()
     fixtures, rows = q.prepare()
+    claim = claim_experiment(public_path, profile, frozen_sources)
     private = create_private_evidence_container(ROOT / 'logs/phase6-private-evidence',
         evidence_kind='synthetic', task_id='T550', created_at_utc=datetime.now(timezone.utc))
-    write_once(public_path.with_suffix('.claim'), {'task': 'T550', 'source_sha256': q.digest(frozen_sources)})
+    write_once(private / 'claim.json', claim)
     write_once(private / 'profile.json', profile)
     write_once(private / 'sources.json', frozen_sources)
     write_once(private / 'fixture-inputs.json', [dict(case_id=f.case.case_id,
         source=f.source, projection_sha256=q.digest(f.source_bytes), catalog=asdict(f.catalog), bindings=f.bindings) for f in fixtures])
     process = runtime = owner = None
     summary = dict(task='T550', status='UNKNOWN', run_integrity=False, generation_calls=0,
-                   utility_calls=0, runtime_loads=0, rows=0, retry=0)
+                   utility_calls=0, runtime_loads=0, rows=0, retry=0,
+                   actual_generation_calls=0, probe_generation_calls=0)
     start = time.monotonic()
-    attempts, results = [], []
+    probe_attempts, probe_results, actual_attempts, actual_results = [], [], [], []
+    phase = 'probe'
     try:
-        if listener_owners(existing.PORT):
-            raise RuntimeError('PORT_OCCUPIED')
-        with (private / 'runtime.log').open('xb') as log:
-            process = subprocess.Popen(profile['argv'], cwd=Path(profile['argv'][0]).parent,
-                stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
-            summary['runtime_loads'] = 1
-            limit = time.monotonic() + 180
-            while time.monotonic() < limit:
-                if process.poll() is not None:
-                    raise RuntimeError('RUNTIME_EXIT')
-                if listener_owners(existing.PORT) == (process.pid,):
-                    break
-                time.sleep(.1)
+        process, owner, runtime = launch(profile, private, 'probe')
+        summary['runtime_loads'] = 1
+        identity = owner.runtime_identity
+        write_once(private / 'identity.json', identity)
+        startup_elapsed = time.monotonic() - start
+        budgets, records = measure(fixtures, rows, runtime, private)
+        records_bytes = q.wire(records)
+        cache_load_start = time.monotonic()
+        probe_cache = RequestCache(json.loads(records_bytes))
+        cache_load_elapsed = time.monotonic() - cache_load_start
+        cache_paths = tuple(sorted(private.glob('cache-*.json')))
+        cache_hashes = {p.name: existing.file_hash(p) for p in cache_paths}
+        write_once(private / 'measurement.json', {'budgets': budgets, 'cache_hashes': cache_hashes,
+            'runtime': identity, 'source': frozen_sources, 'utility_calls': runtime.utility_calls})
+        if source_hashes() != frozen_sources:
+            raise RuntimeError('SOURCE_DRIFT')
+        probe_rows = tuple(next((f, s) for f, s in rows if (f.case.case_id, s) == key) for key in PROBE)
+        fixed_start = time.monotonic()
+        probe_attempts, probe_results, ok = run_rows(probe_rows, runtime, budgets, private, cache=probe_cache, probe=True)
+        probe_end = time.monotonic()
+        if not ok:
+            summary['status'] = 'PROBE_FAILED'
+        else:
+            # Include elapsed non-row setup conservatively. End identity and
+            # cleanup are measured below before the estimate is finalized.
+            owner.full(runtime.identity())
+            # Probe must actually include its end checks and cleanup before
+            # using H_FIXED. The gated run gets a fresh owned process/client.
+            summary['generation_calls'] += runtime.generation_calls
+            summary['probe_generation_calls'] = runtime.generation_calls
+            summary['utility_calls'] += runtime.utility_calls
+            runtime.close()
+            runtime = None
+            probe_cleanup = existing.cleanup_owned(None, process)
+            if probe_cleanup['owned_processes_remaining'] or listener_owners(existing.PORT):
+                raise RuntimeError('PROBE_CLEANUP')
+            write_once(private / 'probe-cleanup.json', probe_cleanup)
+            estimate_value = estimate(probe_attempts, probe_results,
+                                      startup_elapsed + cache_load_elapsed + (time.monotonic() - probe_end))
+            write_once(private / 'probe-estimate.json', estimate_value)
+            summary['estimate_seconds'] = estimate_value['seconds']
+            if not estimate_value['proceed']:
+                summary['status'] = 'ESTIMATE_STOP'
             else:
-                raise RuntimeError('LOAD_TIMEOUT')
-            owner = Owner(process, profile)
-            owner.full()
-            runtime = Runtime(owner)
-            # A single accepted utility connection becomes the immutable transport.
-            identity = runtime.identity()
-            owner.full(identity)
-            runtime.recorder.fixed = True
-            write_once(private / 'identity.json', identity)
-            startup_elapsed = time.monotonic() - start
-            budgets, cache = measure(fixtures, rows, runtime, private)
-            cache_paths = tuple(sorted(private.glob('cache-*.json')))
-            cache_hashes = {p.name: existing.file_hash(p) for p in cache_paths}
-            write_once(private / 'measurement.json', {'budgets': budgets, 'cache_hashes': cache_hashes,
-                'runtime': identity, 'source': frozen_sources, 'utility_calls': runtime.utility_calls})
-            if source_hashes() != frozen_sources:
-                raise RuntimeError('SOURCE_DRIFT')
-            probe_rows = tuple(next((f, s) for f, s in rows if (f.case.case_id, s) == key) for key in PROBE)
-            fixed_start = time.monotonic()
-            attempts, results, ok = run_rows(probe_rows, runtime, budgets, private, probe=True)
-            probe_end = time.monotonic()
-            summary['probe_counts'] = {s: dict(Counter(a['status'] for a in attempts if a['stage'] == s)) for s in q.STAGES}
-            if not ok:
-                summary['status'] = 'PROBE_FAILED'
-            else:
-                # Include elapsed non-row setup conservatively. End identity and
-                # cleanup are measured below before the estimate is finalized.
-                owner.full(runtime.identity())
-                # Probe must actually include its end checks and cleanup before
-                # using H_FIXED. The gated run gets a fresh owned process/client.
-                summary['generation_calls'] += runtime.generation_calls
-                summary['utility_calls'] += runtime.utility_calls
-                runtime.close()
-                runtime = None
-                probe_cleanup = existing.cleanup_owned(None, process)
-                if probe_cleanup['owned_processes_remaining'] or listener_owners(existing.PORT):
-                    raise RuntimeError('PROBE_CLEANUP')
-                write_once(private / 'probe-cleanup.json', probe_cleanup)
-                estimate_value = estimate(attempts, results, startup_elapsed + (time.monotonic() - probe_end))
-                write_once(private / 'probe-estimate.json', estimate_value)
-                summary['estimate_seconds'] = estimate_value['seconds']
-                if not estimate_value['proceed']:
-                    summary['status'] = 'ESTIMATE_STOP'
-                else:
-                    # Distinct durable run directory prevents probe/run key reuse.
-                    actual = private / 'actual'
-                    actual.mkdir(mode=0o700)
-                    write_once(actual / 'claim.json', {'rows': 96, 'retry': 0})
-                    if source_hashes() != frozen_sources or any(existing.file_hash(private / name) != h for name, h in cache_hashes.items()):
-                        raise RuntimeError('CACHE_DRIFT')
-                    process, owner, runtime = launch(profile, private, 'actual')
-                    summary['runtime_loads'] += 1
-                    if owner.runtime_identity != identity:
-                        raise RuntimeError('RUNTIME_DRIFT')
-                    attempts, results, ok = run_rows(rows, runtime, budgets, actual, probe=False)
-                    summary['status'] = 'COMPLETE' if ok and len(results) == 96 else 'INCOMPLETE'
-            if source_hashes() != frozen_sources or any(existing.file_hash(private / name) != h for name, h in cache_hashes.items()):
-                raise RuntimeError('CACHE_DRIFT')
-            if runtime is not None:
-                owner.full(runtime.identity())
-            summary.update(run_integrity=owner.integrity, rows=len(results), budgets=budgets)
+                # Distinct durable run directory prevents probe/run key reuse.
+                actual = private / 'actual'
+                actual.mkdir(mode=0o700)
+                write_once(actual / 'claim.json', {'rows': 96, 'retry': 0})
+                if source_hashes() != frozen_sources or any(existing.file_hash(private / name) != h for name, h in cache_hashes.items()):
+                    raise RuntimeError('CACHE_DRIFT')
+                phase = 'actual'
+                process, owner, runtime = launch(profile, private, 'actual')
+                summary['runtime_loads'] += 1
+                if owner.runtime_identity != identity:
+                    raise RuntimeError('RUNTIME_DRIFT')
+                actual_attempts, actual_results, ok = run_rows(rows, runtime, budgets, actual, cache=RequestCache(json.loads(records_bytes)), probe=False)
+                summary['status'] = 'COMPLETE' if ok and len(actual_results) == 96 else 'INCOMPLETE'
+        if source_hashes() != frozen_sources or any(existing.file_hash(private / name) != h for name, h in cache_hashes.items()):
+            raise RuntimeError('CACHE_DRIFT')
+        if runtime is not None:
+            owner.full(runtime.identity())
+        summary.update(run_integrity=owner.integrity, budgets=budgets)
     except Exception as error:
         summary['status'] = 'UNKNOWN'
         summary['failure_type'] = type(error).__name__
@@ -579,6 +726,7 @@ def run(profile_path, public_path):
     finally:
         if runtime is not None:
             summary['generation_calls'] += runtime.generation_calls
+            summary[phase + '_generation_calls'] = runtime.generation_calls
             summary['utility_calls'] += runtime.utility_calls
             try:
                 runtime.close()
@@ -595,14 +743,8 @@ def run(profile_path, public_path):
         if not summary['run_integrity'] and summary['status'] == 'COMPLETE':
             summary['status'] = 'UNKNOWN'
         summary['duration'] = time.monotonic() - start
-        summary['counts'] = {s: dict(Counter(a['status'] for a in attempts if a['stage'] == s)) for s in q.STAGES}
-        summary['silence'] = sum(r['silence'] for r in results)
-        summary['sample_exhausted'] = sum(r['sample_exhausted'] for r in results)
-        summary['expected_rows'] = 96
-        summary['unrun'] = 96 - len(results) if (private / 'actual').exists() else 96
-        for stage in q.STAGES:
-            summary['counts'][stage]['sample_exhausted'] = sum(row['sample_exhausted'] for row in results if row['terminal_stage'] == stage)
-            summary['counts'][stage]['silence'] = sum(row['silence'] for row in results if row['terminal_stage'] == stage)
+        summary.update(actual_summary(actual_attempts, actual_results, summary['actual_generation_calls']))
+        summary.update(probe_summary(probe_attempts, probe_results))
         write_once(private / 'cleanup.json', cleanup)
         seal = {p.relative_to(private).as_posix(): existing.file_hash(p) for p in sorted(private.rglob('*')) if p.is_file()}
         summary['private_seal_sha256'] = write_once(private / 'seal.json', seal)

@@ -184,6 +184,10 @@ class FakeRuntime:
         self.calls = 0
         self.owner = SimpleNamespace(integrity=True)
 
+    @property
+    def generation_calls(self):
+        return self.calls
+
     def request(self, *args, **kwargs):
         self.calls += 1
         return self.response
@@ -195,13 +199,22 @@ class FakeRuntime:
         return 1
 
 
+def request_cache(fixture, seed=4242027, budget=100):
+    measured = []
+    for ordinal in (1, 2):
+        body = q.body(fixture.stage, fixture, r.derived_seed(seed, fixture.stage, ordinal), budget)
+        measured.append(dict(stage=fixture.stage, ordinal=ordinal, wire=q.wire(body).decode(),
+            wire_sha256=q.digest(q.wire(body)), input_tokens=1, rendered_sha256='a' * 64))
+    return r.RequestCache([dict(case_id=fixture.case.case_id, seed=seed, measured=measured)])
+
+
 @pytest.mark.parametrize('finish,content,status', [('length', 'not JSON', 'LENGTH'),
     ('stop', 'not JSON', 'STRUCTURE_INVALID'), ('content_filter', '{}', 'MISSING_RESPONSE')])
 def test_attempt_length_not_parsed_and_two_samples_exhaust(suite, tmp_path, finish, content, status):
     runtime = FakeRuntime({'choices': [{'finish_reason': finish, 'message': {'content': content}}],
                            'usage': {'prompt_tokens': 1, 'completion_tokens': 1}})
     f = suite[0][0]
-    attempts, rows, ok = r.run_rows([(f, 4242027)], runtime, {f.stage: 100}, tmp_path, probe=False)
+    attempts, rows, ok = r.run_rows([(f, 4242027)], runtime, {f.stage: 100}, tmp_path, cache=request_cache(f), probe=False)
     assert ok and runtime.calls == 2
     assert [a['status'] for a in attempts] == [status, status]
     assert rows[0]['silence'] and rows[0]['sample_exhausted']
@@ -211,7 +224,7 @@ def test_probe_stops_after_first_bad_attempt(suite, tmp_path):
     runtime = FakeRuntime({'choices': [{'finish_reason': 'length', 'message': {'content': '{}'}}],
                            'usage': {'prompt_tokens': 1, 'completion_tokens': 1}})
     f = suite[0][0]
-    attempts, rows, ok = r.run_rows([(f, 4242027)], runtime, {f.stage: 100}, tmp_path, probe=True)
+    attempts, rows, ok = r.run_rows([(f, 4242027)], runtime, {f.stage: 100}, tmp_path, cache=request_cache(f), probe=True)
     assert not ok and runtime.calls == 1 and len(attempts) == 1
 
 
@@ -225,7 +238,7 @@ def test_attempt_clock_includes_preparation_and_durable_recording(suite, tmp_pat
     monkeypatch.setattr(r, 'write_once', delayed)
     runtime = FakeRuntime({'choices': [{'finish_reason': 'length', 'message': {'content': '{}'}}],
                            'usage': {'prompt_tokens': 1, 'completion_tokens': 1}})
-    _, outcome = r.attempt(runtime, suite[0][0], 4242027, 'chat_plan', 100, 1, tmp_path, clock=lambda: now[0])
+    _, outcome = r.attempt(runtime, suite[0][0], 4242027, 'chat_plan', 100, 1, tmp_path, cache=request_cache(suite[0][0]), clock=lambda: now[0])
     assert outcome['elapsed'] == 16 and outcome['provider_latency'] == 0
 
 
@@ -276,7 +289,7 @@ def test_guard_rejection_and_successful_two_stage_boundary(suite, tmp_path):
             return {'choices': [{'finish_reason': 'stop', 'message': {'content': content}}],
                     'usage': {'prompt_tokens': 1, 'completion_tokens': 1}}
     runtime = SequenceRuntime(None)
-    attempts, results, ok = r.run_rows([(f, 4242027)], runtime, {'chat_plan': 100, 'message': 100}, tmp_path, probe=False)
+    attempts, results, ok = r.run_rows([(f, 4242027)], runtime, {'chat_plan': 100, 'message': 100}, tmp_path, cache=request_cache(f), probe=False)
     assert ok and runtime.calls == 2 and not results[0]['silence']
     assert [a['stage'] for a in attempts] == ['chat_plan', 'message']
     assert results[0]['plan']['act'] == 'ANSWER'
@@ -315,8 +328,193 @@ def test_start_identity_failure_always_cleans_owned_process(tmp_path, monkeypatc
             raise RuntimeError('CLOSE_ERROR')
     def identity():
         raise RuntimeError('IDENTITY_ERROR')
-    monkeypatch.setattr(r, 'Runtime', lambda owner: SimpleNamespace(identity=identity, close=close))
+    monkeypatch.setattr(r, 'Runtime', lambda owner: SimpleNamespace(identity=identity, close=close, wait_ready=lambda deadline: None))
     monkeypatch.setattr(r.existing, 'cleanup_owned', lambda monitor, p: events.append(('cleanup', p is process)))
     with pytest.raises(RuntimeError):
         r.launch({'argv': [str(tmp_path / 'fake.exe')]}, tmp_path, 'test')
     assert events == ['close', ('cleanup', True)]
+
+
+def test_readiness_503_then_ready_on_one_real_connection(monkeypatch):
+    observed = []
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+        def do_GET(self):
+            observed.append(self.connection.fileno())
+            ready = len(observed) == 3
+            raw = q.wire({'status': 'ok' if ready else 'loading model'})
+            self.send_response(200 if ready else 503)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(r.existing, 'PORT', server.server_port)
+    owner = SimpleNamespace(integrity=True, light=lambda: None, full=lambda: None)
+    runtime = r.Runtime(owner)
+    try:
+        runtime.wait_ready(r.time.monotonic() + 5)
+        assert owner.integrity and runtime.generation_calls == 0
+        assert runtime.utility_calls == 3 and runtime.recorder.connects == 1
+        assert len(set(observed)) == 1 and runtime.recorder.fixed
+    finally:
+        runtime.close()
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@pytest.mark.parametrize('alias', ['other.json', 'result.txt', 'same', 'absolute'])
+def test_canonical_task_claim_survives_output_alias_and_unknown(tmp_path, monkeypatch, alias):
+    canonical = tmp_path / 'canonical.claim'
+    monkeypatch.setattr(r, 'CANONICAL_CLAIM', canonical)
+    output = tmp_path / 'result.json'
+    claim = r.claim_experiment(output, {'profile': 'fixed'}, {'source': 'fixed'})
+    original = canonical.read_bytes()
+    # A private claim remains even when generation never starts and no public
+    # result exists; neither different output spelling nor UNKNOWN permits retry.
+    r.write_once(tmp_path / 'private-claim.json', claim)
+    candidate = output if alias == 'same' else output.resolve() if alias == 'absolute' else tmp_path / alias
+    with pytest.raises(ValueError, match='TASK_ALREADY_CLAIMED'):
+        r.claim_experiment(candidate, {'profile': 'fixed'}, {'source': 'fixed'})
+    assert canonical.read_bytes() == original
+
+
+@pytest.mark.parametrize('stage', ['chat_plan', 'pre_vote', 'co_opportunity'])
+def test_exact_T_cache_survives_builder_change_and_binds_seed(suite, tmp_path, monkeypatch, stage):
+    f = next(f for f in suite[0] if f.stage == stage)
+    cache = request_cache(f)
+    expected = cache.lookup((f.case.case_id, 4242027, stage, 1, None)).wire
+    monkeypatch.setattr(q, 'body', lambda *a, **k: (_ for _ in ()).throw(AssertionError('REBUILD')))
+    class Recording(FakeRuntime):
+        def request(self, endpoint, body, **kwargs):
+            assert kwargs['wire_payload'] == expected == q.wire(body)
+            return super().request(endpoint, body, **kwargs)
+    runtime = Recording({'choices': [{'finish_reason': 'length', 'message': {'content': '{}'}}],
+                         'usage': {'prompt_tokens': 1, 'completion_tokens': 1}})
+    _, result = r.attempt(runtime, f, 4242027, stage, 100, 1, tmp_path, cache=cache)
+    assert result['status'] == 'LENGTH' and runtime.calls == 1
+
+
+@pytest.mark.parametrize('field', ['wire', 'wire_sha256', 'key'])
+def test_exact_cache_one_bit_mutation_rejected(suite, field):
+    f = suite[0][0]
+    cache = request_cache(f)
+    key = (f.case.case_id, 4242027, 'chat_plan', 1, None)
+    entry = cache.lookup(key)
+    old = getattr(entry, field)
+    new = old + b' ' if field == 'wire' else '0' * 64 if field == 'wire_sha256' else (*old[:3], 2, None)
+    object.__setattr__(entry, field, new)
+    with pytest.raises(ValueError):
+        cache.lookup(key)
+
+
+def test_legal_witness_external_P_plan_is_cached_once_for_two_samples(suite, tmp_path, monkeypatch):
+    f = suite[0][0]
+    values = [json.loads(raw) for raw in q.witnesses('chat_plan', f)]
+    plan_value = dict(next(v for v in values if v['act'] == 'ANSWER'))
+    plan_value['fact_ids'] = []  # Legal non-maximal shape, outside the budget witnesses.
+    assert plan_value not in values
+    plan = q.product.parse_and_validate_generation_v2_candidate_structure('chat_plan', q.wire(plan_value), f.catalog)
+    cache = request_cache(f)
+    builds, counts = [], []
+    original = q.body
+    def build(*args, **kwargs):
+        builds.append(args[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(q, 'body', build)
+    runtime = FakeRuntime({'choices': [{'finish_reason': 'length', 'message': {'content': '{}'}}],
+                           'usage': {'prompt_tokens': 1, 'completion_tokens': 1}})
+    runtime.input_count = lambda body: (counts.append(body) or (1, 'a' * 64))
+    for ordinal in (1, 2):
+        _, result = r.attempt(runtime, f, 4242027, 'message', 100, ordinal, tmp_path, cache=cache, plan=plan)
+        assert result['status'] == 'LENGTH'
+    assert builds == ['message'] and len(counts) == 1 and runtime.calls == 2
+    keys = [(f.case.case_id, 4242027, 'message', i, q.digest(plan_value)) for i in (1, 2)]
+    bodies = [json.loads(cache.lookup(k).wire) for k in keys]
+    assert bodies[0]['messages'] == bodies[1]['messages']
+    assert bodies[0]['response_format'] == bodies[1]['response_format']
+    assert bodies[0]['seed'] != bodies[1]['seed']
+
+
+def test_P_context_miss_stops_before_any_generation(suite, tmp_path):
+    f = suite[0][0]
+    plan = q.product.parse_and_validate_generation_v2_candidate_structure('chat_plan', q.witnesses('chat_plan', f)[0], f.catalog)
+    runtime = FakeRuntime(None)
+    runtime.input_count = lambda body: (8192, 'a' * 64)
+    _, result = r.attempt(runtime, f, 4242027, 'message', 100, 1, tmp_path, cache=request_cache(f), plan=plan)
+    assert result['status'] == 'P_CONTEXT_PREFLIGHT_MISS'
+    assert not runtime.owner.integrity and runtime.generation_calls == 0
+
+
+def test_readiness_deadline_is_bounded_without_generation():
+    now, calls = [0.0], []
+    runtime = object.__new__(r.Runtime)
+    runtime.owner = SimpleNamespace(integrity=True)
+    runtime.request = lambda *a, **k: (calls.append(k) or False)
+    def sleep(delay):
+        now[0] += delay
+    with pytest.raises(RuntimeError, match='LOAD_TIMEOUT'):
+        runtime.wait_ready(.2, clock=lambda: now[0], sleep=sleep)
+    assert len(calls) == 2 and all(c['readiness'] for c in calls)
+    assert not runtime.owner.integrity
+
+
+@pytest.mark.parametrize('actual_rows', [0, 1, 17, 96])
+def test_actual_and_probe_summary_denominators_are_separate(actual_rows):
+    probe_rows = [dict(terminal_stage='message', silence=True, sample_exhausted=True)] * 2
+    actual = [dict(terminal_stage='message', silence=False, sample_exhausted=False)] * actual_rows
+    attempts = [dict(stage='message', status='ACCEPTED', generation_sent=True)] * actual_rows
+    value = r.actual_summary(attempts, actual)
+    value.update(r.probe_summary([], probe_rows))
+    assert value['rows'] + value['unrun'] == 96
+    assert value['rows'] == actual_rows and value['silence'] == 0
+    assert value['probe_rows'] == 2 and value['probe_silence'] == 2
+
+
+@pytest.mark.parametrize('scenario,expected', [('probe_failure', 0), ('estimate_stop', 0),
+    ('actual_start_failure', 0), ('cache_failure_after_claim', 0), ('partial_actual', 17), ('complete', 96)])
+def test_run_never_reports_probe_rows_as_actual(suite, tmp_path, monkeypatch, scenario, expected):
+    private = tmp_path / 'private'
+    private.mkdir()
+    monkeypatch.setattr(r, 'CANONICAL_CLAIM', tmp_path / 'canonical.claim')
+    monkeypatch.setattr(r, 'load_profile', lambda p: {})
+    reads = []
+    def sources():
+        reads.append(None)
+        return {'v': 'changed' if scenario == 'cache_failure_after_claim' and len(reads) >= 3 else 'fixed'}
+    monkeypatch.setattr(r, 'source_hashes', sources)
+    monkeypatch.setattr(q, 'prepare', lambda: suite)
+    monkeypatch.setattr(r, 'create_private_evidence_container', lambda *a, **k: private)
+    monkeypatch.setattr(r, 'listener_owners', lambda port: ())
+    monkeypatch.setattr(r.existing, 'cleanup_owned', lambda *a: {'owned_processes_remaining': 0})
+    def launch(profile, private, label):
+        if label == 'actual' and scenario == 'actual_start_failure':
+            raise RuntimeError('ACTUAL_START')
+        owner = SimpleNamespace(integrity=True, runtime_identity={'identity': 'fixed'}, full=lambda *a: None)
+        runtime = SimpleNamespace(owner=owner, identity=lambda: owner.runtime_identity,
+                                  generation_calls=0, utility_calls=0, close=lambda: None)
+        return object(), owner, runtime
+    monkeypatch.setattr(r, 'launch', launch)
+    monkeypatch.setattr(r, 'measure', lambda *a: ({stage: 100 for stage in q.STAGES}, []))
+    monkeypatch.setattr(r, 'estimate', lambda *a: {'seconds': 4000 if scenario == 'estimate_stop' else 1000,
+                                                  'proceed': scenario != 'estimate_stop'})
+    def run_rows(rows, runtime, *args, probe, cache):
+        assert isinstance(cache, r.RequestCache)
+        n = 0 if probe and scenario == 'probe_failure' else 2 if probe else expected
+        results = [dict(case_id=f.case.case_id, seed=seed, elapsed=1, terminal_stage=f.stage,
+                        silence=False, sample_exhausted=False) for f, seed in list(rows)[:n]]
+        attempts = [dict(stage=row['terminal_stage'], status='ACCEPTED', generation_sent=True) for row in results]
+        runtime.generation_calls += n
+        return attempts, results, n == (2 if probe else 96)
+    monkeypatch.setattr(r, 'run_rows', run_rows)
+    value = r.run(tmp_path / 'profile', tmp_path / 'public.json')
+    assert value['rows'] == expected and value['unrun'] == 96 - expected
+    assert value['actual_generation_calls'] == expected
+    assert value['probe_rows'] == (0 if scenario == 'probe_failure' else 2)
+    if scenario in ('actual_start_failure', 'cache_failure_after_claim'):
+        assert (private / 'actual' / 'claim.json').exists()
+        assert value['status'] == 'UNKNOWN'
