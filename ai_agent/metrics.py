@@ -130,7 +130,7 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                 initial_action = re.search(r"初夜.*(?:占った|調べた|調べました|護衛した|守った|襲撃した|判定.*(?:出た|出ました)|(?:調査|占い)(?:で|の結果).*(?:確認した|確認しました|判定した|確定した|判明した))", clause)
                 if not can_initial and not other_actor and not attributed and not hypothetical and initial_action:
                     issues.append({"reason": "unavailable_initial_action"})
-                if other_actor or attributed:
+                if other_actor or attributed or hypothetical:
                     continue
                 own_report = role.name in claims and re.search(r"結果|確定|判定", text)
                 if not re.search(r"占[いっ]|霊能|霊媒|判定|調べ|私の.*結果", clause) and not own_report:

@@ -138,6 +138,13 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["Q4"], 1)
         self.assertEqual(result["metric_candidates"]["Q4"][0]["issues"], [{"reason": "unreceived_result", "target": "player-2", "claimed": "wolf"}])
 
+    def test_result_hypothesis_is_not_a_false_report_of_an_already_received_result(self):
+        roles = {"player-0": self.game.content.roles["medium"]}
+        private = [{"t": 1, "player_id": "player-0", "event_payload": {"target_player_id": "player-2", "result": "not_wolf"}}]
+        rows = [chat("player-0", "私は霊能者です。player-1の判定が人狼なら、player-2も人狼でしたという可能性があります。", 2),
+                chat("player-0", "もしplayer-2が人狼だったなら、投票を変えます。", 3)]
+        self.assertEqual(self.metrics(rows, roles, private)["metrics"]["Q4"], 0)
+
     def test_reaction_question_pairs_and_rate_use_time_and_previous_five_speakers(self):
         rows = [chat("player-0", "player-2さん、投票理由は？", 1),
                 chat("player-1", "player-0さん、私は賛成です。", 2),
