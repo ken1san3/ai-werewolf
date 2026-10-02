@@ -15,32 +15,6 @@ ROADMAP の「TEST_POLICY 全項目」は、**その Phase が担当する節**�
 
 ---
 
-## Phase 6 テストアーキテクチャ［Phase 6］
-
-- 各 P6 packet は、所有する設計 acceptance の各項目を名前付きテストへ対応付ける。
-  green 件数だけで matrix の代わりにしてはならない。
-- 共通 helper は正しい入力や test double の構築に限る。期待する visibility、status/reason、
-  hash、CAS、audit result、PASS を導出してはならない。別の `test_*.py` の private helper を
-  import せず、同じ constructor を2回目に共有するときだけ `tests/fixtures` へ移す。
-- canonical bytes、digest、固定 limit は、production helper/constant から独立した literal
-  known-answer を少なくとも1つ持つ。mutation table も literal oracle のままにする。
-- semantic PASS authority は層ごとに1つとする: P6-A context/state、P6-B semantic/parser/audit
-  transaction、P6-C Reaction、P6-D pre-vote、P6-E runtime、P6-F adapter/completion、P6-G
-  private processor。境界入力は重なってよいが、PASS authority を競合させない。
-- 既定の P6 test は有限で、model/provider/network/GPU を不要とする。実 subprocess/game
-  completion だけに `completion` marker を付ける。exact-9B と human review は独立した
-  post-review evidence であり、soak は任意かつ closure acceptance ではない。parameterized
-  mutation vector は通常の focused test のまま維持し、新しい mutation framework にしない。
-- privacy test は opaque ID と private sentinel を使い、各 outward boundary で不在を検証し、
-  raw private text/shard を公開 artifact や handoff へコピーしない。
-- `tests/test_phase6_private_review.py` を含むbatchは、private fixtureの既知の実行前提として、
-  最初からOwner通常hostのsandbox外で実行する。packetへの再転記の有無に依存しない。
-  host既存の承認機構（Codexでは `sandbox_permissions=require_escalated`）を使用し、実行モードを
-  証拠に記録する。USERNAME=Ownerだけで通常hostと判定しない。通常hostを利用できない場合は
-  実行を保留し、sandbox内の再試行、ACL/security/TEMP/admin権限変更やskipで代替しない。
-
----
-
 ## 1. データモデル［Phase 1.1］
 
 - [ ] 13役職すべてが content の YAML だけで定義できている

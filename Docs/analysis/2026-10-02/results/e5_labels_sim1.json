@@ -1,0 +1,186 @@
+[
+ {
+  "n": 2,
+  "player": "player-1",
+  "text": "Let's focus on finding the two werewolves quickly; wasting a turn on an innocent villager will only help the wolves. Does anyone have strong suspicions about a specific player?",
+  "label": "CLAIM",
+  "responds_to": null,
+  "sec": 0.95
+ },
+ {
+  "n": 3,
+  "player": "player-0",
+  "text": "I agree with player-1; we need to be decisive and eliminate the threat quickly rather than playing it safe.",
+  "label": "ANSWER",
+  "responds_to": 2,
+  "sec": 0.43
+ },
+ {
+  "n": 4,
+  "player": "player-6",
+  "text": "I agree that we need to be decisive, but acting on weak suspicions just helps the werewolves survive. Does anyone have concrete evidence pointing to a specific player, or are we just guessing?",
+  "label": "QUESTION",
+  "responds_to": null,
+  "sec": 0.49
+ },
+ {
+  "n": 5,
+  "player": "player-7",
+  "text": "I agree with player-6; without concrete evidence, we risk executing an innocent. Does anyone have a specific reason to suspect a particular player, or are we just guessing?",
+  "label": "QUESTION",
+  "responds_to": null,
+  "sec": 0.48
+ },
+ {
+  "n": 6,
+  "player": "player-6",
+  "text": "Exactly, we shouldn't rush without proof. Player-2, since you mentioned avoiding wasting turns, do you have any specific reason to suspect anyone right now, or are you also waiting for evidence?",
+  "label": "QUESTION",
+  "responds_to": null,
+  "sec": 0.52
+ },
+ {
+  "n": 7,
+  "player": "player-2",
+  "text": "I don't have any specific evidence right now, so I'm not pointing fingers. Let's listen to the others before making a move that could cost us a turn.",
+  "label": "ANSWER",
+  "responds_to": 6,
+  "sec": 0.5
+ },
+ {
+  "n": 8,
+  "player": "player-8",
+  "text": "I agree that we shouldn't rush blindly, but silence isn't proof of innocence. Player-7, since you emphasized the need for concrete evidence, does your \"strong suspicion\" point to anyone specific, or are we still just spinning wheels?",
+  "label": "REBUTTAL",
+  "responds_to": 5,
+  "sec": 0.57
+ },
+ {
+  "n": 9,
+  "player": "player-7",
+  "text": "I wasn't pointing at anyone specific yet; my point was that we shouldn't execute without concrete proof. Since player-2 admitted they have no evidence, I'm wondering if the Seer has already used their ability to identify a threat?",
+  "label": "ANSWER",
+  "responds_to": 8,
+  "sec": 0.57
+ },
+ {
+  "n": 10,
+  "player": "player-2",
+  "text": "I don't have any information right now, so I'm not making guesses. Player-7, if you have a strong suspicion, please name that player so we can debate them instead of stalling.",
+  "label": "REBUTTAL",
+  "responds_to": 9,
+  "sec": 0.58
+ },
+ {
+  "n": 11,
+  "player": "player-7",
+  "text": "I don't have specific information yet, but if the Seer has checked anyone, we might be able to deduce who was targeted by their silence. Player-2, you mentioned being fine with who we vote out tonight—is it because you have no suspicions, or do you trust the current group blindly?",
+  "label": "QUESTION",
+  "responds_to": null,
+  "sec": 0.6
+ },
+ {
+  "n": 12,
+  "player": "player-2",
+  "text": "I'm not blindly trusting anyone; I just don't have enough info to make a call yet. Player-7, if you really have a strong suspicion, please name the player so we can actually debate them instead of spinning our wheels.",
+  "label": "REBUTTAL",
+  "responds_to": 11,
+  "sec": 0.68
+ },
+ {
+  "n": 13,
+  "player": "player-3",
+  "text": "I agree with player-2 that we need to avoid executing innocents, but silence from player-7 isn't proof of innocence. Someone needs to step up and name a specific suspect so we can actually debate the threat instead of just arguing about the process.",
+  "label": "REBUTTAL",
+  "responds_to": 11,
+  "sec": 0.77
+ },
+ {
+  "n": 14,
+  "player": "player-4",
+  "text": "I haven't used my Seer ability yet, but the conversation is stalling while we debate procedure instead of identifying a threat. Player-2, you claim to have no evidence; without a specific name from someone like you, we are just spinning wheels. Does anyone else have a concrete reason to suspect a player right now?",
+  "label": "CLAIM",
+  "responds_to": null,
+  "sec": 0.71
+ },
+ {
+  "n": 15,
+  "player": "player-5",
+  "text": "I think we need to stop circling and just name a suspect immediately; player-4 claims to be the Seer, so please reveal your target now so we can actually discuss it.",
+  "label": "CLAIM",
+  "responds_to": null,
+  "sec": 0.67
+ },
+ {
+  "n": 16,
+  "player": "player-5",
+  "text": "If player-4 truly is the Seer, please reveal your target now instead of waiting; we are wasting precious time debating procedure while the wolves remain free. Someone needs to name a specific suspect immediately so we can finally put a threat on the night vote.",
+  "label": "CLAIM",
+  "responds_to": null,
+  "sec": 0.78
+ },
+ {
+  "n": 17,
+  "player": "player-4",
+  "text": "I am not the Seer; I am a villager looking for answers. Since player-7 and player-8 have been questioning if I have information, let me clarify: I have no specific target to name yet. Who among you has concrete proof of guilt, or are we just guessing who might be lying?",
+  "label": "REBUTTAL",
+  "responds_to": 15,
+  "sec": 0.72
+ },
+ {
+  "n": 18,
+  "player": "player-7",
+  "text": "Player-4, please clarify if your Seer ability has been used at all; if you have no target, we are just spinning our wheels again. Without a named suspect from anyone, we risk voting out a villager tonight and losing a turn.",
+  "label": "REBUTTAL",
+  "responds_to": 17,
+  "sec": 0.68
+ },
+ {
+  "n": 19,
+  "player": "player-4",
+  "text": "I am not the Seer as I previously stated; my silence was to avoid giving the wolves an easy target. Player-7, you're pressuring me to reveal information I don't have, and that hesitation might actually be the best clue we have. Who among you has a concrete reason to suspect a specific player right now instead of demanding names?",
+  "label": "REBUTTAL",
+  "responds_to": 18,
+  "sec": 0.73
+ },
+ {
+  "n": 20,
+  "player": "player-3",
+  "text": "Player-4, you just admitted you don't have a target, which means you are likely not the Seer. If you are truly a villager waiting for the night to end, you should have used your Guard ability before this debate. Who among the remaining players has a concrete reason to name a suspect?",
+  "label": "REBUTTAL",
+  "responds_to": 19,
+  "sec": 0.72
+ },
+ {
+  "n": 21,
+  "player": "player-4",
+  "text": "Player-3, you're confusing my role; I'm a villager, not a Guard, and I certainly didn't use an ability I don't have. If we're going to vote based on \"silence,\" then player-2's admission of having no evidence makes them the safest candidate for execution tonight.",
+  "label": "REBUTTAL",
+  "responds_to": 20,
+  "sec": 0.68
+ },
+ {
+  "n": 22,
+  "player": "player-8",
+  "text": "Player-4's logic is dangerously flawed; claiming player-2 is safe simply because they have no evidence is exactly how wolves operate. If we vote based on silence and hesitation, we are handing the game to them. Who among you actually has a specific reason to suspect someone right now?",
+  "label": "REBUTTAL",
+  "responds_to": 21,
+  "sec": 0.64
+ },
+ {
+  "n": 23,
+  "player": "player-1",
+  "text": "The conversation has stalled on accusations without names, which is exactly how wolves thrive. We need to stop debating procedures and start identifying who is acting suspiciously. Player-7, if you truly have a strong suspicion as you mentioned earlier, why are you still refusing to name a specific target?",
+  "label": "REBUTTAL",
+  "responds_to": 18,
+  "sec": 0.67
+ },
+ {
+  "n": 24,
+  "player": "player-0",
+  "text": "Player-7, you mentioned having a strong suspicion earlier but have refused to name a single target; without a name, we cannot debate or protect ourselves. Player-4, your claim of having no information while the game stalls suggests you might be playing a wolf as well. Who among you actually has concrete proof, or are we just guessing?",
+  "label": "REBUTTAL",
+  "responds_to": 23,
+  "sec": 0.67
+ }
+]

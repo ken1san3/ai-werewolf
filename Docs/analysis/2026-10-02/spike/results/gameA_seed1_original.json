@@ -1,0 +1,2087 @@
+{
+ "seed": 1,
+ "roles": {
+  "player-0": "seer",
+  "player-1": "guard",
+  "player-2": "madman",
+  "player-3": "werewolf",
+  "player-4": "werewolf",
+  "player-5": "villager",
+  "player-6": "medium",
+  "player-7": "villager",
+  "player-8": "villager"
+ },
+ "teammates_given": true,
+ "game_end": true,
+ "settings": {
+  "seed": 1,
+  "day": 60,
+  "vote": 20,
+  "night": 20,
+  "lang": "en",
+  "temperature": 0.8,
+  "out": "spike_debug.json",
+  "no_teammates": false
+ },
+ "public_chat": [
+  [
+   1,
+   "public",
+   "player-8",
+   "I'm player-8, a regular villager. Who wants to start the discussion? Let's figure out who seems suspicious today."
+  ],
+  [
+   1,
+   "public",
+   "player-0",
+   "I've been vetted by the moderator and am clear. Since we have no information yet, I suggest we all introduce ourselves and let the discussion start so we can identify potential threats."
+  ],
+  [
+   1,
+   "public",
+   "player-2",
+   "I'm ready to start the day; let's get to work and figure out who might be suspicious."
+  ],
+  [
+   1,
+   "public",
+   "player-7",
+   "I agree with player-8; we should start by observing everyone's behavior without jumping to conclusions. Since it's Day 1, let's wait and see if anyone makes a suspicious claim before we vote."
+  ],
+  [
+   1,
+   "public",
+   "player-8",
+   "I'm happy to hear everyone is ready to work. Since we have no information yet, I propose we focus on identifying anyone who tries to claim special abilities too early. Let's keep an eye on who speaks up about roles tomorrow."
+  ],
+  [
+   1,
+   "public",
+   "player-1",
+   "I agree with player-7 that we should stay calm today. Since it's the first night and no information has been revealed yet, I propose we simply acknowledge each other and wait for the night phase before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-6",
+   "I agree that we should remain calm and avoid jumping to conclusions too early. Let's all take a moment to listen carefully to who speaks up tomorrow night, as that will give us our first real clues."
+  ],
+  [
+   1,
+   "public",
+   "player-7",
+   "I agree that we should remain calm today since we have no information yet. Let's simply acknowledge each other and wait for the night phase to reveal our first clues before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-5",
+   "I agree with the group's approach to stay calm today since we have no information yet. Let's all remain vigilant and listen carefully to the night phase results before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-4",
+   "I agree with the group that we should stay calm today and wait for the night to reveal our first clues before making any accusations. Let's just acknowledge each other and keep an open mind."
+  ],
+  [
+   1,
+   "public",
+   "player-3",
+   "I agree with the group that we should stay calm today since we have no information yet. Let's simply acknowledge each other and wait for the night phase to reveal our first clues before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-2",
+   "I agree with the group to stay calm and avoid accusations until the night phase provides more information. Since no one has claimed a special role yet, let's simply acknowledge everyone and wait for the moderator's results tomorrow."
+  ],
+  [
+   1,
+   "public",
+   "player-0",
+   "We have no official vetting results yet, so let's all agree to stay silent during the night phase and wait for the moderator to announce who was inspected before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-6",
+   "I agree that we should stay calm and wait for the night phase to reveal our first clues before making any accusations. Let's just acknowledge each other and keep an open mind."
+  ],
+  [
+   1,
+   "public",
+   "player-8",
+   "I agree that we should wait for the night results, but let's also note that player-8 introduced themselves explicitly as a villager, which is a bit unusual for Day 1. Everyone else has just agreed to stay calm; I'll keep an eye on who claims a role tomorrow."
+  ],
+  [
+   1,
+   "public",
+   "player-1",
+   "Player-8, claiming to be a villager on Day 1 before any information exists seems suspicious; let's watch your behavior closely tonight."
+  ],
+  [
+   1,
+   "public",
+   "player-7",
+   "I agree with the group that we should wait for the night results, but I find player-8's claim of being a villager suspicious. Since no one has claimed a special role yet, I'd like to hear from player-8 if they have any reason to state their role so openly this early."
+  ],
+  [
+   1,
+   "public",
+   "player-8",
+   "I didn't claim to be a villager; I simply stated my role because I am one, which is a standard declaration. I'm confident in my behavior and happy to answer any specific questions the group has about my actions. Let's focus on waiting for the night results rather than targeting me based on that harmless introduction."
+  ],
+  [
+   1,
+   "public",
+   "player-0",
+   "I inspected player-2 last night, and they are not a werewolf. This confirms player-2 is safe, but it also means we still have no confirmed targets to eliminate today. Let's wait for the night results to reveal our first true clue before voting."
+  ],
+  [
+   1,
+   "public",
+   "player-2",
+   "I agree we should wait for the night results, but since player-8 just defended their claim so aggressively, I suggest we keep an eye on them while we wait. Let's make sure everyone stays calm and doesn't jump to conclusions before we have actual information."
+  ],
+  [
+   1,
+   "public",
+   "player-5",
+   "I agree with the group to wait for the night results, but player-8's insistence that stating their role is \"standard\" feels odd given the tension. Since everyone else is staying quiet, I'll keep listening carefully to see how player-8 reacts when we actually have information to discuss."
+  ],
+  [
+   1,
+   "public",
+   "player-4",
+   "I agree with player-0's inspection, but I'm concerned player-8 is deflecting by claiming to be a villager so aggressively early on. Let's keep an eye on player-8 while we wait for the night results."
+  ],
+  [
+   1,
+   "public",
+   "player-3",
+   "I agree with player-0 that we should wait for the night results before making any accusations, especially since player-2 has been confirmed safe. Let's keep our focus on gathering information rather than targeting player-8 based on his early introduction."
+  ],
+  [
+   1,
+   "public",
+   "player-8",
+   "Player-0, your statement about inspecting player-2 contradicts the game's timeline; no inspections have been announced yet, and claiming results before the night phase begins is highly suspicious. Since I am a villager, I cannot verify your claim, but anyone lying about game events should be watched closely."
+  ],
+  [
+   1,
+   "public",
+   "player-6",
+   "Player-0, please clarify which role you hold since you mentioned inspecting a player last night. Player-8, your aggressive defense of being a villager feels odd without any game mechanics to support it; let's wait for the real clues before targeting anyone."
+  ],
+  [
+   1,
+   "public",
+   "player-1",
+   "I disagree with the claim that player-0 is a seer, as they have not been vetted by the moderator yet. Player-8 was the only one to introduce themselves so early, which seems like a suspicious move to deflect suspicion. We should wait for the night results before making accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-0",
+   "I'm genuinely surprised that player-8 is already defending their claim so aggressively; that level of defensiveness feels out of place for a true villager on Day 1. Let's keep a close eye on them while we wait for tonight's results."
+  ],
+  [
+   1,
+   "public",
+   "player-7",
+   "Player-0, your claim that you inspected player-2 contradicts the fact that no night results have been announced yet; we need to trust only the moderator's official information. Player-8 is correct that we cannot verify your statement, so let's wait for the actual night phase to begin before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-2",
+   "I find player-0's claim of inspecting me yesterday highly suspicious since no night results have been announced yet. Player-8 is right that lying about game events is dangerous, but I urge the group to wait for the official moderator announcement before making any accusations. Let's focus on gathering real information tonight rather than targeting people based on unverified claims."
+  ],
+  [
+   1,
+   "public",
+   "player-5",
+   "Player-0, your claim of inspecting player-2 is definitely suspicious since no moderator announcement has been made yet. Player-8, your aggressive denial that such a statement is possible seems like an attempt to deflect attention. Until we have official results, let's focus on identifying who is spreading unverified information."
+  ],
+  [
+   1,
+   "public",
+   "player-3",
+   "Player-0, your claim about inspecting player-2 is completely false since no night phase has occurred yet, and I agree with player-8 that anyone lying about game events must be watched closely. We should only act on facts from the moderator to avoid being misled by a false seer."
+  ],
+  [
+   1,
+   "public",
+   "player-4",
+   "I agree with player-7 that player-0's claim of inspecting player-2 is suspicious since no official results have been announced yet. Let's wait for the moderator's confirmation before accusing anyone."
+  ],
+  [
+   1,
+   "public",
+   "player-0",
+   "Player-8, your accusation that I lied about inspecting player-2 is a classic werewolf projection; I told you player-2 is safe, which is a verified fact. Since you are the only one attacking my credibility while everyone else accepts the information, I suggest we focus on identifying who is spreading confusion instead of questioning the truth."
+  ],
+  [
+   1,
+   "public",
+   "player-2",
+   "Player-0, your claim about inspecting me is clearly a lie since we haven't reached the night phase yet. We need to ignore these unverified assertions and wait for the official moderator results before discussing anyone's role."
+  ],
+  [
+   1,
+   "public",
+   "player-7",
+   "Player-0, your claim that you inspected player-2 is clearly false since no night phase has occurred yet. Player-8 is correct to point out that anyone spreading unverified game events should be watched closely. Let's wait for the official moderator announcement before making any accusations."
+  ],
+  [
+   1,
+   "public",
+   "player-1",
+   "Player-0, your claim that you inspected player-2 is a blatant lie since the night phase hasn't happened yet. Player-8 correctly identified that anyone spreading unverified game results is suspicious, so I suggest we vote to eliminate you immediately."
+  ],
+  [
+   1,
+   "public",
+   "player-6",
+   "Player-0, claiming to have inspected a player before the night phase even begins is a blatant lie that you can't deny. Player-8 is right to point out that anyone spreading unverified information is suspicious; you should step down immediately before we vote to eliminate you."
+  ],
+  [
+   1,
+   "public",
+   "player-5",
+   "Player-0, your claim that you inspected player-2 is clearly false since no night has passed yet, so you are lying about game events. Player-8 is correct to call this out, and we should focus on identifying anyone spreading unverified information before the night phase begins."
+  ],
+  [
+   1,
+   "public",
+   "player-4",
+   "I agree that player-0's claim is false since no night has occurred yet. Player-8 correctly pointed out that anyone spreading unverified game events must be watched closely, so we should focus on them until we have official results."
+  ],
+  [
+   1,
+   "public",
+   "player-3",
+   "Player-0, your claim to have inspected player-2 is false since no night has passed yet, making you the obvious liar in this chaos. Player-8 is right to flag anyone spreading unverified information, so I agree we must eliminate you immediately to stop the confusion."
+  ],
+  [
+   2,
+   "public",
+   "player-4",
+   "I agree that player-0 is lying about inspecting anyone since no night has passed yet; we should focus on eliminating them before they spread more confusion."
+  ],
+  [
+   2,
+   "public",
+   "player-7",
+   "Player-4, you are confused; the moderator explicitly stated that player-0 was executed by the vote yesterday, so they could not have inspected anyone. We should focus on identifying the two werewolves now that player-0 is gone, not on debating impossible claims from the dead."
+  ],
+  [
+   2,
+   "public",
+   "player-2",
+   "We should vote to eliminate player-0 immediately since their claim about inspecting me last night is completely false and contradicts the public facts. Let's clear this confusion before the night phase begins."
+  ],
+  [
+   2,
+   "public",
+   "player-4",
+   "I agree that player-0 was lying about the night results, but now I'm concerned about player-8's aggressive defense of their role on Day 1. Since we lost two players and have no real information, I suggest we vote to eliminate player-8 tonight to clear the board."
+  ],
+  [
+   2,
+   "public",
+   "player-3",
+   "Player-4, your insistence on eliminating player-0 immediately without waiting for official night results seems suspicious, especially since you were part of the group that initially agreed to stay calm. Let's wait for the moderator to announce the actual kill target before voting."
+  ],
+  [
+   2,
+   "public",
+   "player-5",
+   "The confusion from yesterday has cleared up, and player-0 is dead, which is good. Now we need to focus on player-8, who insisted on stating their role early and got very defensive when questioned. Let's see if they can explain their behavior calmly today before we vote."
+  ],
+  [
+   2,
+   "public",
+   "player-8",
+   "Player-7, you are right to point out that player-0 is dead, but that doesn't change the fact that they claimed to inspect player-2 while everyone else waited for the night phase. Since player-0's story was impossible, we should focus on the living players who might still be spreading confusion instead of debating the dead. Let's analyze who among us is acting suspiciously now that we have a confir"
+  ],
+  [
+   2,
+   "public",
+   "player-6",
+   "I agree with player-7 that we should stop debating player-0 since they are already dead. Now that we know player-0 was not a werewolf, let's focus our attention on the living players to find the two wolves among us."
+  ],
+  [
+   2,
+   "public",
+   "player-4",
+   "I see player-7 is pointing out the factual error in player-4's previous post regarding player-0's execution. That is a valid correction, but my original concern remains: player-8's aggressive defense of being a villager on Day 1 is highly unusual and warrants close observation. Let's wait for the night results to see if anyone else behaves suspiciously."
+  ],
+  [
+   2,
+   "public",
+   "player-7",
+   "Player-7, your accusation that player-8 is spreading confusion contradicts the public facts; player-8 never claimed to have a special ability or inspected anyone. The real threat here is the confusion we've already lost two players to, so let's wait for the moderator's official night results before voting again."
+  ],
+  [
+   2,
+   "public",
+   "player-2",
+   "I agree that we should stop obsessing over the dead and focus on the living; however, player-8's continued defensiveness about their role seems odd given that we now know player-0 was not a seer. Let's wait for the night results before making any moves."
+  ],
+  [
+   2,
+   "public",
+   "player-3",
+   "I agree we should wait for the night results before voting; focusing on player-8 now is premature when we have no confirmed information. Let's stay calm and let the moderator reveal the kill target first."
+  ],
+  [
+   2,
+   "public",
+   "player-8",
+   "I agree with player-7 that we should focus on the living players once we have the night results. Let's wait for the moderator's official announcement before voting again to avoid targeting anyone based on confusion."
+  ],
+  [
+   2,
+   "public",
+   "player-4",
+   "I agree with player-7 that we need to stop wasting time debating the dead and focus on finding the real threats among us. Player-8's initial defensiveness about their role still feels odd, so let's wait for the night results before making any accusations."
+  ],
+  [
+   2,
+   "public",
+   "player-5",
+   "I agree with player-7 that we need to stop dwelling on player-0's impossible claims and focus on the living players. Player-8's initial defensiveness regarding their role is still the only odd behavior we have, so let's wait for the night results to see if anyone else behaves suspiciously before making a move."
+  ],
+  [
+   2,
+   "public",
+   "player-7",
+   "We have lost the seer, and player-0 was not a werewolf, so the night kill was likely a wolf. Player-8, please stop deflecting and tell us if you have any reason to believe the current player-8 is safe, or if you think we should vote now."
+  ],
+  [
+   2,
+   "public",
+   "player-6",
+   "Player-8, you claimed to be a villager yesterday, which is actually a standard move for a Medium to verify if the executed player was a werewolf. Since player-0 was not a werewolf, your \"villager\" claim aligns with my Medium result, making your behavior consistent rather than suspicious. Let's focus on waiting for the night results."
+  ],
+  [
+   2,
+   "public",
+   "player-8",
+   "I agree we should wait for the night results before voting; focusing on me now is premature when we have no confirmed information. Let's stay calm and let the moderator reveal the kill target first."
+  ],
+  [
+   2,
+   "public",
+   "player-3",
+   "I agree we should wait for the night results; targeting player-8 now is premature since we have no confirmed information about their role. Let's focus on gathering real clues before making any accusations."
+  ],
+  [
+   2,
+   "public",
+   "player-2",
+   "I agree we should wait for the night results before voting, but I still find player-8's early and aggressive defense of their role suspicious given the lack of game mechanics to support it."
+  ],
+  [
+   2,
+   "public",
+   "player-5",
+   "I appreciate player-6's clarification that player-8's claim aligns with the Medium role, but player-8 has still refused to state their specific ability. Without knowing what you actually are, we cannot verify your neutrality. Until you confirm your role or the moderator announces the night kill target, we remain cautious. Let's wait for the official results before making any accusations."
+  ],
+  [
+   2,
+   "public",
+   "player-4",
+   "Player-6's logic about the Medium role is interesting, but it's a stretch to claim player-8 is safe just because they defended their identity; player-8 is still acting unusually defensive. Since we lost the seer, we need to wait for the night results to find a real target rather than guessing."
+  ],
+  [
+   2,
+   "public",
+   "player-8",
+   "I agree with player-6 that my initial statements were consistent with being a villager, especially since player-0 was indeed not a werewolf. We should focus on waiting for the night results to identify the real threats rather than targeting anyone based on past confusion. Let's stay calm until the moderator announces the kill target."
+  ],
+  [
+   3,
+   "public",
+   "player-3",
+   "Player-6, your claim that player-8 is a Medium is just a guess since no moderator has announced any role claims yet. We should wait for the official night results before anyone tries to verify or defend specific roles."
+  ],
+  [
+   3,
+   "public",
+   "player-6",
+   "Player-6, your logic that player-8 is safe because they acted like a villager is flawed; a Medium only sees the dead, so claiming to be a villager is just a standard deflection. Since we lost player-0 (who wasn't a wolf) and player-8 (who also wasn't a wolf) to votes, the real danger is the two werewolves among us. We must wait for tonight's results before making any moves."
+  ],
+  [
+   3,
+   "public",
+   "player-7",
+   "Player-6, your theory that player-8 is a Medium is a risky stretch since they never claimed to have used their ability. While we wait for the night results, I believe player-2's continued suspicion of player-8 is justified given their aggressive behavior on Day 1."
+  ],
+  [
+   3,
+   "public",
+   "player-4",
+   "I agree with player-3 that we cannot verify player-6's claim about player-8's role without official confirmation. Player-8's continued insistence on waiting seems reasonable, but let's wait for the night kill results before making any accusations."
+  ],
+  [
+   3,
+   "public",
+   "player-2",
+   "I still don't trust player-8; their initial aggressive defense and refusal to state their specific role feel too suspicious, especially since the Moderator has never confirmed any claims. Let's wait for the night results before making a move."
+  ],
+  [
+   3,
+   "public",
+   "player-3",
+   "I agree with player-7 that player-2's persistent suspicion of player-8 is unjustified given the lack of concrete evidence. We should stop fixating on player-8 and wait for tonight's night results to find a real target."
+  ],
+  [
+   3,
+   "public",
+   "player-6",
+   "I agree we must wait for the night results before voting again; targeting player-8 now is premature since their behavior could simply be a villager's confusion. Let's focus on surviving tonight and identifying the werewolves with real information."
+  ],
+  [
+   3,
+   "public",
+   "player-7",
+   "Player-2, your continued suspicion of player-8 is baseless since no moderator has confirmed any special roles. We should stop fixating on player-8 and wait for tonight's night results to find the real threats among us. Let's focus on gathering actual clues rather than debating unverified suspicions."
+  ],
+  [
+   3,
+   "public",
+   "player-2",
+   "I see that player-6 is claiming player-8 is a Medium based on behavior, but that's just a guess without official confirmation. While I agree we should wait for the night results, I still find player-8's initial defensiveness on Day 1 too suspicious to ignore. Let's just be careful until the moderator tells us what the kill target was."
+  ],
+  [
+   3,
+   "public",
+   "player-4",
+   "I agree that we need to stop fixating on player-8 and wait for the night results; targeting anyone now without concrete evidence is risky. Let's stay calm and let the moderator reveal the kill target before making accusations."
+  ],
+  [
+   3,
+   "public",
+   "player-6",
+   "Player-2, your suspicion of player-8 is unfounded since my Medium result confirms player-8 was not a werewolf. We should stop fixating on past behavior and wait for tonight's kill target to identify the real threats."
+  ],
+  [
+   3,
+   "public",
+   "player-3",
+   "We should stop wasting time guessing roles like Medium and wait for the moderator to announce who was killed tonight. Until we know the actual casualty, we have no way to verify anyone's claims or find the wolves. Let's just survive the night and focus on the facts."
+  ],
+  [
+   3,
+   "public",
+   "player-7",
+   "We have lost both player-1 and player-5, meaning the wolves have killed two villagers. With player-0 executed by vote and player-8 surviving, the real threat is among the living. I agree we should wait for the night results, but I remain wary of anyone who has not yet revealed their role."
+  ],
+  [
+   3,
+   "public",
+   "player-2",
+   "I still don't trust player-6; you are the only one claiming to be a Medium without any official confirmation from the moderator. If you were actually the Medium, you would know the specific roles of the dead players, not just guess at player-8's identity. Let's wait for the night results before casting any more doubts."
+  ],
+  [
+   3,
+   "public",
+   "player-4",
+   "I agree we should wait for the night results, but since player-6 claims to be a Medium, I expect to know who died tonight rather than just waiting. Player-3, you agree to let the Medium reveal the kill target before we vote?"
+  ],
+  [
+   3,
+   "public",
+   "player-6",
+   "I am not claiming to be a Medium; I simply deduced that player-8's behavior aligns with the result that player-0 was not a werewolf. We both know player-8 was safe, so let's stop wasting time on past behavior and wait for tonight's kill results to find the real threats."
+  ],
+  [
+   3,
+   "public",
+   "player-3",
+   "I agree that player-2's suspicion of player-6 is baseless since no moderator has confirmed any roles yet; we should stop fixating on unverified claims and wait for the night results."
+  ],
+  [
+   3,
+   "public",
+   "player-7",
+   "I still don't trust player-6's claim that they are a Medium without any official confirmation. If you were actually the Medium, you would know who died tonight instead of just guessing about player-8. Let's wait for the moderator to announce the actual kill target before making accusations."
+  ],
+  [
+   3,
+   "public",
+   "player-2",
+   "I still find player-6's claim about knowing the night kill highly suspicious since no official results have been announced yet. Until the moderator confirms who died, we cannot verify anyone's ability or trust their sudden certainty."
+  ],
+  [
+   3,
+   "public",
+   "player-6",
+   "Player-2, the Moderator has never confirmed any role, so you have no proof that I am a Medium; you are just guessing. I am simply stating that my private result confirms player-8 was not a werewolf, so we should stop fixating on them and wait for tonight's kill target to identify the real threats."
+  ],
+  [
+   3,
+   "public",
+   "player-3",
+   "Player-6, you claim your Medium result confirms player-8 was safe, but the Moderator has never announced any role or result yet. Since player-0 was executed and player-8 survived, we must wait for the official night kill announcement before trusting any unverified claims. Let's focus on surviving the night and finding the wolves once we have real information."
+  ],
+  [
+   3,
+   "public",
+   "player-2",
+   "I still find player-6's certainty about the night kill highly suspicious since no official results have been announced yet. Until the moderator confirms who died, we cannot trust anyone claiming specific knowledge. Let's wait for the real facts before making accusations."
+  ],
+  [
+   3,
+   "public",
+   "player-4",
+   "I agree with player-2 that player-6's claim of having a private result is highly suspicious since the moderator has never announced any night kills yet. We need to wait for the official announcement before trusting any unverified role claims."
+  ]
+ ],
+ "public_facts": [
+  "Day 1 vote tallies: {'player-0': 8, 'player-8': 1} -> player-0.",
+  "Day 1: player-0 was executed by vote.",
+  "Day 1: player-1 was found dead in the morning.",
+  "Day 2 vote tallies: {'player-2': 1, 'player-8': 6} -> player-8.",
+  "Day 2: player-8 was executed by vote.",
+  "Day 2: player-5 was found dead in the morning.",
+  "Day 3 vote tallies: {'player-2': 1, 'player-6': 4} -> player-6.",
+  "Day 3: player-6 was executed by vote."
+ ],
+ "actions_log": [
+  {
+   "t": 85.9,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-0",
+   "target": "player-8"
+  },
+  {
+   "t": 87.3,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-2",
+   "target": "player-0"
+  },
+  {
+   "t": 88.6,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-8",
+   "target": "player-0"
+  },
+  {
+   "t": 89.9,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-7",
+   "target": "player-0"
+  },
+  {
+   "t": 91.3,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-6",
+   "target": "player-0"
+  },
+  {
+   "t": 92.6,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-3",
+   "target": "player-0"
+  },
+  {
+   "t": 94.0,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-5",
+   "target": "player-0"
+  },
+  {
+   "t": 95.4,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-4",
+   "target": "player-0"
+  },
+  {
+   "t": 96.8,
+   "day": 1,
+   "kind": "vote",
+   "player": "player-1",
+   "target": "player-0"
+  },
+  {
+   "t": 193.3,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-4",
+   "target": "player-8"
+  },
+  {
+   "t": 194.8,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-6",
+   "target": "player-8"
+  },
+  {
+   "t": 196.3,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-2",
+   "target": "player-8"
+  },
+  {
+   "t": 197.8,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-7",
+   "target": "player-8"
+  },
+  {
+   "t": 199.3,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-3",
+   "target": "player-8"
+  },
+  {
+   "t": 200.8,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-5",
+   "target": "player-8"
+  },
+  {
+   "t": 202.2,
+   "day": 2,
+   "kind": "vote",
+   "player": "player-8",
+   "target": "player-2"
+  },
+  {
+   "t": 296.0,
+   "day": 3,
+   "kind": "vote",
+   "player": "player-6",
+   "target": "player-2"
+  },
+  {
+   "t": 297.6,
+   "day": 3,
+   "kind": "vote",
+   "player": "player-2",
+   "target": "player-6"
+  },
+  {
+   "t": 299.1,
+   "day": 3,
+   "kind": "vote",
+   "player": "player-3",
+   "target": "player-6"
+  },
+  {
+   "t": 300.7,
+   "day": 3,
+   "kind": "vote",
+   "player": "player-4",
+   "target": "player-6"
+  },
+  {
+   "t": 302.2,
+   "day": 3,
+   "kind": "vote",
+   "player": "player-7",
+   "target": "player-6"
+  }
+ ],
+ "calls": [
+  {
+   "t": 27.6,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 0.91,
+   "gen_sec": 0.81,
+   "queue_sec": 0.1,
+   "prompt_tokens": 336,
+   "completion_tokens": 28
+  },
+  {
+   "t": 28.3,
+   "player": "player-0",
+   "purpose": "chat",
+   "total_sec": 1.42,
+   "gen_sec": 0.63,
+   "queue_sec": 0.78,
+   "prompt_tokens": 357,
+   "completion_tokens": 38
+  },
+  {
+   "t": 28.8,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 1.89,
+   "gen_sec": 0.45,
+   "queue_sec": 1.44,
+   "prompt_tokens": 375,
+   "completion_tokens": 22
+  },
+  {
+   "t": 29.1,
+   "player": "player-8",
+   "purpose": "co",
+   "total_sec": 1.53,
+   "gen_sec": 0.31,
+   "queue_sec": 1.23,
+   "prompt_tokens": 350,
+   "completion_tokens": 9
+  },
+  {
+   "t": 29.9,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 1.94,
+   "gen_sec": 0.72,
+   "queue_sec": 1.22,
+   "prompt_tokens": 365,
+   "completion_tokens": 43
+  },
+  {
+   "t": 30.3,
+   "player": "player-0",
+   "purpose": "co",
+   "total_sec": 2.03,
+   "gen_sec": 0.33,
+   "queue_sec": 1.7,
+   "prompt_tokens": 400,
+   "completion_tokens": 9
+  },
+  {
+   "t": 30.8,
+   "player": "player-2",
+   "purpose": "co",
+   "total_sec": 2.0,
+   "gen_sec": 0.39,
+   "queue_sec": 1.61,
+   "prompt_tokens": 465,
+   "completion_tokens": 9
+  },
+  {
+   "t": 31.3,
+   "player": "player-7",
+   "purpose": "co",
+   "total_sec": 1.35,
+   "gen_sec": 0.41,
+   "queue_sec": 0.94,
+   "prompt_tokens": 457,
+   "completion_tokens": 9
+  },
+  {
+   "t": 32.1,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 1.08,
+   "gen_sec": 0.76,
+   "queue_sec": 0.33,
+   "prompt_tokens": 495,
+   "completion_tokens": 48
+  },
+  {
+   "t": 32.9,
+   "player": "player-1",
+   "purpose": "chat",
+   "total_sec": 1.28,
+   "gen_sec": 0.79,
+   "queue_sec": 0.49,
+   "prompt_tokens": 500,
+   "completion_tokens": 46
+  },
+  {
+   "t": 33.3,
+   "player": "player-1",
+   "purpose": "co",
+   "total_sec": 0.36,
+   "gen_sec": 0.34,
+   "queue_sec": 0.02,
+   "prompt_tokens": 571,
+   "completion_tokens": 9
+  },
+  {
+   "t": 34.2,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 1.08,
+   "gen_sec": 0.8,
+   "queue_sec": 0.28,
+   "prompt_tokens": 615,
+   "completion_tokens": 42
+  },
+  {
+   "t": 34.6,
+   "player": "player-6",
+   "purpose": "co",
+   "total_sec": 0.42,
+   "gen_sec": 0.4,
+   "queue_sec": 0.01,
+   "prompt_tokens": 629,
+   "completion_tokens": 7
+  },
+  {
+   "t": 35.3,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 0.89,
+   "gen_sec": 0.67,
+   "queue_sec": 0.22,
+   "prompt_tokens": 658,
+   "completion_tokens": 38
+  },
+  {
+   "t": 36.2,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 1.24,
+   "gen_sec": 0.76,
+   "queue_sec": 0.48,
+   "prompt_tokens": 658,
+   "completion_tokens": 37
+  },
+  {
+   "t": 37.0,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 1.22,
+   "gen_sec": 0.82,
+   "queue_sec": 0.4,
+   "prompt_tokens": 744,
+   "completion_tokens": 39
+  },
+  {
+   "t": 38.0,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 1.91,
+   "gen_sec": 0.83,
+   "queue_sec": 1.08,
+   "prompt_tokens": 744,
+   "completion_tokens": 41
+  },
+  {
+   "t": 38.7,
+   "player": "player-0",
+   "purpose": "chat",
+   "total_sec": 2.66,
+   "gen_sec": 0.69,
+   "queue_sec": 1.97,
+   "prompt_tokens": 726,
+   "completion_tokens": 38
+  },
+  {
+   "t": 39.3,
+   "player": "player-5",
+   "purpose": "co",
+   "total_sec": 3.12,
+   "gen_sec": 0.46,
+   "queue_sec": 2.65,
+   "prompt_tokens": 719,
+   "completion_tokens": 8
+  },
+  {
+   "t": 40.1,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 3.65,
+   "gen_sec": 0.79,
+   "queue_sec": 2.85,
+   "prompt_tokens": 790,
+   "completion_tokens": 44
+  },
+  {
+   "t": 40.7,
+   "player": "player-4",
+   "purpose": "co",
+   "total_sec": 3.64,
+   "gen_sec": 0.45,
+   "queue_sec": 3.19,
+   "prompt_tokens": 804,
+   "completion_tokens": 7
+  },
+  {
+   "t": 41.2,
+   "player": "player-3",
+   "purpose": "co",
+   "total_sec": 3.3,
+   "gen_sec": 0.46,
+   "queue_sec": 2.83,
+   "prompt_tokens": 852,
+   "completion_tokens": 7
+  },
+  {
+   "t": 42.1,
+   "player": "player-0",
+   "purpose": "chat",
+   "total_sec": 3.34,
+   "gen_sec": 0.74,
+   "queue_sec": 2.6,
+   "prompt_tokens": 870,
+   "completion_tokens": 37
+  },
+  {
+   "t": 42.9,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 4.11,
+   "gen_sec": 0.72,
+   "queue_sec": 3.38,
+   "prompt_tokens": 857,
+   "completion_tokens": 36
+  },
+  {
+   "t": 44.0,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 4.08,
+   "gen_sec": 1.02,
+   "queue_sec": 3.07,
+   "prompt_tokens": 849,
+   "completion_tokens": 60
+  },
+  {
+   "t": 48.0,
+   "player": "player-1",
+   "purpose": "chat",
+   "total_sec": 1.02,
+   "gen_sec": 0.9,
+   "queue_sec": 0.12,
+   "prompt_tokens": 1067,
+   "completion_tokens": 30
+  },
+  {
+   "t": 49.2,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 2.2,
+   "gen_sec": 1.12,
+   "queue_sec": 1.08,
+   "prompt_tokens": 1062,
+   "completion_tokens": 63
+  },
+  {
+   "t": 50.4,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 1.64,
+   "gen_sec": 1.12,
+   "queue_sec": 0.52,
+   "prompt_tokens": 1101,
+   "completion_tokens": 66
+  },
+  {
+   "t": 51.5,
+   "player": "player-0",
+   "purpose": "chat",
+   "total_sec": 1.91,
+   "gen_sec": 1.01,
+   "queue_sec": 0.89,
+   "prompt_tokens": 1194,
+   "completion_tokens": 55
+  },
+  {
+   "t": 52.6,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 1.86,
+   "gen_sec": 1.06,
+   "queue_sec": 0.8,
+   "prompt_tokens": 1287,
+   "completion_tokens": 54
+  },
+  {
+   "t": 53.8,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 2.65,
+   "gen_sec": 1.16,
+   "queue_sec": 1.5,
+   "prompt_tokens": 1248,
+   "completion_tokens": 60
+  },
+  {
+   "t": 55.0,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 2.97,
+   "gen_sec": 1.03,
+   "queue_sec": 1.94,
+   "prompt_tokens": 1351,
+   "completion_tokens": 49
+  },
+  {
+   "t": 56.1,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 3.86,
+   "gen_sec": 1.02,
+   "queue_sec": 2.84,
+   "prompt_tokens": 1351,
+   "completion_tokens": 50
+  },
+  {
+   "t": 57.2,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 3.81,
+   "gen_sec": 1.09,
+   "queue_sec": 2.72,
+   "prompt_tokens": 1375,
+   "completion_tokens": 63
+  },
+  {
+   "t": 58.4,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 3.35,
+   "gen_sec": 1.14,
+   "queue_sec": 2.21,
+   "prompt_tokens": 1510,
+   "completion_tokens": 54
+  },
+  {
+   "t": 59.6,
+   "player": "player-1",
+   "purpose": "chat",
+   "total_sec": 4.08,
+   "gen_sec": 1.13,
+   "queue_sec": 2.94,
+   "prompt_tokens": 1507,
+   "completion_tokens": 61
+  },
+  {
+   "t": 60.7,
+   "player": "player-0",
+   "purpose": "chat",
+   "total_sec": 4.42,
+   "gen_sec": 1.01,
+   "queue_sec": 3.41,
+   "prompt_tokens": 1582,
+   "completion_tokens": 52
+  },
+  {
+   "t": 62.0,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 4.6,
+   "gen_sec": 1.23,
+   "queue_sec": 3.37,
+   "prompt_tokens": 1633,
+   "completion_tokens": 65
+  },
+  {
+   "t": 63.4,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 5.85,
+   "gen_sec": 1.26,
+   "queue_sec": 4.59,
+   "prompt_tokens": 1672,
+   "completion_tokens": 72
+  },
+  {
+   "t": 64.7,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 3.68,
+   "gen_sec": 1.22,
+   "queue_sec": 2.46,
+   "prompt_tokens": 1827,
+   "completion_tokens": 64
+  },
+  {
+   "t": 65.9,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 3.71,
+   "gen_sec": 1.19,
+   "queue_sec": 2.52,
+   "prompt_tokens": 1940,
+   "completion_tokens": 61
+  },
+  {
+   "t": 67.0,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 4.07,
+   "gen_sec": 0.96,
+   "queue_sec": 3.11,
+   "prompt_tokens": 1940,
+   "completion_tokens": 42
+  },
+  {
+   "t": 68.2,
+   "player": "player-0",
+   "purpose": "chat",
+   "total_sec": 5.29,
+   "gen_sec": 1.21,
+   "queue_sec": 4.09,
+   "prompt_tokens": 1922,
+   "completion_tokens": 70
+  },
+  {
+   "t": 69.3,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 3.01,
+   "gen_sec": 0.97,
+   "queue_sec": 2.05,
+   "prompt_tokens": 2164,
+   "completion_tokens": 46
+  },
+  {
+   "t": 70.5,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 2.63,
+   "gen_sec": 1.13,
+   "queue_sec": 1.51,
+   "prompt_tokens": 2176,
+   "completion_tokens": 57
+  },
+  {
+   "t": 71.7,
+   "player": "player-1",
+   "purpose": "chat",
+   "total_sec": 1.43,
+   "gen_sec": 1.15,
+   "queue_sec": 0.28,
+   "prompt_tokens": 2315,
+   "completion_tokens": 51
+  },
+  {
+   "t": 73.3,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 1.38,
+   "gen_sec": 1.26,
+   "queue_sec": 0.12,
+   "prompt_tokens": 2444,
+   "completion_tokens": 56
+  },
+  {
+   "t": 75.7,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 1.3,
+   "gen_sec": 1.19,
+   "queue_sec": 0.1,
+   "prompt_tokens": 2501,
+   "completion_tokens": 58
+  },
+  {
+   "t": 79.5,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 1.41,
+   "gen_sec": 1.28,
+   "queue_sec": 0.13,
+   "prompt_tokens": 2607,
+   "completion_tokens": 48
+  },
+  {
+   "t": 80.8,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 1.72,
+   "gen_sec": 1.17,
+   "queue_sec": 0.54,
+   "prompt_tokens": 2607,
+   "completion_tokens": 57
+  },
+  {
+   "t": 85.9,
+   "player": "player-0",
+   "purpose": "vote",
+   "total_sec": 1.54,
+   "gen_sec": 1.45,
+   "queue_sec": 0.1,
+   "prompt_tokens": 2711,
+   "completion_tokens": 11
+  },
+  {
+   "t": 87.3,
+   "player": "player-2",
+   "purpose": "vote",
+   "total_sec": 2.86,
+   "gen_sec": 1.22,
+   "queue_sec": 1.64,
+   "prompt_tokens": 2729,
+   "completion_tokens": 9
+  },
+  {
+   "t": 88.6,
+   "player": "player-8",
+   "purpose": "vote",
+   "total_sec": 4.14,
+   "gen_sec": 1.23,
+   "queue_sec": 2.91,
+   "prompt_tokens": 2690,
+   "completion_tokens": 11
+  },
+  {
+   "t": 89.9,
+   "player": "player-7",
+   "purpose": "vote",
+   "total_sec": 5.29,
+   "gen_sec": 1.26,
+   "queue_sec": 4.03,
+   "prompt_tokens": 2690,
+   "completion_tokens": 11
+  },
+  {
+   "t": 91.3,
+   "player": "player-6",
+   "purpose": "vote",
+   "total_sec": 5.86,
+   "gen_sec": 1.24,
+   "queue_sec": 4.62,
+   "prompt_tokens": 2698,
+   "completion_tokens": 11
+  },
+  {
+   "t": 92.6,
+   "player": "player-3",
+   "purpose": "vote",
+   "total_sec": 6.63,
+   "gen_sec": 1.29,
+   "queue_sec": 5.34,
+   "prompt_tokens": 2729,
+   "completion_tokens": 11
+  },
+  {
+   "t": 94.0,
+   "player": "player-5",
+   "purpose": "vote",
+   "total_sec": 5.2,
+   "gen_sec": 1.29,
+   "queue_sec": 3.91,
+   "prompt_tokens": 2690,
+   "completion_tokens": 11
+  },
+  {
+   "t": 95.4,
+   "player": "player-4",
+   "purpose": "vote",
+   "total_sec": 3.7,
+   "gen_sec": 1.32,
+   "queue_sec": 2.38,
+   "prompt_tokens": 2729,
+   "completion_tokens": 14
+  },
+  {
+   "t": 96.8,
+   "player": "player-1",
+   "purpose": "vote",
+   "total_sec": 1.85,
+   "gen_sec": 1.26,
+   "queue_sec": 0.59,
+   "prompt_tokens": 2695,
+   "completion_tokens": 11
+  },
+  {
+   "t": 106.2,
+   "player": "player-3",
+   "purpose": "ability",
+   "total_sec": 1.74,
+   "gen_sec": 1.58,
+   "queue_sec": 0.16,
+   "prompt_tokens": 2769,
+   "completion_tokens": 11
+  },
+  {
+   "t": 107.5,
+   "player": "player-4",
+   "purpose": "ability",
+   "total_sec": 3.12,
+   "gen_sec": 1.28,
+   "queue_sec": 1.84,
+   "prompt_tokens": 2769,
+   "completion_tokens": 11
+  },
+  {
+   "t": 108.9,
+   "player": "player-6",
+   "purpose": "ability",
+   "total_sec": 4.46,
+   "gen_sec": 1.25,
+   "queue_sec": 3.21,
+   "prompt_tokens": 2733,
+   "completion_tokens": 11
+  },
+  {
+   "t": 110.2,
+   "player": "player-1",
+   "purpose": "ability",
+   "total_sec": 5.79,
+   "gen_sec": 1.24,
+   "queue_sec": 4.55,
+   "prompt_tokens": 2730,
+   "completion_tokens": 11
+  },
+  {
+   "t": 133.3,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 1.85,
+   "gen_sec": 1.69,
+   "queue_sec": 0.16,
+   "prompt_tokens": 2782,
+   "completion_tokens": 32
+  },
+  {
+   "t": 133.8,
+   "player": "player-4",
+   "purpose": "co",
+   "total_sec": 0.51,
+   "gen_sec": 0.49,
+   "queue_sec": 0.02,
+   "prompt_tokens": 2796,
+   "completion_tokens": 9
+  },
+  {
+   "t": 140.2,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 2.11,
+   "gen_sec": 1.99,
+   "queue_sec": 0.12,
+   "prompt_tokens": 2747,
+   "completion_tokens": 59
+  },
+  {
+   "t": 141.9,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 3.36,
+   "gen_sec": 1.55,
+   "queue_sec": 1.81,
+   "prompt_tokens": 2786,
+   "completion_tokens": 40
+  },
+  {
+   "t": 143.8,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 5.15,
+   "gen_sec": 1.8,
+   "queue_sec": 3.35,
+   "prompt_tokens": 2786,
+   "completion_tokens": 60
+  },
+  {
+   "t": 145.5,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 5.44,
+   "gen_sec": 1.69,
+   "queue_sec": 3.75,
+   "prompt_tokens": 2786,
+   "completion_tokens": 52
+  },
+  {
+   "t": 147.4,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 7.3,
+   "gen_sec": 1.77,
+   "queue_sec": 5.53,
+   "prompt_tokens": 2747,
+   "completion_tokens": 59
+  },
+  {
+   "t": 147.9,
+   "player": "player-7",
+   "purpose": "co",
+   "total_sec": 7.7,
+   "gen_sec": 0.4,
+   "queue_sec": 7.29,
+   "prompt_tokens": 2761,
+   "completion_tokens": 7
+  },
+  {
+   "t": 150.2,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 9.65,
+   "gen_sec": 2.15,
+   "queue_sec": 7.5,
+   "prompt_tokens": 2768,
+   "completion_tokens": 88
+  },
+  {
+   "t": 151.9,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 10.94,
+   "gen_sec": 1.69,
+   "queue_sec": 9.24,
+   "prompt_tokens": 2786,
+   "completion_tokens": 51
+  },
+  {
+   "t": 153.3,
+   "player": "player-2",
+   "purpose": "co",
+   "total_sec": 11.39,
+   "gen_sec": 1.26,
+   "queue_sec": 10.13,
+   "prompt_tokens": 2821,
+   "completion_tokens": 9
+  },
+  {
+   "t": 154.7,
+   "player": "player-3",
+   "purpose": "co",
+   "total_sec": 9.14,
+   "gen_sec": 1.35,
+   "queue_sec": 7.79,
+   "prompt_tokens": 2856,
+   "completion_tokens": 9
+  },
+  {
+   "t": 156.8,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 9.79,
+   "gen_sec": 2.05,
+   "queue_sec": 7.73,
+   "prompt_tokens": 2846,
+   "completion_tokens": 77
+  },
+  {
+   "t": 158.1,
+   "player": "player-5",
+   "purpose": "co",
+   "total_sec": 10.74,
+   "gen_sec": 1.24,
+   "queue_sec": 9.5,
+   "prompt_tokens": 2821,
+   "completion_tokens": 9
+  },
+  {
+   "t": 159.5,
+   "player": "player-8",
+   "purpose": "co",
+   "total_sec": 9.39,
+   "gen_sec": 1.34,
+   "queue_sec": 8.06,
+   "prompt_tokens": 2834,
+   "completion_tokens": 9
+  },
+  {
+   "t": 161.5,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 10.36,
+   "gen_sec": 1.87,
+   "queue_sec": 8.48,
+   "prompt_tokens": 2864,
+   "completion_tokens": 64
+  },
+  {
+   "t": 162.9,
+   "player": "player-6",
+   "purpose": "co",
+   "total_sec": 10.95,
+   "gen_sec": 1.3,
+   "queue_sec": 9.65,
+   "prompt_tokens": 2896,
+   "completion_tokens": 9
+  },
+  {
+   "t": 164.8,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 5.66,
+   "gen_sec": 1.84,
+   "queue_sec": 3.83,
+   "prompt_tokens": 2956,
+   "completion_tokens": 58
+  },
+  {
+   "t": 166.5,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 6.66,
+   "gen_sec": 1.64,
+   "queue_sec": 5.02,
+   "prompt_tokens": 2956,
+   "completion_tokens": 42
+  },
+  {
+   "t": 168.3,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 5.77,
+   "gen_sec": 1.63,
+   "queue_sec": 4.14,
+   "prompt_tokens": 2942,
+   "completion_tokens": 42
+  },
+  {
+   "t": 170.2,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 7.33,
+   "gen_sec": 1.8,
+   "queue_sec": 5.53,
+   "prompt_tokens": 2981,
+   "completion_tokens": 54
+  },
+  {
+   "t": 172.2,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 6.13,
+   "gen_sec": 1.95,
+   "queue_sec": 4.18,
+   "prompt_tokens": 2959,
+   "completion_tokens": 67
+  },
+  {
+   "t": 174.2,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 5.16,
+   "gen_sec": 1.88,
+   "queue_sec": 3.28,
+   "prompt_tokens": 2962,
+   "completion_tokens": 62
+  },
+  {
+   "t": 176.4,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 5.03,
+   "gen_sec": 2.08,
+   "queue_sec": 2.95,
+   "prompt_tokens": 2998,
+   "completion_tokens": 76
+  },
+  {
+   "t": 178.1,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 6.51,
+   "gen_sec": 1.62,
+   "queue_sec": 4.89,
+   "prompt_tokens": 2980,
+   "completion_tokens": 40
+  },
+  {
+   "t": 179.9,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 8.03,
+   "gen_sec": 1.63,
+   "queue_sec": 6.4,
+   "prompt_tokens": 3019,
+   "completion_tokens": 40
+  },
+  {
+   "t": 181.6,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 9.07,
+   "gen_sec": 1.62,
+   "queue_sec": 7.44,
+   "prompt_tokens": 3026,
+   "completion_tokens": 39
+  },
+  {
+   "t": 183.9,
+   "player": "player-5",
+   "purpose": "chat",
+   "total_sec": 5.92,
+   "gen_sec": 2.11,
+   "queue_sec": 3.81,
+   "prompt_tokens": 3032,
+   "completion_tokens": 77
+  },
+  {
+   "t": 185.9,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 7.82,
+   "gen_sec": 1.95,
+   "queue_sec": 5.87,
+   "prompt_tokens": 3071,
+   "completion_tokens": 65
+  },
+  {
+   "t": 188.0,
+   "player": "player-8",
+   "purpose": "chat",
+   "total_sec": 6.2,
+   "gen_sec": 1.94,
+   "queue_sec": 4.26,
+   "prompt_tokens": 2976,
+   "completion_tokens": 66
+  },
+  {
+   "t": 190.0,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 6.72,
+   "gen_sec": 1.87,
+   "queue_sec": 4.85,
+   "prompt_tokens": 2994,
+   "completion_tokens": 60
+  },
+  {
+   "t": 191.8,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 6.23,
+   "gen_sec": 1.74,
+   "queue_sec": 4.5,
+   "prompt_tokens": 2993,
+   "completion_tokens": 49
+  },
+  {
+   "t": 193.3,
+   "player": "player-4",
+   "purpose": "vote",
+   "total_sec": 3.39,
+   "gen_sec": 1.43,
+   "queue_sec": 1.95,
+   "prompt_tokens": 3063,
+   "completion_tokens": 14
+  },
+  {
+   "t": 194.8,
+   "player": "player-6",
+   "purpose": "vote",
+   "total_sec": 4.87,
+   "gen_sec": 1.41,
+   "queue_sec": 3.46,
+   "prompt_tokens": 3042,
+   "completion_tokens": 14
+  },
+  {
+   "t": 196.3,
+   "player": "player-2",
+   "purpose": "vote",
+   "total_sec": 5.56,
+   "gen_sec": 1.37,
+   "queue_sec": 4.18,
+   "prompt_tokens": 3063,
+   "completion_tokens": 9
+  },
+  {
+   "t": 197.8,
+   "player": "player-7",
+   "purpose": "vote",
+   "total_sec": 6.01,
+   "gen_sec": 1.42,
+   "queue_sec": 4.59,
+   "prompt_tokens": 3024,
+   "completion_tokens": 14
+  },
+  {
+   "t": 199.3,
+   "player": "player-3",
+   "purpose": "vote",
+   "total_sec": 7.1,
+   "gen_sec": 1.38,
+   "queue_sec": 5.71,
+   "prompt_tokens": 3063,
+   "completion_tokens": 11
+  },
+  {
+   "t": 200.8,
+   "player": "player-5",
+   "purpose": "vote",
+   "total_sec": 6.74,
+   "gen_sec": 1.4,
+   "queue_sec": 5.34,
+   "prompt_tokens": 3024,
+   "completion_tokens": 14
+  },
+  {
+   "t": 202.2,
+   "player": "player-8",
+   "purpose": "vote",
+   "total_sec": 2.98,
+   "gen_sec": 1.36,
+   "queue_sec": 1.61,
+   "prompt_tokens": 3024,
+   "completion_tokens": 11
+  },
+  {
+   "t": 211.2,
+   "player": "player-4",
+   "purpose": "ability",
+   "total_sec": 1.8,
+   "gen_sec": 1.67,
+   "queue_sec": 0.12,
+   "prompt_tokens": 3111,
+   "completion_tokens": 11
+  },
+  {
+   "t": 212.7,
+   "player": "player-6",
+   "purpose": "ability",
+   "total_sec": 3.26,
+   "gen_sec": 1.39,
+   "queue_sec": 1.87,
+   "prompt_tokens": 3085,
+   "completion_tokens": 11
+  },
+  {
+   "t": 214.1,
+   "player": "player-3",
+   "purpose": "ability",
+   "total_sec": 4.68,
+   "gen_sec": 1.35,
+   "queue_sec": 3.33,
+   "prompt_tokens": 3111,
+   "completion_tokens": 11
+  },
+  {
+   "t": 239.9,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 2.07,
+   "gen_sec": 1.92,
+   "queue_sec": 0.15,
+   "prompt_tokens": 3124,
+   "completion_tokens": 46
+  },
+  {
+   "t": 242.3,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 3.93,
+   "gen_sec": 2.36,
+   "queue_sec": 1.57,
+   "prompt_tokens": 3118,
+   "completion_tokens": 96
+  },
+  {
+   "t": 244.3,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 4.85,
+   "gen_sec": 1.88,
+   "queue_sec": 2.96,
+   "prompt_tokens": 3085,
+   "completion_tokens": 59
+  },
+  {
+   "t": 244.8,
+   "player": "player-3",
+   "purpose": "co",
+   "total_sec": 4.95,
+   "gen_sec": 0.43,
+   "queue_sec": 4.52,
+   "prompt_tokens": 3138,
+   "completion_tokens": 9
+  },
+  {
+   "t": 246.7,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 4.44,
+   "gen_sec": 1.78,
+   "queue_sec": 2.66,
+   "prompt_tokens": 3107,
+   "completion_tokens": 51
+  },
+  {
+   "t": 248.2,
+   "player": "player-6",
+   "purpose": "co",
+   "total_sec": 5.88,
+   "gen_sec": 1.43,
+   "queue_sec": 4.45,
+   "prompt_tokens": 3115,
+   "completion_tokens": 9
+  },
+  {
+   "t": 250.1,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 5.83,
+   "gen_sec": 1.76,
+   "queue_sec": 4.07,
+   "prompt_tokens": 3149,
+   "completion_tokens": 47
+  },
+  {
+   "t": 251.5,
+   "player": "player-7",
+   "purpose": "co",
+   "total_sec": 7.25,
+   "gen_sec": 1.35,
+   "queue_sec": 5.91,
+   "prompt_tokens": 3124,
+   "completion_tokens": 9
+  },
+  {
+   "t": 253.0,
+   "player": "player-4",
+   "purpose": "co",
+   "total_sec": 6.36,
+   "gen_sec": 1.42,
+   "queue_sec": 4.94,
+   "prompt_tokens": 3161,
+   "completion_tokens": 9
+  },
+  {
+   "t": 254.9,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 6.97,
+   "gen_sec": 1.8,
+   "queue_sec": 5.17,
+   "prompt_tokens": 3146,
+   "completion_tokens": 50
+  },
+  {
+   "t": 256.5,
+   "player": "player-2",
+   "purpose": "co",
+   "total_sec": 6.41,
+   "gen_sec": 1.43,
+   "queue_sec": 4.98,
+   "prompt_tokens": 3160,
+   "completion_tokens": 9
+  },
+  {
+   "t": 258.4,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 4.79,
+   "gen_sec": 1.78,
+   "queue_sec": 3.01,
+   "prompt_tokens": 3122,
+   "completion_tokens": 49
+  },
+  {
+   "t": 260.4,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 4.65,
+   "gen_sec": 1.92,
+   "queue_sec": 2.73,
+   "prompt_tokens": 3067,
+   "completion_tokens": 62
+  },
+  {
+   "t": 263.8,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 2.22,
+   "gen_sec": 2.09,
+   "queue_sec": 0.12,
+   "prompt_tokens": 3092,
+   "completion_tokens": 75
+  },
+  {
+   "t": 265.6,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 3.9,
+   "gen_sec": 1.75,
+   "queue_sec": 2.16,
+   "prompt_tokens": 3092,
+   "completion_tokens": 46
+  },
+  {
+   "t": 267.5,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 2.67,
+   "gen_sec": 1.76,
+   "queue_sec": 0.9,
+   "prompt_tokens": 3119,
+   "completion_tokens": 49
+  },
+  {
+   "t": 269.4,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 3.04,
+   "gen_sec": 1.85,
+   "queue_sec": 1.19,
+   "prompt_tokens": 3101,
+   "completion_tokens": 55
+  },
+  {
+   "t": 271.5,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 4.41,
+   "gen_sec": 1.98,
+   "queue_sec": 2.43,
+   "prompt_tokens": 3062,
+   "completion_tokens": 66
+  },
+  {
+   "t": 273.6,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 4.55,
+   "gen_sec": 2.04,
+   "queue_sec": 2.51,
+   "prompt_tokens": 3104,
+   "completion_tokens": 69
+  },
+  {
+   "t": 275.5,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 3.5,
+   "gen_sec": 1.82,
+   "queue_sec": 1.68,
+   "prompt_tokens": 3117,
+   "completion_tokens": 52
+  },
+  {
+   "t": 277.6,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 2.25,
+   "gen_sec": 1.99,
+   "queue_sec": 0.26,
+   "prompt_tokens": 3124,
+   "completion_tokens": 66
+  },
+  {
+   "t": 279.4,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 2.23,
+   "gen_sec": 1.68,
+   "queue_sec": 0.55,
+   "prompt_tokens": 3124,
+   "completion_tokens": 41
+  },
+  {
+   "t": 281.3,
+   "player": "player-7",
+   "purpose": "chat",
+   "total_sec": 3.12,
+   "gen_sec": 1.9,
+   "queue_sec": 1.23,
+   "prompt_tokens": 3103,
+   "completion_tokens": 59
+  },
+  {
+   "t": 283.2,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 4.07,
+   "gen_sec": 1.74,
+   "queue_sec": 2.34,
+   "prompt_tokens": 3142,
+   "completion_tokens": 44
+  },
+  {
+   "t": 285.3,
+   "player": "player-6",
+   "purpose": "chat",
+   "total_sec": 5.23,
+   "gen_sec": 2.01,
+   "queue_sec": 3.23,
+   "prompt_tokens": 3120,
+   "completion_tokens": 68
+  },
+  {
+   "t": 287.9,
+   "player": "player-3",
+   "purpose": "chat",
+   "total_sec": 2.21,
+   "gen_sec": 2.11,
+   "queue_sec": 0.1,
+   "prompt_tokens": 3166,
+   "completion_tokens": 74
+  },
+  {
+   "t": 289.8,
+   "player": "player-2",
+   "purpose": "chat",
+   "total_sec": 3.27,
+   "gen_sec": 1.81,
+   "queue_sec": 1.45,
+   "prompt_tokens": 3166,
+   "completion_tokens": 50
+  },
+  {
+   "t": 291.6,
+   "player": "player-4",
+   "purpose": "chat",
+   "total_sec": 3.46,
+   "gen_sec": 1.79,
+   "queue_sec": 1.67,
+   "prompt_tokens": 3180,
+   "completion_tokens": 48
+  },
+  {
+   "t": 296.0,
+   "player": "player-6",
+   "purpose": "vote",
+   "total_sec": 1.7,
+   "gen_sec": 1.58,
+   "queue_sec": 0.12,
+   "prompt_tokens": 3160,
+   "completion_tokens": 11
+  },
+  {
+   "t": 297.6,
+   "player": "player-2",
+   "purpose": "vote",
+   "total_sec": 2.78,
+   "gen_sec": 1.45,
+   "queue_sec": 1.32,
+   "prompt_tokens": 3166,
+   "completion_tokens": 14
+  },
+  {
+   "t": 299.1,
+   "player": "player-3",
+   "purpose": "vote",
+   "total_sec": 4.21,
+   "gen_sec": 1.47,
+   "queue_sec": 2.74,
+   "prompt_tokens": 3166,
+   "completion_tokens": 14
+  },
+  {
+   "t": 300.7,
+   "player": "player-4",
+   "purpose": "vote",
+   "total_sec": 4.04,
+   "gen_sec": 1.47,
+   "queue_sec": 2.56,
+   "prompt_tokens": 3166,
+   "completion_tokens": 14
+  },
+  {
+   "t": 302.2,
+   "player": "player-7",
+   "purpose": "vote",
+   "total_sec": 1.94,
+   "gen_sec": 1.45,
+   "queue_sec": 0.49,
+   "prompt_tokens": 3127,
+   "completion_tokens": 14
+  }
+ ],
+ "rejections": [],
+ "wall_sec": 314.3
+}

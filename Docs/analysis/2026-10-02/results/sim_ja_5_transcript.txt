@@ -1,0 +1,97 @@
+# sim_ja_5.json  result=werewolf  wolves_know_teammates=True
+roles: player-0=werewolf, player-1=medium, player-2=werewolf, player-3=guard, player-4=seer, player-5=madman, player-6=villager, player-7=villager, player-8=villager
+
+D1 player-4(seer): まだ何も始まっていないけど、player-7 は見ましたね。今夜は誰を調べようか考えるところです。
+D1 player-7(villager): まだ夜明けなので、player-4 の発言は前日からのものですね。今日、誰が霊能者で誰が医者なのかを見極める必要があります。
+D1 player-6(villager): player-4 は player-7 が前夜の発言だと断定していますが、霊能者の player-7 なら夜中の情報を得ているはずです。player-7 さんが霊能者かどうか、player-4 さんの根拠は何ですか？
+D1 player-0(werewolf): player-6、player-7 の発言内容から霊能者だと決めつけるのは早計だと思いますよ。player-7 さんも player-4 さんにも、もう少し慎重に考えてもらえますか？
+D1 player-6(villager): player-7 さんはまだ「誰が霊能者か見極める」だけと仰っていますが、もし私が霊能者なら、既に調べた結果を伝えますよ。player-4 さん、なぜ player-7 さんは前日の発言だと断定したのですか？根拠をお聞かせください。
+D1 player-7(villager): player-6 さん、私は霊能者ではありませんが、player-4 さんが私の発言を「前日」だと断定したのは少し変な気がします。なぜなら、私はまだ夜中を過ごしており、結果を待っていますから。player-4 さん、その根拠をもう少し詳しく教えていただけますか？
+D1 player-6(villager): player-4 さん、なぜ player-7 さんの発言を「前日」と断言されたのでしょうか？player-7 さん自身が霊能者ではないことを認めていますが、その根拠が気になります。もう少し慎重に議論していきましょう。
+D1 player-4(seer): player-7 が霊能者ではないと主張していますが、まだ夜中を過ごしている以上、結果が確定していないはずです。その点だけを確認した上で、誰が狼か調べる必要がありますね。
+D1 player-7(villager): player-4 さん、player-7 が霊能者ではないと言った根拠も気になりますが、player-7 さんが「結果待ち」と言っている時点で、霊能者はすでに情報を得ているはずです。player-6 さん、player-7 さんのその発言は少し矛盾しているように感じますね。
+D1 player-4(seer): player-7 は霊能者ではないと明言していますが、その根拠がまだ夜中であることを理由にしているのは矛盾に思えます。霊能者なら既に結果を知っているはずです。player-0 さんや player-6 さん、player-7 の発言から霊能者か村民かを考え直してください。
+D1 player-5(madman): player-7 の「結果待ち」という発言が変なのは分かりますが、player-4 さんが霊能者を否定する根拠もまだ曖昧です。player-0 さんや player-6 さん、誰が霊能者だと確信していますか？
+D1 player-7(villager): player-4 さん、player-7 の「結果待ち」という発言が変だと言う前に、player-4 さんがなぜ私が霊能者だと断定したのか、その根拠をまず説明してくださいね。霊能者の情報源なしに、ただ「前日」と断じるのは少し早計だと思います。
+D1 player-2(werewolf): player-4 さん、player-7 さんが霊能者ではないと言っているのに、なぜ結果待ちと言っているのかその矛盾を指摘するのは、よく考えられた動きのように思えます。私たちがもっと慎重に、誰が本当に情報を持っているのか見極めるべきではないでしょうか。
+D1 player-1(medium): player-4 さんの「前日」という断定が不安でなりませんね。player-7 さんは矛盾を指摘されていますが、player-0 さんや player-6 さんも議論に参加してください。
+D1 player-4(seer): player-7 が「結果待ち」と言っている時点で霊能者ではないと確信しています。ただ、player-6 が player-7 の根拠をなぜ問いているのか、そこが気になります。
+D1 player-3(guard): player-4 さんの断定には根拠が薄すぎるので、player-7 さんにはなぜ「霊能者ではない」と言えたのか理由を聞かせてください。霊能者ではないなら、夜中の結果は分からないはずです。
+D1 player-8(villager): player-4 さん、player-7 さんが「霊能者ではない」と断言する根拠がまだ分かりませんが、player-7 さんの「結果待ち」という発言は確かに矛盾に思えます。まずは player-7 さん、なぜそう言えるのか理由を教えてください。
+D1 player-2(werewolf): player-4 さんの「前日」という断定こそが最も不自然に思えますね。player-7 さんが矛盾を指摘したのは、むしろ霊能者として夜中の情報を整理しているように見えるのですが、player-4 さんはなぜそれを無視して狼だと決めつけたのでしょうか？
+D1 player-1(medium): player-4 さん、player-7 さんが「前日」だと断定した根拠は本当にありますか？ただの狼の暴言に見えますが、何か裏があるのかもしれませんね。
+D1 player-3(guard): player-4 さんの「霊能者ではない」という断定には根拠が薄すぎるので、player-7 さんにはなぜそう言い切れたのか理由を聞かせてください。霊能者ではないなら、夜中の結果は分からないはずです。
+D1 player-0(werewolf): player-4 さんが player-7 さんを狼扱いする根拠が本当に薄いので、まずは player-7 さんの説明を聞くべきではないでしょうか。
+D1 player-5(madman): player-4 さん、player-7 さんが「霊能者ではない」と断言できる根拠が本当にあるのか気になりますね。もし霊能者なら夜中の情報を得ているはずです。player-7 さん、もう少し詳しく教えてください。
+D1 player-8(villager): player-7 さん、なぜ「霊能者ではない」と言い切れるのか、その根拠を教えてください。player-4 さんが理由なく狼だと決めつけているのは危険ですが、まずは player-7 さんの説明を聞きたいです。
+D1 player-0(werewolf): player-4 さん、根拠なしに player-7 さんを狼扱いするのは危険すぎます。player-7 さんの方から「結果待ち」と言っている時点で、狼側が夜間に動いた可能性が高いですが、まずは冷静に議論しましょう。
+D1 ** Votes: {"player-0": "player-7", "player-1": "player-7", "player-2": "player-4", "player-3": "player-4", "player-4": "player-6", "player-5": "player-4", "player-6": "player-4", "player-7": "player-4", "player-8": "player-4"}. player-4 was executed.
+D2 ** Morning: player-6 was found dead.
+D2 player-7(villager): 昨日、player-4 が「霊能者ではない」と断定していましたが、実は player-4 が狼で霊能者の player-6 を見逃している可能性があります。player-6 は霊能者らしく、昨夜の調査結果を誰かに伝えられたのかもしれませんね。
+D2 player-0(werewolf): player-7 さん、霊能者の player-6 さんが見逃したはずないですから、player-4 さんが狼を狼だと思い込んでいるだけのように思えます。昨夜の夜明けで player-6 さんが死にましたね、player-4 さんは霊能者を探し求めていたのでしょうか？
+D2 player-1(medium): player-6 が死んだので、player-4 が狼だったことは確定です。player-7 さんが「player-6 は霊能者」だと断言していますが、霊能者は自分が調べた人を死ぬと知っているので、その言い方は少し変に感じますね。player-7 さんの真意を疑いたくなります。
+D2 player-7(villager): player-1 さん、霊能者が自分が調べた人が死んだことを知らないなんてありえませんよね。player-6 さんが死んだ以上、player-7 さんが言っていることは嘘ではありません。なぜ私を疑うのですか？
+D2 player-1(medium): player-7 さん、霊能者が調べた人が死んだら即座に「調べた」と言うのが普通ですよね。player-6 さんが死んだことを知らないまま「霊能者らしい」と言っているのは、狼が霊能者役を演じている証拠ではないでしょうか？
+D2 player-7(villager): player-1 さん、もし私が狼なら、霊能者が調べた人が死ぬなんて有利な情報を与えませんよ。むしろ、player-6 さんが霊能者だと確信しているからこそ、その立場を明確に伝えているだけ。なぜ私を狼だと疑うのですか？
+D2 player-1(medium): player-7 さん、霊能者が夜中の被害者に気づいていないのはあり得ませんよね。player-6 が死んでいる事実を無視して霊能者だと主張するのは、狼が情報を操作している疑い濃厚です。
+D2 player-7(villager): player-1 さん、霊能者は自分が調べた人が死んだことを即座に「調べた」と言う必要はないですよね。私はただ player-6 さんが霊能者だと確信しているだけなので、なぜ私が狼だと疑われるのでしょうか？
+D2 player-1(medium): player-7 さん、霊能者は被害者が死ぬと「夜中に誰かが死んだ」という事実をまず報告するのが常識です。player-6 さんが死んでいることを無視して、いきなり「霊能者」と断定するのは、狼が霊能者役を演じている典型の手口に見えますね。
+D2 player-3(guard): player-6 さんが死んだ以上、霊能者なら必ず「調べた」と発言するはずです。player-7 さんが player-6 さんを「霊能者」だと断定している時点で、player-6 さんが実は player-7 さんの調べた犠牲者だった可能性があります。player-7 さん、本当に player-6 さんのことを調べたことはありますか？
+D2 player-5(madman): player-1 さんの指摘はもっともで、player-7 さんが player-6 さんの死を無視して霊能者だと断定するのは変な動きですね。player-7 さん、player-6 さんについて本当に何か特別な情報を持っていますか？
+D2 player-8(villager): player-7 さん、player-6 さんが死んだことを無視して霊能者と主張するのは本当に不自然です。player-1 さんや player-3 さんの指摘通り、もし霊能者なら「調べた」はずです。player-7 さんの真意を疑わざるを得ませんね。
+D2 player-2(werewolf): player-1 さん、player-7 さんが「霊能者なら即座に報告する」というのは正しいですが、player-7 が本当に狼で player-6 を見逃している可能性も捨てきれません。player-7 さん、player-6 さんを調べる前と後で、何か変わった情報はありませんか？
+D2 player-5(madman): player-1 さんの指摘は核心を突いていますが、player-7 さんが「霊能者なら報告するはず」という前提自体が少し強引に思えます。player-7 さんが霊能者で player-6 を見逃した可能性も否定できませんね。
+D2 player-3(guard): player-7 さん、player-6 さんの死を無視して霊能者だと主張するのは本当に不自然ですね。もしあなたが霊能者なら、なぜ「調べた」と言わないのでしょう？
+D2 player-2(werewolf): player-7 さんの「霊能者が報告しない」という前提こそが狼側の嘘っぽさを強調しているように感じます。もし本当に霊能者なら、player-6 さんを見送った事実を隠す必要はないはずです。
+D2 player-0(werewolf): player-7 さん、player-6 さんが死んだ事実を無視するのは本当に不自然ですね。もし本当に霊能者なら、昨夜誰が倒れたか報告すべきだったはずです。
+D2 player-8(villager): player-7 さん、player-6 さんが死んだことを完全に無視して霊能者だと主張するのは本当に不自然です。もし霊能者なら、昨夜の調査結果を報告するのが常識ですよね。
+D2 player-2(werewolf): player-7 さん、player-6 さんの死を無視して霊能者だと主張するのは本当に変ですね。もし本当に霊能者なら、昨夜誰が死んだか報告するのが常識ですよ。
+D2 player-8(villager): player-7 さん、player-6 さんの死を無視して霊能者だと主張するのは本当に不自然ですよね。もし本当に霊能者なら、昨夜誰が倒れたか報告するのが常識ですよ。
+D2 player-0(werewolf): player-7 さん、昨夜の死亡者である player-6 さんの名前さえ叫べないのは本当に変です。本当に霊能者なら「player-6 さんが倒れた」くらいは言うはずです。
+D2 player-5(madman): player-7 さんの「霊能者なら報告するはず」という主張が本当に正しいのか、私には少し疑問が残ります。player-6 さんが死んだことは事実ですが、霊能者が夜を過ごして結果を待っていた場合、報告のタイミングには柔軟性があるはずです。player-7 さん、なぜ player-6 さんの死を完全に無視しなければならないのでしょうか？
+D2 player-3(guard): player-7 さん、昨夜 player-6 さんが死んだ事実を無視して霊能者だと主張するのは本当に不自然すぎます。もし本当に霊能者なら、少なくとも「player-6 さんが倒れた」と報告するはずです。この態度は狼が霊能者役を演じている典型の手口に見えます。
+D2 player-5(madman): player-5 の意見ですが、player-7 さんが player-6 さんの死を無視するのは確かに変に思えますね。ただ、霊能者が即座に結果を報告しなければならない理由はないはずです。player-7 さん、もう少し丁寧に状況を説明してくれないでしょうか。
+D2 ** Votes: {"player-0": "player-7", "player-1": "player-7", "player-2": "player-1", "player-3": "player-7", "player-5": "player-7", "player-7": "player-1", "player-8": "player-7"}. player-7 was executed.
+D3 ** Morning: player-1 was found dead.
+D3 player-8(villager): player-1 さんが朝に死んでいるので、player-7 さんの「霊能者」発言は完全に狼の嘘だと証明されましたね。残った player-0 さんと player-3 さんの行動を注視しつつ、もう一人の狼を見つけるのが急務です。
+D3 player-0(werewolf): player-3 さん、player-7 さんが狼だったことは確定ですが、player-2 さんが player-1 を票した理由が気になります。player-2 さん、本当に player-7 が狼だと分かっていましたか？
+D3 player-3(guard): player-2 さん、player-1 さんの死で player-7 が狼だと確定しましたが、player-2 さんがその理由を聞かずに直接投票したのはなぜでしょうか？また、残る狼は player-2 さんや player-8 さんのどちらでしょうか？
+D3 player-2(werewolf): player-3 さん、player-2 さんが投票したのは player-1 さんの発言が危なかったからだんです。player-0 さんが player-7 を狼だと断定していたので、狼の行動パターンが露呈したと判断しました。
+D3 player-3(guard): player-2 さんの「発言が危なかったから」という理由は具体的すぎて、私としては狼が真似できないような本物の根拠を感じています。player-8 さん、player-2 さんとどちらが狼か決定的な話ですが、あなたの今の行動も少し不自然に感じます。
+D3 player-2(werewolf): player-3 さん、player-2 さんが「危なかったから」という根拠で投票したのは、player-1 さんの霊能者模範が狼の罠に嵌りかけたからだだけです。player-8 さんも冷静に、なぜ player-2 さんを狼だと思わないのですか？
+D3 player-5(madman): player-2 さんの「霊能者模範」という表現、少し不自然な気もしますね。player-8 さん、player-2 さんの根拠を信じるほどですか？
+D3 player-2(werewolf): player-3 さん、私の根拠が具体性があるからこそ狼にしか見えないんです。player-1 さんの霊能者模範が罠に嵌りかけたのが最大の証拠です。
+D3 player-3(guard): player-2 さん、なぜ player-1 さんの「霊能者模範」という発言を狼の罠だと判断できるほどの根拠があるのでしょうか？それと、player-8 さんは私とどちらが狼のどちらか決定的な話ですが、player-2 さんの行動も少し不自然に感じます。
+D3 player-2(werewolf): player-3 さん、player-2 が狼だと疑うのは不自然じゃないですか？player-2 は昨日も player-1 を救おうとして投票しましたし、むしろ player-3 さんの「狼が真似できない」という理由こそが危険に思えます。player-3 さんは本当に霊能者ですか？
+D3 player-3(guard): player-2 さん、昨日 player-1 が死んだ時点で player-7 は確定狼なのに、なぜ player-3 さんが霊能者だと疑うのですか？私が狼ならそんな単純な理屈を言ってはいません。player-2 さんこそがもう一人の狼である可能性が高いですが、player-8 さんも正直に自分の真意を語ってください。
+D3 player-5(madman): player-2 さんが「霊能者模範」という奇妙な表現を使っていますが、player-3 さんが本当に霊能者なら player-2 さんの行動に矛盾があるはずです。player-3 さん、player-2 さんが狼だと確信できる根拠を教えてください。
+D3 player-0(werewolf): player-2 さん、昨日 player-1 が霊能者模範を演じていたのは、player-7 が狼だったことが確定した後の混乱で仕方なかったんです。player-8 さん、player-2 さんが「player-3 が狼だ」と急激に発言を変えた理由、正直に話してください。
+D3 player-8(villager): player-0 さん、player-2 さんが player-3 さんを狼扱いにする根拠が私には分かりません。player-3 さんの発言は正直に思えるので、player-2 さんが狼で player-3 さんを騙して投票させようとしている気がします。player-2 さん、もう少し具体的な証拠を提示してください。
+D3 player-0(werewolf): player-2 さん、player-3 さんが霊能者なら「player-7 を狼と断定した理由」を説明できないはずです。その曖昧さは狼の疑い深い行動に見えますが、player-8 さんは正直にplayer-2 さんを狼だと思わない根拠は何でしょうか？
+D3 player-8(villager): player-2 さん、player-3 さんの霊能者発言が曖昧すぎますね。昨日 player-1 が死んだ時点で狼は確定しているはずです。その事実を踏まえて player-2 さんがなぜ「霊能者模範」という奇妙な言葉を使うのでしょうか。player-2 さんは本当に player-3 さんを信頼していますか？
+D3 player-5(madman): player-2 さんの「霊能者模範」という表現は本当に変に聞こえますね。player-3 さんが霊能者なら、そんな曖昧な言い方をする必要はないはずです。player-2 さん、本当に player-3 さんを信頼できる根拠を一つ教えてくれませんか？
+D3 player-0(werewolf): player-2 さん、player-1 さんが霊能者模範だと称賛したのは、player-7 が狼だったことを証明する強い証拠なのに、それを「罠」と言うのは本当に変です。player-8 さんも player-2 さんのその態度に流されているのが心配です。
+D3 player-8(villager): player-3 さん、player-2 さんの「霊能者模範」という表現は本当に不自然に聞こえますね。player-2 さんが player-7 を狼と断定した具体的な根拠を教えてください。
+D3 player-5(madman): player-2 さん、「霊能者模範」という言葉は本当に変に聞こえますね。player-3 さんが本当に霊能者なら、そんな曖昧な言い方をする必要はないはずです。player-2 さん、player-3 さんを狼だと見抜ける具体的な根拠を一つ教えてくれませんか？
+D3 ** Votes: {"player-0": "player-2", "player-2": "player-3", "player-3": "player-2", "player-5": "player-2", "player-8": "player-2"}. player-2 was executed.
+D4 ** Morning: nobody died last night.
+D4 player-5(madman): 昨夜の死亡者がいないのは、player-2 さんが霊能者だったからだと信じています。player-8 さん、player-2 さんが狼だと疑う根拠をもう一度教えてください。
+D4 player-8(villager): player-5 さん、player-2 が霊能者なら昨日夜間に誰か殺せるはずですよ。死者がいないのは、player-2 が狼で霊能者役を演じていたからでしょう。player-0 さん、player-2 が投票で player-3 を狙ったのは何故ですか？
+D4 player-5(madman): player-8 さん、昨夜誰も死んでいないのは player-2 さんが狼ではないからだと思います。player-2 さんは player-3 さんを救うために投票したのでしょう。player-3 さんは本当に霊能者として player-2 さんを信じられていますか？
+D4 player-8(villager): player-5 さん、player-2 が霊能者なら昨夜の「狼の夜」を無効化して生存させるのは可能ですが、昨日 player-7 が狼だったという事実は変わりません。player-8 として player-2 さんに聞きたいですが、player-3 さんが霊能者だと判断した具体的な根拠は何ですか？
+D4 player-5(madman): player-8 さん、昨夜の生存は player-2 さんが狼ではないからではなく、ただの偶然でしょう。player-3 さんが霊能者なら、player-2 さんが狼だと見抜く明確な根拠を提示してください。
+D4 player-3(guard): player-5 さん、昨夜の生存は player-2 さんが霊能者として護衛をした可能性が最も高いです。player-8 さんの「偶然だ」という主張は、護衛役の存在を認めない狼の罠のように聞こえます。player-2 さんの護衛行動こそが、狼を倒す唯一の道不是吗？
+D4 player-0(werewolf): player-8 さん、昨夜の生存は偶然ではなく、player-2 さんが狼だったからこそ狼が死ななかったんです。player-2 さんが狼なら護衛はできませんが、霊能者なら見誤ることもないはず。player-3 さんの霊能者主張こそが狼の罠だと思いませんか？
+D4 player-3(guard): 昨夜の生存は私が護衛をさせない狼の罠だと信じている player-8 さんへの反論です。player-0 さんの主張こそが矛盾しており、私の護衛行動こそが狼を排除する唯一の鍵だと確信しています。
+D4 player-0(werewolf): player-3 さん、昨日 player-2 が護衛できたなら狼は動けないはずですが、player-2 が狼なら護衛は不可能です。その矛盾を指摘した私が狼扱いされるのは変ですね。player-8 さん、player-3 さんの護衛主張こそが狼の罠だと思いませんか？
+D4 player-0(werewolf): player-3 さん、player-2 さんが護衛をしたら昨夜狼は死なないはずです。でも player-2 さんは狼側なのに護衛なんてできませんよね。player-3 さんの護衛説は矛盾しすぎていて、player-8 さんこそがもう一人の狼に見えます。
+D4 player-3(guard): player-0 さん、player-2 が狼なら護衛は不可能ですが、昨夜は護衛が成功しました。player-2 が狼を排除した真の護衛役だったはずです。player-8 さん、player-2 を狼と断定する根拠を教えてください。
+D4 player-0(werewolf): player-3 さん、player-2 が護衛役だと主張するのは本当に矛盾していませんか？player-2 は狼側なのに、なぜ昨夜の護衛が成功したと言っているのですか？
+D4 player-3(guard): player-0 さん、player-2 が狼なら護衛できませんが、昨夜は護衛が成功したはずです。player-2 さんは確定した狼を騙して護衛役を演じたのか、それとも player-3 さんが誤って護衛役を主張しているのでしょうか？
+D4 player-8(villager): player-0 さん、player-3 さんが護衛役だと主張するのは本当に変ですね。もし護衛が成功したなら、player-2 さんは狼ではなく村民か、あるいは護衛役の player-3 さん自身が悪戯している可能性があります。player-3 さん、なぜ player-2 さんを護衛役だと断定できるのですか？
+D4 player-8(villager): player-3 さん、player-2 を護衛役だと断定する根拠が一つもないのに、昨夜の生存を「成功した護衛」としか言いません。もしあなたが霊能者なら、player-2 の狼らしさを指摘すべきですが、player-0 さんの「矛盾」という指摘を無視しているのは不自然です。player-3 さん、player-2 を救うのではなく、player-0 さんの発言を無視して狼が一人残ることに安心していますか？
+D4 player-5(madman): player-3 さん、昨夜誰も死んでいないのは偶然や護衛の成功ではなく、player-2 さんが狼だったからじゃないですか？その論理矛盾を無視して player-0 さんを狼と断定するのは、player-3 さんが本当に霊能者なら危険な判断だと思います。
+D4 ** Votes: {"player-0": "player-3", "player-3": "player-8", "player-5": "player-8", "player-8": "player-3"}. player-3 was executed.
+D5 ** Morning: player-8 was found dead.
+
+LLM calls=116 mean=1.60s max=2.67s
