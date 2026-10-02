@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from random import Random
+from shutil import copytree
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -87,6 +88,79 @@ class GameStateTests(unittest.TestCase):
 
         game = self.create_game(rng=Random(19), logs_root=None)
         self.assertIsInstance(game.event_sink, InMemoryEventSink)
+
+    def test_initial_teammates_are_private_and_only_include_team_core_members(self) -> None:
+        counts = {role_id: 1 for role_id in self.content.roles}
+        counts["fox"] = 2
+        game = GameState.create_from_preset(
+            self.content, replace(self.preset, role_counts=counts),
+            [PlayerConfig(f"p-{i}", f"Player {i}") for i in range(sum(counts.values()))],
+            game_id="all-teammates", event_sink=InMemoryEventSink(), rng=Random(31),
+        )
+        wolves = {p.player_id for p in game.players.values()
+                  if p.role.id in {"werewolf", "greedy_werewolf", "wise_werewolf"}}
+        foxes = {p.player_id for p in game.players.values() if p.role.id == "fox"}
+        for player in game.players.values():
+            if player.role.id in {"werewolf", "greedy_werewolf", "wise_werewolf",
+                                  "fanatic", "whispering_madman"}:
+                expected = wolves - {player.player_id}
+            elif player.role.id == "fox":
+                expected = foxes - {player.player_id}
+            else:
+                expected = set()
+            with self.subTest(role_id=player.role.id, player_id=player.player_id):
+                assignments = [e for e in game.event_bus.events
+                               if e.type == "ROLE_ASSIGNED" and e.recipient_player_id == player.player_id]
+                self.assertEqual(len(assignments), 1)
+                self.assertIs(assignments[0].visibility, EventVisibility.PRIVATE)
+                payload = assignments[0].payload
+                self.assertEqual(set(payload["teammate_player_ids"]), expected)
+                self.assertEqual(set(payload), {"player_id", "role_id", "modifier_ids", "teammate_player_ids"})
+                history = [e["payload"]["event_payload"] for e in game.get_state_sync(player.player_id)["history"]
+                           if e["payload"].get("event_type") == "ROLE_ASSIGNED"]
+                self.assertEqual(history, [dict(payload)])
+        public = [dict(e.payload) for e in game.event_bus.events if e.visibility is EventVisibility.PUBLIC]
+        self.assertNotIn("teammate_player_ids", json.dumps(public))
+
+    def test_teammates_follow_renamed_yaml_roles_tags_and_team(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "content"
+            copytree(CONTENT_ROOT, root)
+            for path in (root / "roles").glob("*.yaml"):
+                path.write_text(path.read_text(encoding="utf-8")
+                                .replace("werewolf", "predator").replace("team: wolf", "team: pack"),
+                                encoding="utf-8")
+            path = root / "teams.yaml"
+            path.write_text(path.read_text(encoding="utf-8")
+                            .replace("werewolf", "predator").replace("id: wolf", "id: pack"), encoding="utf-8")
+            content = load_content(root)
+        counts = {"predator": 2, "fanatic": 1, "villager": 2}
+        game = GameState.create_from_preset(
+            content, replace(self.preset, role_counts=counts),
+            [PlayerConfig(f"p-{i}", str(i)) for i in range(5)],
+            game_id="renamed-teammates", event_sink=InMemoryEventSink(), rng=Random(32),
+        )
+        wolves = {p.player_id for p in game.players.values() if p.role.id == "predator"}
+        for event in game.event_bus.events:
+            if event.type == "ROLE_ASSIGNED":
+                player = game.players[event.recipient_player_id]
+                expected = wolves - {player.player_id} if player.role.id != "villager" else set()
+                self.assertEqual(set(event.payload["teammate_player_ids"]), expected)
+
+    def test_initial_teammates_exclude_missing_role_and_allow_no_other_members(self) -> None:
+        class MissingWolfRandom(Random):
+            def choice(self, sequence):
+                return "werewolf"
+
+        rules = replace(self.preset.rules, role_missing=replace(self.preset.rules.role_missing, enabled=True))
+        counts = dict(self.preset.role_counts)
+        counts["fanatic"] = counts.pop("madman")
+        game = self.create_game(rng=MissingWolfRandom(33), preset=replace(self.preset, rules=rules, role_counts=counts))
+        wolf = next(p.player_id for p in game.players.values() if p.role.id == "werewolf")
+        for event in game.event_bus.events:
+            if event.type == "ROLE_ASSIGNED":
+                role = game.players[event.recipient_player_id].role.id
+                self.assertEqual(event.payload["teammate_player_ids"], [wolf] if role == "fanatic" else [])
 
     def test_direct_game_state_construction_requires_preset_role_ids(self) -> None:
         sink = InMemoryEventSink()

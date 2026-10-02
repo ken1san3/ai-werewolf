@@ -65,6 +65,7 @@ class Team:
     default_inspect_result: str
     default_medium_result: str
     win_conditions: tuple[WinCondition, ...]
+    teammate_tags: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

@@ -232,6 +232,42 @@ class StateWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sync["type"], "game.state_sync")
         return joined, sync
 
+    async def test_initial_teammates_and_resume_are_recipient_only_even_after_death(self):
+        wolves = [p.player_id for p in self.game.players.values() if p.role.id == "werewolf"]
+        wolf, teammate = wolves
+        villager = role_player(self.game, "villager")
+
+        def assignment(snapshot):
+            entries = [e["payload"]["event_payload"] for e in snapshot["payload"]["history"]
+                       if e["payload"].get("event_type") == "ROLE_ASSIGNED"]
+            self.assertEqual(len(entries), 1)
+            return entries[0]
+
+        async with connect(self.uri) as old, connect(self.uri) as other:
+            joined, initial = await self.join(old, wolf)
+            _, other_sync = await self.join(other, villager)
+            self.assertEqual(assignment(initial)["teammate_player_ids"], [teammate])
+            self.assertEqual(assignment(other_sync)["teammate_player_ids"], [])
+            self.assertEqual(assignment(other_sync)["player_id"], villager)
+            # A resumed snapshot must preserve the original knowledge, including dead teammates.
+            self.game._record_player_death(teammate, "attacked")
+            public = await self.receive(other)
+            self.assertEqual(public["type"], "game.event")
+            self.assertNotIn("teammate_player_ids", json.dumps(public))
+            self.game._record_player_death(wolf, "attacked")
+            public = await self.receive(other)
+            self.assertNotIn("teammate_player_ids", json.dumps(public))
+            async with connect(self.uri) as resumed:
+                await resumed.send(json.dumps(client_message("session.resume", {
+                    "connection_token": joined["payload"]["connection_token"], "last_seq": initial["seq"],
+                })))
+                while True:
+                    snapshot = await self.receive(resumed)
+                    if snapshot["type"] == "game.state_sync":
+                        break
+                self.assertEqual(assignment(snapshot), assignment(initial))
+                self.assertEqual(snapshot["payload"]["revealed_roles"], [])
+
     async def test_join_and_phase_start_deliver_full_state_without_per_action_pushes(self):
         guard = role_player(self.game, "guard")
         wolf = role_player(self.game, "werewolf")

@@ -64,6 +64,22 @@ class ProtocolSchemaTests(unittest.TestCase):
         self.assert_invalid(self.server_validator, recorded)
         ProtocolMessageValidator(schema_path=LEGACY_SCHEMA_PATH).validate_server(recorded)
 
+    def test_role_assignment_teammates_are_validated_without_rejecting_old_assignments(self) -> None:
+        validator = ProtocolMessageValidator()
+        assignment = {"player_id": "p-0", "role_id": "custom_role", "modifier_ids": []}
+        event = self.make_server_event(event_type="game.event", payload={
+            "event_type": "ROLE_ASSIGNED", "event_payload": assignment,
+        })
+        validator.validate_server(event)
+        for teammates in ([], ["p-1", "p-2"]):
+            assignment["teammate_player_ids"] = teammates
+            validator.validate_server(event)
+        for teammates in ("p-1", [""], [1], ["p-1", "p-1"], [{"player_id": "p-1", "role_id": "hidden"}]):
+            with self.subTest(teammates=teammates):
+                assignment["teammate_player_ids"] = teammates
+                with self.assertRaises(ValueError):
+                    validator.validate_server(event)
+
     def test_server_event_requires_common_envelope_and_positive_seq(self) -> None:
         event = self.make_server_event()
         self.assert_valid(self.server_validator, event)

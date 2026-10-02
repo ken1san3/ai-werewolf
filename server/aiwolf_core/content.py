@@ -345,7 +345,7 @@ def _parse_team(data: Any, path: str) -> Team:
     _keys(
         mapping,
         required={"id", "name", "default_attributes", "win_conditions"},
-        optional=set(),
+        optional={"teammate_tags"},
         path=path,
     )
     defaults = _mapping(mapping["default_attributes"], f"{path}.default_attributes")
@@ -373,6 +373,10 @@ def _parse_team(data: Any, path: str) -> Team:
         default_inspect_result=defaults["inspect_result"],
         default_medium_result=defaults["medium_result"],
         win_conditions=conditions,
+        teammate_tags=frozenset(
+            _identifier(tag, f"{path}.teammate_tags")
+            for tag in _list(mapping.get("teammate_tags", []), f"{path}.teammate_tags")
+        ),
     )
 
 

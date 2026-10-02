@@ -1,6 +1,7 @@
 teams:
   - id: village
     name: 市民陣営
+    teammate_tags: []
     default_attributes:
       count_as: village
       inspect_result: not_wolf
@@ -11,6 +12,7 @@ teams:
 
   - id: wolf
     name: 人狼陣営
+    teammate_tags: [werewolf]
     default_attributes:
       count_as: wolf
       inspect_result: wolf
@@ -23,6 +25,7 @@ teams:
 
   - id: fox
     name: 妖狐陣営
+    teammate_tags: [fox]
     default_attributes:
       count_as: none
       inspect_result: not_wolf

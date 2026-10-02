@@ -38,6 +38,7 @@ from server.aiwolf_core.content import (
     _parse_modifier,
     _parse_passive,
     _parse_role,
+    _parse_team,
     _parse_rules,
     _parse_win_condition,
     _validate_core_death_causes,
@@ -85,6 +86,15 @@ def make_modifier(
 class ContentLoadingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.content = load_content(CONTENT_ROOT)
+
+    def test_team_teammate_tags_validate_and_default_to_no_disclosure(self) -> None:
+        data = yaml.safe_load((CONTENT_ROOT / "teams.yaml").read_text(encoding="utf-8"))["teams"][1]
+        self.assertEqual(_parse_team(data, "team").teammate_tags, frozenset({"werewolf"}))
+        data.pop("teammate_tags")
+        self.assertEqual(_parse_team(data, "team").teammate_tags, frozenset())
+        for tags in ("werewolf", None, [True], [""], [1]):
+            with self.subTest(tags=tags), self.assertRaisesRegex(ContentValidationError, "teammate_tags"):
+                _parse_team({**data, "teammate_tags": tags}, "team")
 
     def test_all_thirteen_roles_are_loaded_from_yaml(self) -> None:
         self.assertEqual(

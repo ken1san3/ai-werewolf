@@ -329,12 +329,27 @@ class GameState:
                 role=self.content.roles[role_id],
             )
             self.players[player.player_id] = player
+        # All assignments must exist before deriving anyone's initial knowledge.
+        for player in self.players.values():
+            team = self.content.teams[player.role.attributes.team]
+            teammate_player_ids = [
+                other.player_id
+                for other in self.players.values()
+                if other.player_id != player.player_id
+                and other.role.attributes.team == team.id
+                and not other.role.tags.isdisjoint(team.teammate_tags)
+            ] if player.role.knows_teammates else []
             self.event_bus.publish(
                 GameEvent(
                     type="ROLE_ASSIGNED",
                     visibility=EventVisibility.PRIVATE,
                     recipient_player_id=player.player_id,
-                    payload={"player_id": player.player_id, "role_id": role_id, "modifier_ids": []},
+                    payload={
+                        "player_id": player.player_id,
+                        "role_id": player.role.id,
+                        "modifier_ids": [],
+                        "teammate_player_ids": teammate_player_ids,
+                    },
                 )
             )
 
