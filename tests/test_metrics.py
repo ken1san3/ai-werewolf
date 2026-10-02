@@ -128,6 +128,16 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["Q3"], 1)
         self.assertEqual(result["metrics"]["Q1"], 1)
 
+    def test_medium_own_report_for_a_different_dead_target_is_an_unreceived_result(self):
+        roles = {"player-0": self.game.content.roles["medium"]}
+        private = [{"t": 1, "player_id": "player-0", "event_payload": {"target_player_id": "player-1", "result": "wolf"}}]
+        rows = [{"kind": "PLAYER_DIED", "t": 0, "payload": {"player_id": "player-2"}},
+                chat("player-0", "霊能者としてplayer-2は人狼でした。", 2),
+                chat("player-0", "もし私の霊能結果がplayer-2は人狼と出たなら、処刑します。", 3)]
+        result = self.metrics(rows, roles, private)
+        self.assertEqual(result["metrics"]["Q4"], 1)
+        self.assertEqual(result["metric_candidates"]["Q4"][0]["issues"], [{"reason": "unreceived_result", "target": "player-2", "claimed": "wolf"}])
+
     def test_reaction_question_pairs_and_rate_use_time_and_previous_five_speakers(self):
         rows = [chat("player-0", "player-2さん、投票理由は？", 1),
                 chat("player-1", "player-0さん、私は賛成です。", 2),

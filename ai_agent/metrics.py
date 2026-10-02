@@ -144,6 +144,10 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                                 if p["event_payload"].get("result") in {"wolf", "not_wolf"}}
                     if claimed_result and effects.intersection({"inspect", "medium_inspect"}) and expected and claimed_result not in expected:
                         issues.append({"reason": "result_mismatch", "target": target, "claimed": claimed_result, "server_results": sorted(expected)})
+                    explicit_own_report = own_report or re.match(rf"\s*{re.escape(role.name)}として", clause) or re.search(
+                        r"(?:私|僕|俺|自分)(?:は|が|の)[^。！？]*(?:占った|占って|調べた|判定|結果)", clause)
+                    if claimed_result and effects.intersection({"inspect", "medium_inspect"}) and own and not expected and explicit_own_report and not hypothetical:
+                        issues.append({"reason": "unreceived_result", "target": target, "claimed": claimed_result})
                     if "medium_inspect" in effects and target not in dead and (re.search(r"霊能|霊媒|判定|調べ", clause) or own_report) and claimed_result:
                         issues.append({"reason": "medium_living_target", "target": target})
             if issues:
