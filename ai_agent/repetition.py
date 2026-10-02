@@ -4,6 +4,11 @@ import re
 import unicodedata
 
 
+# Existing Japanese logs: a response adding a point scored 0.513, while a
+# nearly copied refusal scored 0.786. Keep the former and reject the latter.
+SIMILARITY_THRESHOLD = 0.60
+
+
 def normalize(text):
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text).casefold()).strip()
 
@@ -14,8 +19,10 @@ def sentences(text):
 
 def similarity(a, b):
     def grams(text):
-        words = re.findall(r"[\w-]+", normalize(text))
-        return {tuple(words[i:i + 3]) for i in range(max(len(words) - 2, 0))}
+        text = re.sub(r"player-\d+", "", normalize(text))
+        text = "".join(char for char in text if not char.isspace()
+                       and not unicodedata.category(char).startswith("P"))
+        return {text[i:i + 3] for i in range(len(text) - 2)}
     x, y = grams(a), grams(b)
     return len(x & y) / len(x | y) if x and y else 0
 
@@ -28,9 +35,10 @@ class RepetitionFilter:
     def allows(self, player_id, text, recent):
         parts = sentences(text)
         additions = Counter(parts)
-        return bool(text.strip()) and normalize(text) != self.last.get(player_id) and (
+        previous_parts = set(sentences(self.last.get(player_id, "")))
+        return bool(text.strip()) and not previous_parts.intersection(parts) and (
             all(self.counts[s] + count <= 2 for s, count in additions.items())
-            and not any(similarity(text, previous) > 0.45 for previous in recent[-15:])
+            and not any(similarity(text, previous) > SIMILARITY_THRESHOLD for previous in recent[-15:])
         )
 
     def reserve(self, player_id, text):
