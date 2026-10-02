@@ -97,6 +97,37 @@ class MetricTests(unittest.TestCase):
                  chat("player-0", "私は真の霊能者です。player-1は私の初夜調査で人狼と確認したため、疑っています。", 2)]
         self.assertIn("unavailable_initial_action", [issue["reason"] for issue in self.metrics(later, roles)["metric_candidates"]["Q4"][0]["issues"]])
 
+    def test_own_future_attack_guard_action_and_true_army_from_a_different_role(self):
+        roles = {"player-0": self.game.content.roles["werewolf"], "player-1": self.game.content.roles["guard"],
+                 "player-2": self.game.content.roles["madman"]}
+        rows = [chat("player-0", "本夜は私がplayer-3さんへの襲撃で狼を暴きます。", 1),
+                chat("player-1", "今夜player-3を護衛します。", 2),
+                chat("player-2", "人狼です。", 3),
+                chat("player-1", "今夜player-3がplayer-4を護衛します。", 4),
+                chat("player-0", "私はplayer-3がplayer-4を襲撃したと思います。", 5)]
+        result = self.metrics(rows, roles)
+        self.assertEqual(result["metrics"]["Q1"], 2)
+        self.assertEqual([c["row"] for c in result["role_team_disclosure_candidates"]], [0, 1, 2])
+
+    def test_own_result_after_target_subject_and_quoted_atomic_result_are_checked(self):
+        roles = {"player-0": self.game.content.roles["seer"]}
+        private = [{"t": 1, "player_id": "player-0", "event_payload": {"target_player_id": "player-3", "result": "wolf"}},
+                   {"t": 1, "player_id": "player-0", "event_payload": {"target_player_id": "player-7", "result": "not_wolf"}}]
+        rows = [chat("player-0", "player-3は夜に死んでいますが、私が占った限り人狼ではありませんでした。", 2),
+                chat("player-0", "player-7への占いは「狼」です。", 3),
+                chat("player-0", "player-2がplayer-3を占ったそうです。", 4)]
+        self.assertEqual([c["row"] for c in self.metrics(rows, roles, private)["metric_candidates"]["Q4"]], [0, 1])
+
+    def test_co_verb_is_a_self_claim_but_negative_and_hypothetical_co_are_not(self):
+        roles = {"player-0": self.game.content.roles["seer"], "player-1": self.game.content.roles["werewolf"]}
+        rows = [chat("player-0", "私が霊能者COしています。", 1),
+                chat("player-1", "人狼COします。", 2),
+                chat("player-0", "霊能者COしていません。", 3),
+                chat("player-1", "私が人狼なら人狼COします。", 4)]
+        result = self.metrics(rows, roles)
+        self.assertEqual(result["metrics"]["Q3"], 1)
+        self.assertEqual(result["metrics"]["Q1"], 1)
+
     def test_reaction_question_pairs_and_rate_use_time_and_previous_five_speakers(self):
         rows = [chat("player-0", "player-2さん、投票理由は？", 1),
                 chat("player-1", "player-0さん、私は賛成です。", 2),
@@ -110,6 +141,14 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["G4"], 0.3)
         self.assertEqual(result["question_answer_pairs"][0]["delay_sec"], 60)
         self.assertIsNone(self.metrics(rows)["metrics"]["G4"])
+
+    def test_question_recipient_is_not_every_player_mentioned_in_the_question(self):
+        rows = [chat("player-0", "player-1さん、player-2への結果は？", 1),
+                chat("player-2", "占われた側です。", 2),
+                chat("player-1", "人狼ではありませんでした。", 62)]
+        self.assertEqual(self.metrics(rows)["metrics"]["G3"], 0)
+        rows[-1]["t"] = 61
+        self.assertEqual(self.metrics(rows)["metrics"]["G3"], 1)
 
     def test_http_unknown_is_not_machine_pass_and_own_disclosure_is_not_literal_leak(self):
         checks = {"completed": True, "server_rejections": 0, "crashes": 0,

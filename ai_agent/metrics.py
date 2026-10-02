@@ -21,15 +21,15 @@ def self_claims(player, text, role_names):
     claims = []
     for name in role_names:
         role_word = r"(?:人狼|狼)" if name == "人狼" else re.escape(name)
-        subject = rf"(?:私たち|私|僕|俺)(?:の役職)?(?:は|が|も)\s*|{re.escape(player)}\s*(?:さん)?\s*(?:は|が|も)\s*"
-        tail = r"\s*(?:(?:の\s*)?co\s*)?(?:役職)?(?:です|だ(?:[。！、\s]|$)|であり|である|なので|なんです|だが|だけど|の一人|として|という役職)(?!\s*(?:可能性|かもしれ|なら|だったら|とすれば))"
+        subject = rf"(?:私たち|私|僕|俺|自分)(?:の役職)?(?:は|が|も)\s*|{re.escape(player)}\s*(?:さん)?\s*(?:は|が|も)\s*"
+        tail = r"\s*(?:(?:の\s*)?co\s*)?(?:役職)?(?:です|でした|だった|します|しました|しています|している|だ(?:[。！、\s]|$)|であり|である|なので|なんです|だが|だけど|の一人|として|という役職|(?=[。！]|$))(?!\s*(?:可能性|かもしれ|なら|だったら|とすれば))"
         named_intro = rf"(?:^|(?<=[。！？]))\s*{role_word}の\s*{re.escape(player)}\s*です"
         body = r"(?:(?!player-\d+\s*(?:さん)?\s*(?:は|が))[^。！？.!?])*?"
         own_predicate = rf"{re.escape(player)}\s*(?:さん)?\s*(?:は|が){body}{role_word}{tail}"
         # An explicit self subject may be followed by an action target ID;
         # only an unqualified role phrase excludes a following other actor.
         bare = rf"(?:^|(?<=[。！？]))\s*(?:真の|本当の|唯一の)?{role_word}{tail}(?!\s*player-\d+)"
-        inverse = rf"{role_word}(?:である|の)(?:私たち|私|僕|俺|{re.escape(player)})"
+        inverse = rf"{role_word}(?:である|としての|の)(?:私たち|私|僕|俺|自分|{re.escape(player)})"
         pattern = rf"(?:{subject})(?:真の|本当の|唯一の)?{role_word}{tail}|{bare}|{named_intro}|{own_predicate}|{inverse}"
         matches = list(re.finditer(pattern, text))
         definite = []
@@ -46,7 +46,20 @@ def self_claims(player, text, role_names):
             for clause in re.split(r"[。！？.!?]", text):
                 if re.search(r"なら|だったら|とすれば|仮に|もし", clause):
                     continue
-                if re.search(r"私(?:たち)?(?:は|が|で)[^。！？]*(?:襲撃した|襲撃しました|襲った|共同襲撃)(?!\s*(?:狼|人狼|者|相手))", clause):
+                attack = re.search(r"(?:私(?:たち)?|自分)(?:は|が|で)[^。！？]*(?:襲撃(?:した|しました)(?!\s*(?:狼|人狼|者|相手))|襲撃します|襲撃する|襲った(?!\s*(?:狼|人狼|者|相手))|襲う|共同襲撃|player-\d+\s*(?:さん)?\s*(?:への|を)\s*襲撃で)", clause)
+                other_subject = attack and re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:は|が)", attack.group())
+                if attack and not other_subject and not re.search(r"(?:襲撃した|襲撃する|襲った)(?:の)?(?:では(?:ない|ありません)|とは言っていない)", clause[attack.start():]):
+                    claims.append(name)
+                    break
+        elif name == "狩人":
+            for clause in re.split(r"[。！？.!?]", text):
+                if re.search(r"なら|だったら|とすれば|仮に|もし", clause):
+                    continue
+                explicit = re.search(r"(?:私|僕|俺|自分)(?:は|が)[^。！？]*護衛(?:した|しました|します|する)", clause)
+                night = re.search(r"(?:^|(?:私|僕|俺|自分)(?:は|が))[^。！？]*(?:初夜|昨夜|今夜|本夜)[^。！？]*player-\d+[^。！？]*(?:護衛(?:した|しました|します)|守(?:った|りました|ります))", clause)
+                action = explicit or night
+                other_subject = action and re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:は|が)", action.group())
+                if action and not other_subject:
                     claims.append(name)
                     break
     return claims
@@ -54,9 +67,9 @@ def self_claims(player, text, role_names):
 
 def result_value(text):
     text = re.sub(r'[「」『』“”"]', "", text)
-    if re.search(r"人狼で(?:は)?(?:ない|ありません)|非人狼|白(?:です|でした|と|判定|確定)|人間(?:です|でした|と)|村人(?:です|でした|と)", text):
+    if re.search(r"(?:人狼|狼)で(?:は)?(?:ない|ありません)|非人狼|(?:清白|白)(?:です|でした|と|に|判定|確定)|人間(?:です|でした|と)|村人(?:です|でした|と)", text):
         return "not_wolf"
-    if re.search(r"人狼(?:です|でした|だった|と|だと|である|確定)|黒(?:です|でした|と|判定|確定)", text):
+    if re.search(r"(?:人狼|狼)(?:です|でした|だった|と|だと|である|確定)|黒(?:です|でした|と|判定|確定)", text):
         return "wolf"
     return None
 
@@ -87,9 +100,10 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
         if role:
             team_claim = bool(re.search(r"(?:私は|僕は|俺は|^|[。！？]\s*)(?:人狼|狼)陣営(?:です|に属|の一員)", unquoted(text, names)))
             true_role = role.name in claims
-            if true_role or (role.attributes.team == "wolf" and team_claim):
+            wolf_claim = role.attributes.team == "wolf" and (team_claim or any(r.name in claims for r in content_roles.values() if r.attributes.team == "wolf"))
+            if true_role or wolf_claim:
                 disclosures.append({**location, "role_id": role.id, "team": role.attributes.team, "day": day})
-            if role.attributes.team == "wolf" and (true_role or team_claim):
+            if wolf_claim:
                 candidates["Q1"].append(location)
             if role.attributes.team == "village" and any(name != role.name for name in claims):
                 candidates["Q3"].append({**location, "claimed_roles": sorted(set(claims)), "actual_role": role.name})
@@ -104,9 +118,13 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
             issues = []
             effects = {effect.id for ability in role.abilities for effect in ability.effects}
             own = [p for p in private_results if p["player_id"] == player and p["t"] <= row["t"]]
-            for clause in re.split(r"[。！？.!?\n]", unquoted(text, names)):
+            # Quoted atomic results are often the speaker's own report, not
+            # a quotation of another participant's whole utterance.
+            result_text = re.sub(r"[「『](人狼ではない|人狼|狼|白|黒)[」』]", r"\1", text)
+            for clause in re.split(r"[。！？.!?\n]", unquoted(result_text, names)):
                 can_initial = any(a.available_from_night == 0 for a in role.abilities)
-                other_actor = re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:が|は)[^。！？]*(?:占った|調べた|護衛した|守った|襲撃した)", clause)
+                actor_body = r"(?:(?!(?:私|僕|俺|自分)(?:は|が)|player-\d+\s*(?:さん)?\s*(?:は|が))[^。！？])*?"
+                other_actor = re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:が|は){actor_body}(?:占った|調べた|護衛した|守った|襲撃した)", clause)
                 attributed = re.search(r"(?:調べた|占った|護衛した|守った)(?:そう|らしい)|(?:と|という)(?:発言|説明|主張|報告)", clause)
                 hypothetical = re.search(r"もし|なら|場合|仮に|だったら|かもしれ", clause)
                 initial_action = re.search(r"初夜.*(?:占った|調べた|調べました|護衛した|守った|襲撃した|判定.*(?:出た|出ました)|(?:調査|占い)(?:で|の結果).*(?:確認した|確認しました|判定した|確定した|判明した))", clause)
@@ -143,9 +161,14 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                 question["answered"] = True
                 pairs.append({"question_row": question["row"], "question_line": question["line"], "answer_row": index,
                               "answer_line": location["line"], "target": player, "delay_sec": round(row["t"] - question["t"], 2)})
+        addressees = set()
         for clause in re.split(r"(?<=[。！？?])", text):
+            direct = set(re.findall(r"(player-\d+)(?:さん|君)?\s*[,、:]", normalize(clause)))
+            if direct:
+                addressees = direct
             if "？" in clause or "?" in clause:
-                for target in set(re.findall(r"player-\d+", clause)) - {player}:
+                subject = set(re.findall(r"(player-\d+)(?:さん|君)?\s*は\s*(?=どう|誰|何|なぜ|どの)", normalize(clause)))
+                for target in (direct or subject or addressees) - {player}:
                     questions.append({**location, "target": target})
         prior.append(location)
     total_discarded = sum(discards.values()) if discards is not None else None

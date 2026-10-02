@@ -61,6 +61,16 @@ class AgentStateTests(unittest.TestCase):
         self.assertNotIn("AUTH-SECRET", prompt)
         self.assertIn(state.teammates[0], prompt)
 
+    def test_public_only_body_prompt_omits_own_private_role_results_and_teammate_information(self):
+        game = make_game()
+        state = PlayerState("player-0", role_id="werewolf", players=[f"player-{i}" for i in range(9)],
+                            teammates=["player-1"], private=[{"type": "NOTE", "text": "PRIVATE-FACT-SENTINEL"}])
+        prompt = json.dumps(messages(state, game.content.roles, {}, "発言してください。", include_private=False), ensure_ascii=False)
+        self.assertNotIn("PRIVATE-FACT-SENTINEL", prompt)
+        self.assertNotIn("あなたの非公開の役職", prompt)
+        self.assertNotIn("あなたが知っている仲間", prompt)
+        self.assertNotIn(game.content.roles["werewolf"].description, prompt)
+
     def test_repetition_filter_blocks_immediate_and_third_sentences(self):
         repetition = RepetitionFilter()
         self.assertTrue(repetition.allows("p1", "One question?", []))
@@ -101,6 +111,24 @@ class AgentStateTests(unittest.TestCase):
 
 
 class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_hidden_role_body_uses_public_context_while_full_brief_decision_is_saved(self):
+        game = make_game()
+        agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
+                      FakeLLM(), RepetitionFilter(), lambda *_: None, seed=1)
+        agent.state.role_id, agent.state.day, agent.state.phase = "werewolf", 1, "day"
+        agent.state.alive = {f"player-{i}" for i in range(9)}
+        agent.state.phase_ends_at = int(time.monotonic()) + 20
+        plan = {"facts": ["私は人狼", "player-1は仲間"], "aim": "人狼として襲撃を隠す", "reason": "仲間を守って勝つ"}
+        agent.generate = AsyncMock(side_effect=[json.dumps(plan, ensure_ascii=False), "player-2さん、根拠を教えてください。"])
+        await agent.generate_speech("発言してください。", "chat", 160)
+        body_call = agent.generate.call_args_list[1]
+        self.assertTrue(body_call.kwargs["public_only"])
+        self.assertNotIn("私は人狼", body_call.args[0])
+        self.assertNotIn("player-1は仲間", body_call.args[0])
+        self.assertNotIn("仲間を守って勝つ", body_call.args[0])
+        self.assertEqual(agent.decisions[-1]["decision"], plan)
+        self.assertEqual(agent.decisions[-1]["body_context"], "public_only")
+
     async def test_intro_is_removed_without_retry_and_expired_chat_never_regenerates(self):
         game = make_game()
         agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
