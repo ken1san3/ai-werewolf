@@ -210,6 +210,7 @@ class Role:
     abilities: tuple[Ability, ...]
     passives: tuple[Passive, ...]
     options: Mapping[str, RoleOption]
+    description: str = ""
 
     @property
     def knows_teammates(self) -> bool:

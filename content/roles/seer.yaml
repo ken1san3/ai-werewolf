@@ -1,4 +1,5 @@
 id: seer
+description: "Seer. Each night you inspect one player and learn whether they are a werewolf. On Night 0 you receive a free server-selected non-wolf result. Find the werewolves and help the village win."
 name: 占い師
 claimable: true
 team: village

@@ -444,7 +444,7 @@ def _parse_role(
             "passives",
             "options",
         },
-        optional={"count_as", "inspect_result", "medium_result"},
+        optional={"count_as", "inspect_result", "medium_result", "description"},
         path=path,
     )
     team_id = _team_id(mapping["team"], f"{path}.team", teams)
@@ -489,6 +489,10 @@ def _parse_role(
         abilities=abilities,
         passives=passives,
         options=_parse_options(mapping["options"], f"{path}.options"),
+        description=(
+            _non_empty_string(mapping["description"], f"{path}.description")
+            if "description" in mapping else ""
+        ),
     )
 
 

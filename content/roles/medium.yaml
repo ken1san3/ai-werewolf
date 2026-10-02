@@ -1,4 +1,5 @@
 id: medium
+description: "Medium. At night you examine an eligible unexamined dead player and learn whether they were a werewolf. You cannot inspect living players. Help the village find the remaining werewolves."
 name: 霊能者
 claimable: true
 team: village

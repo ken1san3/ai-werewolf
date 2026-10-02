@@ -1,4 +1,5 @@
 id: greedy_werewolf
+description: "Greedy werewolf. You belong to the werewolf side, know the other core werewolves and have the attack abilities shown by the server. Your special double attack is limited. Conceal your allegiance; lies and fake role claims are allowed."
 name: 強欲な人狼
 claimable: true
 team: wolf

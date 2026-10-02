@@ -1,4 +1,5 @@
 id: guard
+description: "Guard. At night you protect one eligible player from a werewolf attack. Use only the server's available targets. Help the village win."
 name: 狩人
 claimable: true
 team: village

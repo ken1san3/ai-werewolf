@@ -1,4 +1,5 @@
 id: baker
+description: "Baker. You belong to the village and have no night choice. The server announces bread while a baker is alive. Find the werewolves and help the village win."
 name: パン屋
 claimable: true
 team: village

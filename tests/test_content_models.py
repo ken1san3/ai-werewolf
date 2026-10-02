@@ -96,6 +96,12 @@ class ContentLoadingTests(unittest.TestCase):
             with self.subTest(tags=tags), self.assertRaisesRegex(ContentValidationError, "teammate_tags"):
                 _parse_team({**data, "teammate_tags": tags}, "team")
 
+    def test_role_descriptions_are_loaded_from_content(self) -> None:
+        self.assertTrue(all(role.description for role in self.content.roles.values()))
+        role = self.content.roles["seer"]
+        data = yaml.safe_load((CONTENT_ROOT / "roles" / "seer.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(role.description, data["description"])
+
     def test_all_thirteen_roles_are_loaded_from_yaml(self) -> None:
         self.assertEqual(
             set(self.content.roles),

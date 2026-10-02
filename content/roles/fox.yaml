@@ -1,4 +1,5 @@
 id: fox
+description: "Fox. You belong to the fox side and win by surviving when another side meets its victory condition. You resist werewolf attacks but die when inspected. Known fellow foxes are notified by the server."
 name: 妖狐
 claimable: true
 team: fox

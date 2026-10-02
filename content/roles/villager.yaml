@@ -1,4 +1,5 @@
 id: villager
+description: "Villager. You have no special ability. Find the werewolves and vote to execute them so the village wins."
 name: 市民
 claimable: false
 team: village

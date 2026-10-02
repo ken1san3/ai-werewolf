@@ -1,4 +1,5 @@
 id: nekomata
+description: "Nekomata. You belong to the village. When you die, your retaliation may kill another player according to the server rules. Find the werewolves and help the village win."
 name: 猫又
 claimable: true
 team: village

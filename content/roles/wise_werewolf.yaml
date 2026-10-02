@@ -1,4 +1,5 @@
 id: wise_werewolf
+description: "Wise werewolf. You belong to the werewolf side and know the other core werewolves. Your attack also reveals the victim's role privately, and you resist attacks. Conceal your allegiance; lies and fake role claims are allowed."
 name: 賢狼
 claimable: true
 team: wolf

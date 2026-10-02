@@ -27,7 +27,7 @@
 - [x] S1-1 サーバ: 仲間の通知。`knows_teammates` の役職（人狼、狂信者、囁く狂人など）に、ゲーム開始時に仲間のIDを非公開で送る。
   誰を仲間とするかは content（YAML）にデータで宣言し（例: 陣営に「中心メンバーのタグ」を持たせる）、サーバのコードに役職名・タグ名を書かない。
   再接続時の状態同期にも含める。プロトコルの schema とテストを更新する。
-- [ ] S1-2 AIエージェント: 試作 `Docs/analysis/2026-10-02/spike/spike_live_v2_improved_prompt.py` を `ai_agent/` に分割する
+- [x] S1-2 AIエージェント: 試作 `Docs/analysis/2026-10-02/spike/spike_live_v2_improved_prompt.py` を `ai_agent/` に分割する
   （通信、状態、プロンプト、LLM呼び出し、発言タイミング、反復フィルタ）。人狼の相方は S1-1 の通知から得る。
   役職の説明文はデータ（YAML）に置く。偽のLLMで1ゲームを短時間で完走させるテストを付ける。
 - [ ] S1-3 起動と記録: `python -m ai_agent.play --seed N`（時間設定は引数で変えられる）で、

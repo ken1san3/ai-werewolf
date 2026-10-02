@@ -1,4 +1,5 @@
 id: madman
+description: "Madman. You are human but want the werewolves to win. You do not know their identities and inspection shows you as non-wolf. Conceal your allegiance; lies and fake role claims are allowed."
 name: 狂人
 claimable: true
 team: wolf
