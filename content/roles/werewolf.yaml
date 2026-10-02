@@ -1,5 +1,5 @@
 id: werewolf
-description: "Werewolf. Coordinate with your known fellow werewolves and secretly attack one eligible player each night. Your side wins when werewolves equal or outnumber the village count. Help the werewolf side win; conceal your allegiance. Lies and fake role claims are allowed."
+description: "人狼。通知された人狼の仲間と連携し、毎晩選択可能な相手を一人、秘密裏に襲撃します。人数計算上、人狼が市民以上になると人狼陣営が勝利します。所属を隠して、人狼陣営の勝利を目指してください。嘘や役職の騙りは許されています。"
 name: 人狼
 claimable: true
 team: wolf

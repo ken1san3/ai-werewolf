@@ -1,5 +1,5 @@
 id: guard
-description: "Guard. At night you protect one eligible player from a werewolf attack. Use only the server's available targets. Help the village win."
+description: "狩人。夜に選択可能な相手を一人選び、人狼の襲撃から守ります。サーバが示す対象から選んでください。市民陣営の勝利を目指してください。"
 name: 狩人
 claimable: true
 team: village

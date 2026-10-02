@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from random import Random
+import sys
 from uuid import uuid4
 
 from server.aiwolf_core import EventVisibility, GameState, InMemoryEventSink, PlayerConfig, load_content, load_preset
@@ -38,7 +39,7 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
                                           night_seconds=night, silence_after_dawn_seconds=0 if timing_scale < 1 else preset.rules.silence_after_dawn_seconds))
     players = [PlayerConfig(f"player-{i}", f"player-{i}") for i in range(sum(preset.role_counts.values()))]
     game_id = str(uuid4())
-    recorder = Recorder(c.id for c in content.chat_channels.values() if c.is_public)
+    recorder = Recorder((c.id for c in content.chat_channels.values() if c.is_public), progress=progress)
     game = GameState.create_from_preset(content, preset, players, game_id=game_id,
                                        event_sink=InMemoryEventSink(), rng=Random(seed), started_at=monotonic_seconds())
     for event in game.event_bus.events:
@@ -78,12 +79,17 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
         if owned_llm:
             await llm.close()
     checks = recorder.checks(game, agents, errors, getattr(llm, "calls", []))
+    checks["settings"] = {"seed": seed, "day_seconds": day, "vote_seconds": vote,
+                          "night_seconds": night, "silence_after_dawn_seconds": preset.rules.silence_after_dawn_seconds}
     if output is not None:
         recorder.save(output, checks)
     return GameRun(checks, agents, recorder)
 
 
 def main():
+    # Windows redirected output may otherwise default to CP932 and terminate
+    # the observing player when a generated Japanese message contains variants.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--day", type=int, default=180)
@@ -95,7 +101,15 @@ def main():
     result = asyncio.run(run_game(seed=args.seed, day=args.day, vote=args.vote, night=args.night,
                                  output=output, progress=True))
     print("output", output.resolve(), flush=True)
-    print({k: v for k, v in result.checks.items() if k != "llm_calls"}, flush=True)
+    print({k: v for k, v in result.checks.items() if k in {
+        "completed", "winner", "outcome", "players", "finished_agents", "server_rejections",
+        "crashes", "public_messages", "generation_sec", "wait_sec", "wall_sec",
+    }}, flush=True)
+    print({k: len(result.checks[k]) for k in {
+        "immediate_repetitions", "immediate_sentence_repetitions", "sentences_repeated_three_times",
+        "private_channel_body_matches", "authentication_token_leaks", "other_private_result_literal_matches",
+        "own_result_disclosure_candidates", "wolf_side_self_disclosure_candidates", "dead_player_address_candidates",
+    }}, flush=True)
     if not result.checks["completed"] or result.checks["crashes"] or result.checks["server_rejections"]:
         raise SystemExit(1)
 

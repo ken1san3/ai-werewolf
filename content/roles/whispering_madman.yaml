@@ -1,5 +1,5 @@
 id: whispering_madman
-description: "Whispering madman. You are human but want the werewolves to win. You know the core werewolves and can join their private channel. Inspection shows you as non-wolf. Conceal your allegiance; lies and fake role claims are allowed."
+description: "囁く狂人。人間ですが、人狼陣営の勝利を目指します。人狼の仲間を知り、人狼の秘密チャットに参加できます。占い結果は人狼ではないと出ます。所属を隠してください。嘘や役職の騙りは許されています。"
 name: 囁く狂人
 claimable: true
 team: wolf

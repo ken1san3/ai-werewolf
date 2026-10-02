@@ -1,24 +1,29 @@
-"""Minimal public transcript and completion checks for agent development runs."""
+"""Public protocol transcript, private comparisons and mechanical checks."""
 from collections import Counter
 import json
 from pathlib import Path
 import time
 
-from .repetition import normalize, sentences
+from .checks import redact, text_checks, timing_summary
 from .state import PRIVATE_RESULTS
 
 
 class Recorder:
-    def __init__(self, public_channels):
+    def __init__(self, public_channels, public_viewer="player-0", progress=False):
         self.public_channels = set(public_channels)
         self.started = time.monotonic()
+        self.public_viewer, self.progress = public_viewer, progress
+        self.public_types = set()
         self.rows, self.rejections = [], []
         self.private_messages, self.private_results, self.tokens = [], [], set()
         self._viewer_counts, self._recorded_counts = Counter(), Counter()
 
     def core_event(self, event):
-        self.rows.append({"t": round(time.monotonic() - self.started, 2),
-                          "kind": event.type, "payload": dict(event.payload)})
+        self.public_types.add(event.type)
+        # GAME_CREATED precedes player assignment and is absent from client
+        # histories. All subsequent public rows follow the observer's seq order.
+        if event.type == "GAME_CREATED":
+            self.rows.append({"t": 0, "kind": event.type, "payload": dict(event.payload)})
 
     def observe(self, viewer, message):
         kind, payload = message["type"], message["payload"]
@@ -37,7 +42,17 @@ class Recorder:
             return
         if kind == "game.event":
             if payload["event_type"] in PRIVATE_RESULTS:
-                self.private_results.append({"player_id": viewer, **payload})
+                self.private_results.append({"t": round(time.monotonic() - self.started, 2),
+                                             "player_id": viewer, **payload})
+            elif viewer == self.public_viewer and payload["event_type"] in self.public_types:
+                self.rows.append({"t": round(time.monotonic() - self.started, 2),
+                                  "kind": payload["event_type"], "payload": payload["event_payload"]})
+            return
+        if payload["channel"] in self.public_channels:
+            if viewer == self.public_viewer:
+                self.rows.append({"t": round(time.monotonic() - self.started, 2), "kind": "chat", **payload})
+                if self.progress:
+                    print(redact(f"CHAT {payload['message']['player_id']}: {payload['message']['message']}", self.tokens), flush=True)
             return
         # Per-viewer occurrence counts preserve real repeated messages while
         # merging copies delivered to multiple recipients.
@@ -48,46 +63,43 @@ class Recorder:
             return
         self._recorded_counts[signature] = self._viewer_counts[key]
         row = {"t": round(time.monotonic() - self.started, 2), "kind": "chat", **payload}
-        if payload["channel"] in self.public_channels:
-            self.rows.append(row)
-        else:
-            self.private_messages.append(row)
+        self.private_messages.append(row)
 
     def checks(self, game, agents, errors, calls):
-        counts, previous, immediate = Counter(), {}, []
-        for row in self.rows:
-            if row["kind"] == "chat":
-                player, text = row["message"]["player_id"], row["message"]["message"]
-            elif row["kind"] == "CO_DECLARED":
-                player, text = row["payload"]["player_id"], row["payload"]["comment"]
-            else:
-                continue
-            normalized = normalize(text)
-            if previous.get(player) == normalized:
-                immediate.append({"player_id": player, "text": text})
-            previous[player] = normalized
-            counts.update(sentences(text))
-        repeated = [{"text": text, "count": count} for text, count in counts.items() if count >= 3]
+        text_result = text_checks(self.rows, self.private_messages, self.private_results, self.tokens,
+                                  {p.player_id: p.role for p in game.players.values()})
+        # Timings contain no prompts or model-private information, even when a
+        # test LLM keeps richer debug records in its own calls collection.
+        safe_calls = [{key: call[key] for key in ("player_id", "purpose", "total_sec", "generation_sec",
+                      "wait_sec", "prompt_tokens", "completion_tokens") if key in call} for call in calls]
         return {
             "completed": game.game_result is not None and all(a.state.done for a in agents),
             "winner": game.game_result.winner_team if game.game_result else None,
+            "outcome": game.game_result.outcome if game.game_result else None,
             "players": len(agents), "finished_agents": sum(a.state.done for a in agents),
             "server_rejections": len(self.rejections), "rejections": self.rejections,
             "crashes": len(errors), "errors": errors,
-            "immediate_repetitions": immediate, "sentences_repeated_three_times": repeated,
+            **text_result,
+            "public_messages": sum(row["kind"] == "chat" for row in self.rows),
+            "private_messages_compared": len(self.private_messages),
+            "private_results_compared": len(self.private_results),
+            "authentication_tokens_compared": len(self.tokens),
             "stale_generations_suppressed": sum(a.stale_suppressed for a in agents),
-            "llm_calls": calls, "wall_sec": round(time.monotonic() - self.started, 2),
+            "llm_calls": safe_calls,
+            "generation_sec": timing_summary(safe_calls, "generation_sec"),
+            "wait_sec": timing_summary(safe_calls, "wait_sec"),
+            "wall_sec": round(time.monotonic() - self.started, 2),
         }
 
     def save(self, directory, checks):
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=False)
-        lines = ["# Game transcript", "", "Only public server facts and public speech are included.", ""]
+        lines = ["# ゲームの書き起こし", "公開されたサーバの事実と発言だけを記録しています。"]
         for row in self.rows:
             if row["kind"] == "chat":
                 text = f"{row['message']['player_id']}: {row['message']['message']}"
             else:
                 text = f"{row['kind']}: {json.dumps(row['payload'], ensure_ascii=False)}"
-            lines.append(f"[{row['t']:.2f}s] {text}")
+            lines.append(redact(f"[{row['t']:.2f}s] {text}", self.tokens))
         (directory / "transcript.md").write_text("\n\n".join(lines) + "\n", encoding="utf-8")
         (directory / "checks.json").write_text(json.dumps(checks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

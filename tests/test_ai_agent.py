@@ -5,11 +5,11 @@ import json
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from ai_agent.agent import Agent
 from ai_agent.play import run_game
-from ai_agent.prompts import messages
+from ai_agent.prompts import japanese_message, messages, recent_json
 from ai_agent.repetition import RepetitionFilter
 from ai_agent.state import PlayerState
 from tests.test_network_sessions import make_game
@@ -28,7 +28,7 @@ class FakeLLM:
         if schema:
             return json.dumps({"target": schema["properties"]["target"]["enum"][0]})
         self.count += 1
-        return f"{player_id} asks about evidence item {self.count}: which claim has support?"
+        return f"{player_id}からの質問です。根拠{self.count}について、どの主張を裏付けていますか？"
 
 
 class AgentStateTests(unittest.TestCase):
@@ -68,8 +68,68 @@ class AgentStateTests(unittest.TestCase):
         self.assertFalse(repetition.allows("p3", "One question?", []))
         self.assertFalse(RepetitionFilter().allows("p1", "Why now? Why now? Why now?", []))
 
+    def test_prompt_uses_japanese_instructions_and_content_role_names(self):
+        game = make_game()
+        state = PlayerState("player-0")
+        state.receive({"type": "game.state_sync", "payload": game.get_state_sync("player-0")})
+        prompt = messages(state, game.content.roles, {"seer": 1}, "日本語で発言してください。")
+        system = prompt[0]["content"]
+        self.assertIn("必ず日本語", system)
+        self.assertIn('"占い師": 1', system)
+        self.assertIn(game.content.roles[state.role_id].name, system)
+        self.assertNotIn("English message", system)
+        self.assertTrue(all(japanese_message(role.description) for role in game.content.roles.values()))
+
+    def test_english_conversation_is_not_accepted_as_japanese_speech(self):
+        self.assertTrue(japanese_message("player-2さん、占い師COの根拠を教えてください。"))
+        self.assertTrue(japanese_message("占い師CO。player-2白。"))
+        self.assertFalse(japanese_message("Player-2, what supports your claim?"))
+        self.assertFalse(japanese_message("I am the Seer. 占い師です。"))
+        self.assertFalse(japanese_message("I agree. 同意です。"))
+
+    def test_long_japanese_history_keeps_newest_complete_entries_within_budget(self):
+        history = [{"player_id": f"player-{i % 9}", "message": f"発言{i}:" + "議論の根拠を確認します。" * 35} for i in range(40)]
+        encoded = recent_json(history, 3500)
+        self.assertLessEqual(len(encoded), 3500)
+        included = json.loads(encoded)
+        self.assertTrue(included)
+        self.assertEqual(included[-1], history[-1])
+        self.assertNotIn(history[0], included)
+
 
 class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_retries_english_without_sending_it(self):
+        game = make_game()
+        agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
+                      FakeLLM(), RepetitionFilter(), lambda *_: None, seed=1)
+        agent.state.receive({"type": "game.state_sync", "payload": game.get_state_sync("player-0")})
+        agent.state.phase, agent.state.day = "day", 1
+        agent.state.phase_ends_at = int(time.monotonic()) + 20
+        agent.state.actions = [{"type": "chat", "channel": "public"}]
+        agent.ws = AsyncMock()
+        agent.generate = AsyncMock(side_effect=["I agree. 同意です。", "player-2さん、投票理由を教えてください。"])
+        with patch("ai_agent.agent.speech_pause", new_callable=AsyncMock):
+            await agent.step()
+        sent = json.loads(agent.ws.send.call_args.args[0])
+        agent.ws.send.assert_called_once()
+        self.assertEqual(sent["payload"]["message"], "player-2さん、投票理由を教えてください。")
+
+    async def test_english_co_comment_is_not_sent(self):
+        game = make_game()
+        agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
+                      FakeLLM(), RepetitionFilter(), lambda *_: None, seed=1)
+        agent.state.receive({"type": "game.state_sync", "payload": game.get_state_sync("player-0")})
+        agent.state.phase, agent.state.day = "day", 1
+        agent.state.phase_ends_at = int(time.monotonic()) + 20
+        agent.state.actions = [{"type": "chat", "channel": "public"},
+                               {"type": "co_declare", "claimed_role_ids": ["seer"]}]
+        agent.spoke[(1, "public")] = 1
+        agent.ws = AsyncMock()
+        agent.choose = AsyncMock(return_value="seer")
+        agent.generate = AsyncMock(return_value="I am the Seer. 占い師です。")
+        await agent.step()
+        agent.ws.send.assert_not_called()
+
     async def test_phase_start_waits_for_new_actions_instead_of_sending_a_previous_vote(self):
         game = make_game()
         llm = FakeLLM()

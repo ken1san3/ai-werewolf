@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from websockets.asyncio.client import connect
 
-from .prompts import messages
+from .prompts import japanese_message, messages
 from .state import PlayerState
 from .timing import fresh, speech_pause
 
@@ -75,7 +75,7 @@ class Agent:
     async def choose(self, question, candidates, purpose):
         schema = {"type": "object", "additionalProperties": False, "required": ["target"],
                   "properties": {"target": {"type": "string", "enum": candidates}}}
-        text = await self.generate(question, purpose, schema, 40)
+        text = await self.generate(question + ' 候補のIDを選び、{"target":"選んだID"}のJSONだけを返してください。', purpose, schema, 40)
         try:
             choice = json.loads(text)["target"]
         except (ValueError, KeyError, TypeError):
@@ -118,8 +118,8 @@ class Agent:
                 return
             chosen = []
             for _ in range(count):
-                question = "Who should be executed by today's vote?" if vote else (
-                    f"Choose a target for your available ability {action['ability_id']}: {action.get('description', '')}"
+                question = "今日の投票で誰を処刑しますか？" if vote else (
+                    f"使用可能な能力（ID: {action['ability_id']}）の対象を選んでください。{action.get('description', '')}"
                 )
                 target = await self.choose(question, candidates, "vote" if vote else "ability")
                 chosen.append(target)
@@ -140,11 +140,11 @@ class Agent:
         if co and state.day not in self.co_decided and spoken:
             self.co_decided.add(state.day)
             candidates = ["none", *co["claimed_role_ids"]]
-            choice = await self.choose("Make a formal role claim now, or choose none to stay quiet.", candidates, "co")
+            choice = await self.choose("役職を正式にCOするなら役職IDを、今はCOしないならnoneを選んでください。", candidates, "co")
             if choice != "none" and fresh(state, key):
-                comment = (await self.generate(f"Write the short comment for your formal claim as {choice}.", "co_comment", max_tokens=80))[:200]
+                comment = (await self.generate(f"{self.roles[choice].name}として正式にCOする短いコメントを日本語で書いてください。", "co_comment", max_tokens=160))[:200]
                 recent = [c["message"] for c in state.chats if c["channel"] == "public"]
-                if self.repetition.allows(state.player_id, comment, recent) and fresh(state, key):
+                if japanese_message(comment) and self.repetition.allows(state.player_id, comment, recent) and fresh(state, key):
                     self.repetition.reserve(state.player_id, comment)
                     if await self.send("co.declare", {"claimed_role_id": choice, "comment": comment}, key):
                         self.spoke[spoke_key] = spoken + 1
@@ -153,9 +153,9 @@ class Agent:
         if not fresh(state, key):
             return
         for _ in range(3):
-            text = (await self.generate(f"Your next public chat message as {state.player_id}:", "chat")).strip().strip('"')[:400]
+            text = (await self.generate(f"{state.player_id}として次の公開チャットの発言を日本語で書いてください。", "chat", max_tokens=320)).strip().strip('"')[:400]
             recent = [c["message"] for c in state.chats if c["channel"] == "public"]
-            if self.repetition.allows(state.player_id, text, recent) and fresh(state, key):
+            if japanese_message(text) and self.repetition.allows(state.player_id, text, recent) and fresh(state, key):
                 self.repetition.reserve(state.player_id, text)
                 if await self.send("chat.send", {"channel_id": "public", "message": text}, key):
                     self.spoke[spoke_key] = spoken + 1

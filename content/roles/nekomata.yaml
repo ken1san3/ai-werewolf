@@ -1,5 +1,5 @@
 id: nekomata
-description: "Nekomata. You belong to the village. When you die, your retaliation may kill another player according to the server rules. Find the werewolves and help the village win."
+description: "猫又。市民陣営に属します。死亡すると、サーバのルールに従い他の参加者を道連れにすることがあります。人狼を見つけ、市民陣営の勝利を目指してください。"
 name: 猫又
 claimable: true
 team: village

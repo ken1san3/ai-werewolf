@@ -1,5 +1,5 @@
 id: baker
-description: "Baker. You belong to the village and have no night choice. The server announces bread while a baker is alive. Find the werewolves and help the village win."
+description: "パン屋。市民陣営で、夜に対象を選ぶ能力はありません。パン屋が生きている間はサーバがパンの配布を知らせます。人狼を見つけ、市民陣営の勝利を目指してください。"
 name: パン屋
 claimable: true
 team: village
