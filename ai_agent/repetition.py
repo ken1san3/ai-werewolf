@@ -32,14 +32,20 @@ class RepetitionFilter:
         self.last = {}
         self.counts = Counter()
 
-    def allows(self, player_id, text, recent):
+    def rejection_reason(self, player_id, text, recent):
         parts = sentences(text)
         additions = Counter(parts)
         previous_parts = set(sentences(self.last.get(player_id, "")))
-        return bool(text.strip()) and not previous_parts.intersection(parts) and (
-            all(self.counts[s] + count <= 2 for s, count in additions.items())
-            and not any(similarity(text, previous) > SIMILARITY_THRESHOLD for previous in recent[-15:])
-        )
+        if previous_parts.intersection(parts):
+            return "own_previous_sentence"
+        if any(self.counts[s] + count > 2 for s, count in additions.items()):
+            return "third_sentence"
+        if any(similarity(text, previous) > SIMILARITY_THRESHOLD for previous in recent[-15:]):
+            return "similarity"
+        return None
+
+    def allows(self, player_id, text, recent):
+        return bool(text.strip()) and self.rejection_reason(player_id, text, recent) is None
 
     def reserve(self, player_id, text):
         # Reserve before sending so concurrent players cannot all send the third copy.

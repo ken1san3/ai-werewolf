@@ -1,5 +1,6 @@
 """WebSocket player; never receives the orchestrator's game state or role table."""
 import asyncio
+from collections import Counter
 from contextlib import suppress
 import json
 from random import Random
@@ -8,7 +9,7 @@ from uuid import uuid4
 
 from websockets.asyncio.client import connect
 
-from .prompts import japanese_message, messages
+from .prompts import japanese_message, messages, strip_introduction
 from .state import PlayerState
 from .timing import fresh, speech_pause
 
@@ -29,6 +30,8 @@ class Agent:
         self.mentioned, self.changed = asyncio.Event(), asyncio.Event()
         self.acted, self.co_decided, self.spoke = set(), set(), {}
         self.stale_suppressed = 0
+        self.speech_generations = 0
+        self.speech_discards = Counter()
 
     async def run(self):
         async with connect(self.uri, max_size=2**22) as self.ws:
@@ -71,6 +74,42 @@ class Agent:
             player_id=self.state.player_id, purpose=purpose,
             seed=self.rng.randrange(1, 10**9), schema=schema, max_tokens=max_tokens,
         ), timeout)
+
+    async def generate_speech(self, question, purpose, max_tokens):
+        self.speech_generations += 1
+        try:
+            return await self.generate(question, purpose, max_tokens=max_tokens)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            self.speech_discards["phase_expired"] += 1
+            raise
+
+    def speech_rejection(self, text, key):
+        if not fresh(self.state, key):
+            return "phase_expired"
+        if not japanese_message(text):
+            return "japanese_check"
+        recent = [c["message"] for c in self.state.chats if c["channel"] == "public"]
+        return self.repetition.rejection_reason(self.state.player_id, text, recent)
+
+    async def speak(self, question, purpose, key, kind, payload, field, max_tokens):
+        for _ in range(3):
+            if not fresh(self.state, key):
+                return False
+            generated = await self.generate_speech(question, purpose, max_tokens)
+            text = strip_introduction(generated, self.state.player_id)[:200 if field == "comment" else 400]
+            reason = self.speech_rejection(text, key)
+            if reason:
+                self.speech_discards[reason] += 1
+                if reason == "phase_expired":
+                    self.stale_suppressed += 1
+                    return False
+                continue
+            self.repetition.reserve(self.state.player_id, text)
+            if await self.send(kind, {**payload, field: text}, key):
+                return True
+            self.speech_discards["phase_expired"] += 1
+            return False
+        return False
 
     async def choose(self, question, candidates, purpose):
         schema = {"type": "object", "additionalProperties": False, "required": ["target"],
@@ -142,21 +181,13 @@ class Agent:
             candidates = ["none", *co["claimed_role_ids"]]
             choice = await self.choose("役職を正式にCOするなら役職IDを、今はCOしないならnoneを選んでください。", candidates, "co")
             if choice != "none" and fresh(state, key):
-                comment = (await self.generate(f"{self.roles[choice].name}として正式にCOする短いコメントを日本語で書いてください。", "co_comment", max_tokens=160))[:200]
-                recent = [c["message"] for c in state.chats if c["channel"] == "public"]
-                if japanese_message(comment) and self.repetition.allows(state.player_id, comment, recent) and fresh(state, key):
-                    self.repetition.reserve(state.player_id, comment)
-                    if await self.send("co.declare", {"claimed_role_id": choice, "comment": comment}, key):
-                        self.spoke[spoke_key] = spoken + 1
+                if await self.speak(f"{self.roles[choice].name}を正式にCOする短いコメントを日本語で書いてください。", "co_comment", key,
+                                    "co.declare", {"claimed_role_id": choice}, "comment", 160):
+                    self.spoke[spoke_key] = spoken + 1
             return
         await speech_pause(self.mentioned, self.rng, not spoken, self.timing_scale)
         if not fresh(state, key):
             return
-        for _ in range(3):
-            text = (await self.generate(f"{state.player_id}として次の公開チャットの発言を日本語で書いてください。", "chat", max_tokens=320)).strip().strip('"')[:400]
-            recent = [c["message"] for c in state.chats if c["channel"] == "public"]
-            if japanese_message(text) and self.repetition.allows(state.player_id, text, recent) and fresh(state, key):
-                self.repetition.reserve(state.player_id, text)
-                if await self.send("chat.send", {"channel_id": "public", "message": text}, key):
-                    self.spoke[spoke_key] = spoken + 1
-                return
+        if await self.speak("次の公開チャットの発言を日本語で書いてください。", "chat", key,
+                            "chat.send", {"channel_id": "public"}, "message", 320):
+            self.spoke[spoke_key] = spoken + 1

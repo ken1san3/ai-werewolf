@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 
 from .checks import redact, text_checks, timing_summary
+from .metrics import measure, mechanical_conditions
 from .state import PRIVATE_RESULTS
 
 
@@ -66,13 +67,23 @@ class Recorder:
         self.private_messages.append(row)
 
     def checks(self, game, agents, errors, calls):
+        roles = {p.player_id: p.role for p in game.players.values()}
         text_result = text_checks(self.rows, self.private_messages, self.private_results, self.tokens,
-                                  {p.player_id: p.role for p in game.players.values()})
+                                  roles)
         # Timings contain no prompts or model-private information, even when a
         # test LLM keeps richer debug records in its own calls collection.
         safe_calls = [{key: call[key] for key in ("player_id", "purpose", "total_sec", "generation_sec",
-                      "wait_sec", "prompt_tokens", "completion_tokens") if key in call} for call in calls]
-        return {
+                      "wait_sec", "prompt_tokens", "completion_tokens", "http_status", "http_error", "completed") if key in call} for call in calls]
+        discards = Counter()
+        for agent in agents:
+            discards.update(agent.speech_discards)
+        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired"):
+            discards.setdefault(reason, 0)
+        measurements = measure(self.rows, self.private_results, roles, game.content.roles, game.rules, safe_calls,
+                               generated=sum(a.speech_generations for a in agents), discards=dict(discards))
+        self.server_record = redact({"rows": self.rows, "roles": {p: r.id for p, r in roles.items()},
+                                     "private_results": self.private_results, "private_messages": self.private_messages}, self.tokens)
+        checks = {
             "completed": game.game_result is not None and all(a.state.done for a in agents),
             "winner": game.game_result.winner_team if game.game_result else None,
             "outcome": game.game_result.outcome if game.game_result else None,
@@ -80,16 +91,22 @@ class Recorder:
             "server_rejections": len(self.rejections), "rejections": self.rejections,
             "crashes": len(errors), "errors": errors,
             **text_result,
+            **redact(measurements, self.tokens),
+            "strategic_disclosure_review": {"status": "pending", "leaks": None,
+                                            "note": "Codex reviews context and strategy; uncertain cases go to the user."},
             "public_messages": sum(row["kind"] == "chat" for row in self.rows),
             "private_messages_compared": len(self.private_messages),
             "private_results_compared": len(self.private_results),
             "authentication_tokens_compared": len(self.tokens),
             "stale_generations_suppressed": sum(a.stale_suppressed for a in agents),
             "llm_calls": safe_calls,
-            "generation_sec": timing_summary(safe_calls, "generation_sec"),
+            "llm_http_errors": sum(bool(c.get("http_error")) or (c.get("http_status") is not None and c["http_status"] >= 400) for c in safe_calls),
+            "generation_sec": timing_summary([c for c in safe_calls if c.get("completed", True)], "generation_sec"),
             "wait_sec": timing_summary(safe_calls, "wait_sec"),
             "wall_sec": round(time.monotonic() - self.started, 2),
         }
+        checks["mechanical_conditions"] = mechanical_conditions(checks)
+        return checks
 
     def save(self, directory, checks):
         directory = Path(directory)
@@ -103,3 +120,5 @@ class Recorder:
             lines.append(redact(f"[{row['t']:.2f}s] {text}", self.tokens))
         (directory / "transcript.md").write_text("\n\n".join(lines) + "\n", encoding="utf-8")
         (directory / "checks.json").write_text(json.dumps(checks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if hasattr(self, "server_record"):
+            (directory / "server_record.json").write_text(json.dumps(self.server_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

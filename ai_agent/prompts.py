@@ -1,6 +1,17 @@
 """Build prompts from public content and one player's received state."""
 import json
 import re
+import unicodedata
+
+
+def strip_introduction(text, player_id):
+    """Remove only leading self-ID sentences, preserving a role claim or argument."""
+    text = unicodedata.normalize("NFKC", text).strip().strip('"')
+    greeting = r"(?:(?:初めまして|はじめまして|こんにちは|こんばんは|おはようございます)[、,。.!！\s]*)?"
+    pattern = rf"^{greeting}(?:(?:私は|僕は|俺は)\s*)?{re.escape(player_id)}\s*(?:です|だ|と申します)[。.!！]\s*"
+    while re.match(pattern, text, re.I):
+        text = re.sub(pattern, "", text, count=1, flags=re.I)
+    return text
 
 
 def japanese_message(text):

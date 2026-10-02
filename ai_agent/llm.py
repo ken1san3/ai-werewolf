@@ -26,20 +26,28 @@ class SharedLLM:
                 body["response_format"] = {"type": "json_schema", "json_schema": {
                     "name": "choice", "strict": True, "schema": schema,
                 }}
-            response = await self.client.post(self.url, json=body)
-            response.raise_for_status()
-            result = response.json()
-            elapsed = time.monotonic() - started
-            timing = result.get("timings") or {}
-            generation = (timing.get("prompt_ms", 0) + timing.get("predicted_ms", 0)) / 1000
-            self.calls.append({
-                "player_id": player_id, "purpose": purpose,
-                "total_sec": time.monotonic() - queued,
-                "generation_sec": generation or elapsed,
-                "wait_sec": started - queued + max(elapsed - generation, 0) if generation else started - queued,
-                "prompt_tokens": (result.get("usage") or {}).get("prompt_tokens"),
-                "completion_tokens": (result.get("usage") or {}).get("completion_tokens"),
-            })
+            result, status, error = {}, None, None
+            try:
+                response = await self.client.post(self.url, json=body)
+                status = response.status_code
+                response.raise_for_status()
+                result = response.json()
+            except httpx.HTTPError as exception:
+                error = type(exception).__name__
+                raise
+            finally:
+                elapsed = time.monotonic() - started
+                timing = result.get("timings") or {}
+                generation = (timing.get("prompt_ms", 0) + timing.get("predicted_ms", 0)) / 1000
+                self.calls.append({
+                    "player_id": player_id, "purpose": purpose, "http_status": status,
+                    "http_error": error, "completed": bool(result),
+                    "total_sec": time.monotonic() - queued,
+                    "generation_sec": generation or elapsed,
+                    "wait_sec": started - queued + max(elapsed - generation, 0) if generation else started - queued,
+                    "prompt_tokens": (result.get("usage") or {}).get("prompt_tokens"),
+                    "completion_tokens": (result.get("usage") or {}).get("completion_tokens"),
+                })
             return (result["choices"][0]["message"].get("content") or "").strip()
 
     async def close(self):

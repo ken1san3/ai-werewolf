@@ -148,5 +148,5 @@ def text_checks(rows, private_messages, private_results, tokens, roles):
         "own_result_disclosure_candidates": own_results,
         "wolf_side_self_disclosure_candidates": wolf_disclosures,
         "dead_player_address_candidates": dead_calls,
-        "privacy_detection_scope": "Exact private-channel bodies, authentication tokens and literal private result payloads. Natural own-result reports and wolf-side self-disclosures are candidates for user judgement, not automatic failures. Semantic paraphrases are not proven absent.",
+        "privacy_detection_scope": "Exact private-channel bodies, authentication tokens and literal other-player private result payloads. Own seer/medium reports are allowed. Role/team disclosures require a contextual strategic review; unjustified disclosures count as leaks. Semantic paraphrases are not proven absent.",
     }, tokens)

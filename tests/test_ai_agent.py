@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 from ai_agent.agent import Agent
 from ai_agent.play import run_game
-from ai_agent.prompts import japanese_message, messages, recent_json
+from ai_agent.prompts import japanese_message, messages, recent_json, strip_introduction
 from ai_agent.repetition import RepetitionFilter
 from ai_agent.state import PlayerState
 from tests.test_network_sessions import make_game
@@ -98,6 +98,54 @@ class AgentStateTests(unittest.TestCase):
 
 
 class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_intro_is_removed_without_retry_and_expired_chat_never_regenerates(self):
+        game = make_game()
+        agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
+                      FakeLLM(), RepetitionFilter(), lambda *_: None, seed=1)
+        agent.state.receive({"type": "game.state_sync", "payload": game.get_state_sync("player-0")})
+        agent.state.phase, agent.state.day = "day", 1
+        agent.state.phase_ends_at = int(time.monotonic()) + 20
+        agent.state.actions = [{"type": "chat", "channel": "public"}]
+        agent.ws = AsyncMock()
+        agent.generate = AsyncMock(return_value="player-0 です。player-2さん、根拠を教えてください。")
+        with patch("ai_agent.agent.speech_pause", new_callable=AsyncMock):
+            await agent.step()
+        self.assertEqual(agent.generate.call_count, 1)
+        self.assertEqual(json.loads(agent.ws.send.call_args.args[0])["payload"]["message"], "player-2さん、根拠を教えてください。")
+        self.assertNotIn("player-0として", agent.generate.call_args.args[0])
+        self.assertEqual(strip_introduction("占い師のplayer-0です。結果を伝えます。", "player-0"), "占い師のplayer-0です。結果を伝えます。")
+        self.assertEqual(strip_introduction("こんにちは、player-0 です。根拠を教えてください。", "player-0"), "根拠を教えてください。")
+
+        async def expire(*args, **kwargs):
+            agent.state.phase = "vote"
+            return "player-3さん、理由は？"
+        agent.generate = AsyncMock(side_effect=expire)
+        agent.ws.reset_mock()
+        with patch("ai_agent.agent.speech_pause", new_callable=AsyncMock):
+            await agent.step()
+        agent.generate.assert_awaited_once()
+        agent.ws.send.assert_not_called()
+        self.assertEqual(agent.speech_discards["phase_expired"], 1)
+        self.assertEqual(agent.speech_generations, 2)
+
+    async def test_discard_counters_distinguish_text_checks(self):
+        game = make_game()
+        agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
+                      FakeLLM(), RepetitionFilter(), lambda *_: None, seed=1)
+        agent.state.receive({"type": "game.state_sync", "payload": game.get_state_sync("player-0")})
+        agent.state.phase, agent.state.day = "day", 1
+        agent.state.phase_ends_at = int(time.monotonic()) + 20
+        agent.state.actions = [{"type": "chat", "channel": "public"}]
+        key = agent.state.phase_key
+        self.assertEqual(agent.speech_rejection("Hello", key), "japanese_check")
+        agent.repetition.reserve("player-0", "根拠を教えてください。結果を確認します。")
+        self.assertEqual(agent.speech_rejection("根拠を教えてください。別の理由は？", key), "own_previous_sentence")
+        agent.repetition.reserve("player-1", "結果を確認します。")
+        self.assertEqual(agent.speech_rejection("別の意見です。結果を確認します。", key), "own_previous_sentence")
+        self.assertEqual(agent.repetition.rejection_reason("player-2", "結果を確認します。", []), "third_sentence")
+        agent.state.chats = [{"channel": "public", "message": "投票先の理由を説明してください。"}]
+        self.assertEqual(agent.speech_rejection("投票先の理由を説明してください！", key), "similarity")
+
     async def test_chat_retries_english_without_sending_it(self):
         game = make_game()
         agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
