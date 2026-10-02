@@ -5,6 +5,7 @@ from contextlib import suppress
 import json
 from random import Random
 import re
+import time
 from uuid import uuid4
 
 from websockets.asyncio.client import connect
@@ -32,6 +33,7 @@ class Agent:
         self.stale_suppressed = 0
         self.speech_generations = 0
         self.speech_discards = Counter()
+        self.decisions = []
 
     async def run(self):
         async with connect(self.uri, max_size=2**22) as self.ws:
@@ -77,10 +79,40 @@ class Agent:
 
     async def generate_speech(self, question, purpose, max_tokens):
         self.speech_generations += 1
+        key = self.state.phase_key
+        record = None
         try:
-            return await self.generate(question, purpose, max_tokens=max_tokens)
+            schema = {"type": "object", "additionalProperties": False, "required": ["facts", "aim", "reason"],
+                      "properties": {"facts": {"type": "array", "maxItems": 2,
+                                               "items": {"type": "string", "maxLength": 32}},
+                                     "aim": {"type": "string", "maxLength": 32},
+                                     "reason": {"type": "string", "maxLength": 48}}}
+            plan_text = await self.generate(
+                question + ' 発言前の判断だけをJSONで返してください。factsは確認した事実を最大2件、aimは狙い、reasonは行動を選ぶ短い理由です。'
+                '各文字列は日本語で20字前後にしてください。他人の発言は公称と区別し、サーバの事実を優先してください。このJSONは公開しません。',
+                purpose + "_decision", schema, 224)
+            record = {"player_id": self.state.player_id, "day": key[0], "phase": key[1],
+                      "at_monotonic": time.monotonic(), "purpose": purpose, "status": "planned"}
+            self.decisions.append(record)
+            try:
+                plan = json.loads(plan_text)
+                if not isinstance(plan, dict) or set(plan) != {"facts", "aim", "reason"} or not isinstance(plan["facts"], list) or not all(isinstance(f, str) for f in plan["facts"]) or not all(isinstance(plan[k], str) for k in ("aim", "reason")):
+                    raise ValueError("invalid decision fields")
+            except (ValueError, TypeError):
+                record.update(status="discarded", discard_reason="invalid_decision_json", raw=plan_text)
+                self.speech_discards["invalid_decision_json"] += 1
+                return None
+            record["decision"] = plan
+            if not fresh(self.state, key):
+                record.update(status="discarded", discard_reason="phase_expired")
+                self.speech_discards["phase_expired"] += 1
+                self.stale_suppressed += 1
+                return None
+            return await self.generate(question + f"\n発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。この記録は判断の補助です。本文だけを書き、JSONを会話に出さないでください。", purpose, max_tokens=max_tokens)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             self.speech_discards["phase_expired"] += 1
+            if record is not None:
+                record.update(status="discarded", discard_reason="phase_expired")
             raise
 
     def speech_rejection(self, text, key):
@@ -92,22 +124,35 @@ class Agent:
         return self.repetition.rejection_reason(self.state.player_id, text, recent)
 
     async def speak(self, question, purpose, key, kind, payload, field, max_tokens):
+        original_question = question
         for _ in range(3):
             if not fresh(self.state, key):
                 return False
             generated = await self.generate_speech(question, purpose, max_tokens)
+            if generated is None:
+                if not fresh(self.state, key):
+                    return False
+                continue
             text = strip_introduction(generated, self.state.player_id)[:200 if field == "comment" else 400]
+            record = self.decisions[-1]
+            record["speech"] = text
             reason = self.speech_rejection(text, key)
             if reason:
                 self.speech_discards[reason] += 1
+                record.update(status="discarded", discard_reason=reason)
                 if reason == "phase_expired":
                     self.stale_suppressed += 1
                     return False
+                explanation = {"japanese_check": "日本語以外または空の本文", "own_previous_sentence": "自分の直前の文の再使用",
+                               "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似"}.get(reason, reason)
+                question = original_question + f" 前の生成は送信しませんでした（理由: {explanation}）。その内容を避け、議論に使える別の発言を書いてください。"
                 continue
             self.repetition.reserve(self.state.player_id, text)
             if await self.send(kind, {**payload, field: text}, key):
+                record["status"] = "sent"
                 return True
             self.speech_discards["phase_expired"] += 1
+            record.update(status="discarded", discard_reason="phase_expired")
             return False
         return False
 

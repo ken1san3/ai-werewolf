@@ -16,6 +16,7 @@ from tests.test_network_sessions import make_game
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PLAN = json.dumps({"facts": [], "aim": "投票理由を確認する", "reason": "根拠のある投票をしたい"}, ensure_ascii=False)
 
 
 class FakeLLM:
@@ -25,8 +26,10 @@ class FakeLLM:
 
     async def complete(self, prompt, *, player_id, purpose, seed, schema=None, max_tokens=160):
         self.calls.append({"player_id": player_id, "purpose": purpose, "messages": prompt()})
-        if schema:
+        if schema and "target" in schema["properties"]:
             return json.dumps({"target": schema["properties"]["target"]["enum"][0]})
+        if schema:
+            return PLAN
         self.count += 1
         return f"{player_id}からの質問です。根拠{self.count}について、どの主張を裏付けていますか？"
 
@@ -107,10 +110,10 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         agent.state.phase_ends_at = int(time.monotonic()) + 20
         agent.state.actions = [{"type": "chat", "channel": "public"}]
         agent.ws = AsyncMock()
-        agent.generate = AsyncMock(return_value="player-0 です。player-2さん、根拠を教えてください。")
+        agent.generate = AsyncMock(side_effect=[PLAN, "player-0 です。player-2さん、根拠を教えてください。"])
         with patch("ai_agent.agent.speech_pause", new_callable=AsyncMock):
             await agent.step()
-        self.assertEqual(agent.generate.call_count, 1)
+        self.assertEqual(agent.generate.call_count, 2)
         self.assertEqual(json.loads(agent.ws.send.call_args.args[0])["payload"]["message"], "player-2さん、根拠を教えてください。")
         self.assertNotIn("player-0として", agent.generate.call_args.args[0])
         self.assertEqual(strip_introduction("占い師のplayer-0です。結果を伝えます。", "player-0"), "占い師のplayer-0です。結果を伝えます。")
@@ -118,7 +121,7 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
 
         async def expire(*args, **kwargs):
             agent.state.phase = "vote"
-            return "player-3さん、理由は？"
+            return PLAN
         agent.generate = AsyncMock(side_effect=expire)
         agent.ws.reset_mock()
         with patch("ai_agent.agent.speech_pause", new_callable=AsyncMock):
@@ -155,12 +158,15 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         agent.state.phase_ends_at = int(time.monotonic()) + 20
         agent.state.actions = [{"type": "chat", "channel": "public"}]
         agent.ws = AsyncMock()
-        agent.generate = AsyncMock(side_effect=["I agree. 同意です。", "player-2さん、投票理由を教えてください。"])
+        agent.generate = AsyncMock(side_effect=[PLAN, "I agree. 同意です。", PLAN, "player-2さん、投票理由を教えてください。"])
         with patch("ai_agent.agent.speech_pause", new_callable=AsyncMock):
             await agent.step()
         sent = json.loads(agent.ws.send.call_args.args[0])
         agent.ws.send.assert_called_once()
         self.assertEqual(sent["payload"]["message"], "player-2さん、投票理由を教えてください。")
+        self.assertEqual([d["status"] for d in agent.decisions], ["discarded", "sent"])
+        self.assertTrue(all("decision" in d for d in agent.decisions))
+        self.assertNotIn('"facts"', sent["payload"]["message"])
 
     async def test_english_co_comment_is_not_sent(self):
         game = make_game()
@@ -174,7 +180,7 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         agent.spoke[(1, "public")] = 1
         agent.ws = AsyncMock()
         agent.choose = AsyncMock(return_value="seer")
-        agent.generate = AsyncMock(return_value="I am the Seer. 占い師です。")
+        agent.generate = AsyncMock(side_effect=[PLAN, "I am the Seer. 占い師です。"] * 3)
         await agent.step()
         agent.ws.send.assert_not_called()
 

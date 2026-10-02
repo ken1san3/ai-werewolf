@@ -77,12 +77,14 @@ class Recorder:
         discards = Counter()
         for agent in agents:
             discards.update(agent.speech_discards)
-        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired"):
+        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "invalid_decision_json"):
             discards.setdefault(reason, 0)
         measurements = measure(self.rows, self.private_results, roles, game.content.roles, game.rules, safe_calls,
                                generated=sum(a.speech_generations for a in agents), discards=dict(discards))
         self.server_record = redact({"rows": self.rows, "roles": {p: r.id for p, r in roles.items()},
                                      "private_results": self.private_results, "private_messages": self.private_messages}, self.tokens)
+        self.decisions = redact([{**{k: v for k, v in d.items() if k != "at_monotonic"},
+                                   "t": round(d["at_monotonic"] - self.started, 2)} for a in agents for d in a.decisions], self.tokens)
         checks = {
             "completed": game.game_result is not None and all(a.state.done for a in agents),
             "winner": game.game_result.winner_team if game.game_result else None,
@@ -101,6 +103,7 @@ class Recorder:
             "stale_generations_suppressed": sum(a.stale_suppressed for a in agents),
             "llm_calls": safe_calls,
             "llm_http_errors": sum(bool(c.get("http_error")) or (c.get("http_status") is not None and c["http_status"] >= 400) for c in safe_calls),
+            "decision_records": len(self.decisions), "decision_record_path": "decisions.json",
             "generation_sec": timing_summary([c for c in safe_calls if c.get("completed", True)], "generation_sec"),
             "wait_sec": timing_summary(safe_calls, "wait_sec"),
             "wall_sec": round(time.monotonic() - self.started, 2),
@@ -122,3 +125,4 @@ class Recorder:
         (directory / "checks.json").write_text(json.dumps(checks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if hasattr(self, "server_record"):
             (directory / "server_record.json").write_text(json.dumps(self.server_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            (directory / "decisions.json").write_text(json.dumps(self.decisions, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
