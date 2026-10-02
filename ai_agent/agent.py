@@ -10,7 +10,6 @@ from uuid import uuid4
 
 from websockets.asyncio.client import connect
 
-from .disclosure import disclosure_reason
 from .prompts import japanese_message, messages, strip_introduction
 from .state import PlayerState
 from .timing import fresh, speech_pause
@@ -90,7 +89,7 @@ class Agent:
                                      "reason": {"type": "string", "maxLength": 48}}}
             plan_text = await self.generate(
                 question + ' 発言前の判断だけをJSONで返してください。factsは確認した事実を最大2件、aimは狙い、reasonは行動を選ぶ短い理由です。'
-                '各文字列は日本語で10〜20字にしてください。他人の発言は公称と区別し、サーバの事実を優先してください。このJSONは公開しません。',
+                '各文字列は日本語で20字前後にしてください。他人の発言は公称と区別し、サーバの事実を優先してください。このJSONは公開しません。',
                 purpose + "_decision", schema, 224)
             record = {"player_id": self.state.player_id, "day": key[0], "phase": key[1],
                       "at_monotonic": time.monotonic(), "purpose": purpose, "status": "planned"}
@@ -116,14 +115,11 @@ class Agent:
                 record.update(status="discarded", discard_reason="phase_expired")
             raise
 
-    def speech_rejection(self, text, key, formal_claim=None):
+    def speech_rejection(self, text, key):
         if not fresh(self.state, key):
             return "phase_expired"
         if not japanese_message(text):
             return "japanese_check"
-        disclosure = disclosure_reason(self.state, text, self.roles, formal_claim=formal_claim)
-        if disclosure:
-            return disclosure
         recent = [c["message"] for c in self.state.chats if c["channel"] == "public"]
         return self.repetition.rejection_reason(self.state.player_id, text, recent)
 
@@ -140,7 +136,7 @@ class Agent:
             text = strip_introduction(generated, self.state.player_id)[:200 if field == "comment" else 400]
             record = self.decisions[-1]
             record["speech"] = text
-            reason = self.speech_rejection(text, key, payload.get("claimed_role_id"))
+            reason = self.speech_rejection(text, key)
             if reason:
                 self.speech_discards[reason] += 1
                 record.update(status="discarded", discard_reason=reason)
@@ -148,8 +144,7 @@ class Agent:
                     self.stale_suppressed += 1
                     return False
                 explanation = {"japanese_check": "日本語以外または空の本文", "own_previous_sentence": "自分の直前の文の再使用",
-                               "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似",
-                               "unjustified_self_disclosure": "場面の根拠がない自分の本当の役職・陣営・襲撃の公表"}.get(reason, reason)
+                               "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似"}.get(reason, reason)
                 question = original_question + f" 前の生成は送信しませんでした（理由: {explanation}）。その内容を避け、議論に使える別の発言を書いてください。"
                 continue
             self.repetition.reserve(self.state.player_id, text)

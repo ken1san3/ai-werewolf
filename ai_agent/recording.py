@@ -77,7 +77,7 @@ class Recorder:
         discards = Counter()
         for agent in agents:
             discards.update(agent.speech_discards)
-        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "unjustified_self_disclosure", "invalid_decision_json"):
+        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "invalid_decision_json"):
             discards.setdefault(reason, 0)
         measurements = measure(self.rows, self.private_results, roles, game.content.roles, game.rules, safe_calls,
                                generated=sum(a.speech_generations for a in agents), discards=dict(discards))
