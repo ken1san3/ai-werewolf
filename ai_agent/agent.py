@@ -196,7 +196,7 @@ class Agent:
                     return False
                 explanation = {"japanese_check": "日本語以外または空の本文", "own_previous_sentence": "自分の直前の文の再使用",
                                "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似",
-                               "self_id_confusion": "自分のIDを他人として書いていた。自分は『私』と書いて",
+                               "self_id_confusion": f"本人のIDは{self.state.player_id}です。自分のIDを他人として扱わず、他人のIDを自分の名前にしないで、自分は『私』と書いて",
                                "own_result_conflict": "本人の受信済み結果または行動時期と矛盾した。結果一覧を確認し、未受信の自分の判定を作らず書き直して",
                                "meta_refusal": "人狼ゲームの参加者として、拒否やAIの説明ではなく議論に返答して",
                                "self_fact_confusion": "本人の役職と生存状態は受信済みで確定しています。公表するかとは別です。他人の発言の私を自分と取り違えず書き直して",

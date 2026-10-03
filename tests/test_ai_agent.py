@@ -121,6 +121,17 @@ class AgentStateTests(unittest.TestCase):
         self.assertFalse(self_reference('player-8が「player-4は狼」と言いましたが反論します。', 'player-4'))
         self.assertFalse(self_reference('player-40さんを疑います。', 'player-4'))
 
+    def test_wrong_self_id_is_rejected_but_other_targets_quotes_and_denials_are_free(self):
+        for text in ['はい、私、player-2です。', '私はplayer-2です。', '僕はplayer-2と申します。',
+                     '私は占い師のplayer-2です。', '私はplayer-2さんです。']:
+            with self.subTest(text=text):
+                self.assertTrue(self_reference(text, 'player-0'))
+        for text in ['私、player-2さんを疑います。', '私の投票先はplayer-2です。',
+                     'player-2が「私はplayer-2です」と言いました。',
+                     '私はplayer-2ですとは言っていません。', 'もし私がplayer-2ならCOします。']:
+            with self.subTest(text=text):
+                self.assertFalse(self_reference(text, 'player-0'))
+
     def test_repetition_filter_blocks_immediate_and_third_sentences(self):
         repetition = RepetitionFilter()
         self.assertTrue(repetition.allows("p1", "One question?", []))

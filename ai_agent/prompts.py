@@ -2,7 +2,7 @@
 import json
 import re
 import unicodedata
-from .claims import self_claims
+from .claims import denied_statement, self_claims
 from .strategy import STRATEGIES, strategy_for, under_pressure
 
 
@@ -23,9 +23,12 @@ def japanese_message(text):
 
 
 def self_reference(text, player_id):
-    """Own ID in unquoted speech invites treating oneself as another player."""
+    """Reject treating own ID as another person or naming another ID as oneself."""
     plain = re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”|"[^\"]*"', "", unicodedata.normalize("NFKC", text))
     plain = re.sub(rf"(?:私|僕|俺|自分)\s*\(\s*{re.escape(player_id)}\s*\)", "私", plain, flags=re.I)
+    for match in re.finditer(r'(?:私|僕|俺|自分)(?:は|が|[、,])\s*(?:[ぁ-ゖァ-ヺ一-龯]{1,12}の)?(player-\d+)(?![A-Za-z0-9_-])\s*(?:さん)?\s*(?:です|だ(?=[。！？.!?\s]|$)|と申します)', plain, re.I):
+        if match.group(1).lower() != player_id.lower() and not denied_statement(plain[match.end():]):
+            return True
     return bool(re.search(rf"(?<![A-Za-z0-9_-]){re.escape(player_id)}(?![A-Za-z0-9_-])", plain, re.I))
 
 
