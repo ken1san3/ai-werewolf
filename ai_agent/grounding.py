@@ -29,7 +29,8 @@ def own_result_conflict(state, text, roles, rules, formal_claim=None):
                if formal else {'kind': 'chat', 'message': {'player_id': state.player_id, 'message': utterance['text']}})
         rows.append({**row, 't': len(rows) * 2 + 1})
     current = len(rows)
-    rows.append({'kind': 'chat', 't': current * 2 + 2,
-                 'message': {'player_id': state.player_id, 'message': text}})
+    row = ({'kind': 'CO_DECLARED', 'payload': {'player_id': state.player_id, 'claimed_role_id': formal_claim, 'comment': text}}
+           if formal_claim else {'kind': 'chat', 'message': {'player_id': state.player_id, 'message': text}})
+    rows.append({**row, 't': current * 2 + 2})
     measured = measure(rows, own, {state.player_id: role}, roles, rules, [])
     return any(c['row'] == current for c in measured['metric_candidates']['Q4'])

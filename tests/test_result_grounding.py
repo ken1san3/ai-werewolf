@@ -78,3 +78,14 @@ class ResultGroundingTests(unittest.TestCase):
             self.state.receive({'type': 'chat.message', 'payload': {'channel': 'public',
                                 'message': {'player_id': 'player-0', 'message': '私は霊能者です。'}}})
             self.assertTrue(self.conflict('初夜にplayer-1は人狼と判定しました。'))
+
+    def test_current_formal_true_co_overrides_an_earlier_false_co_in_the_guard(self):
+        self.state.role_id, self.state.private = 'medium', []
+        self.state.own_public = [{'text': '占い師です。', 'formal_claim': 'seer'}]
+        text = 'player-1は人狼と判定しました。'
+        self.assertFalse(self.conflict(text, 'seer'))
+        self.assertTrue(self.conflict(text, 'medium'))
+        rows = [{'kind': 'CO_DECLARED', 't': i, 'payload': {'player_id': 'player-0', 'claimed_role_id': role, 'comment': body}}
+                for i, (role, body) in enumerate([('seer', '占い師です。'), ('medium', text)])]
+        measured = measure(rows, [], {'player-0': self.roles['medium']}, self.roles, self.game.rules, [])
+        self.assertEqual([c['row'] for c in measured['metric_candidates']['Q4']], [1])
