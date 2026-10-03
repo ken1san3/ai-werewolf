@@ -82,6 +82,15 @@ class RoleStrategyTests(unittest.TestCase):
         self.state.alive = {'player-0', 'player-1', 'player-2'}
         self.assertIsNone(disclosure_reason(self.state, statement + 'player-2へ票を合わせましょう。', self.game.content.roles))
 
+    def test_denial_of_a_quoted_meaning_does_not_disclose_private_intent(self):
+        for text in ['私の投票は村の混乱策に過ぎませんという意味ではありません。',
+                     '私の投票は村の混乱策に過ぎませんとは言っていません。',
+                     '私の投票は村の混乱策に過ぎませんということではない。']:
+            with self.subTest(text=text):
+                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
+        self.assertEqual(disclosure_reason(self.state, '私の投票は村の混乱策に過ぎませんという意味ではありませんが、私は人狼を救うのが目的です。',
+                                          self.game.content.roles), 'unjustified_self_disclosure')
+
     def test_hidden_vote_disruption_intent_and_changed_army_co_are_guarded(self):
         for text in ['player-2さんに疑いを持たせ、混乱で票が割れるよう仕向けます。',
                      'player-2への疑いで混乱で票が割れるよう誘導します。',

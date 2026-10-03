@@ -57,6 +57,19 @@ class ConversationQualityTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(quality_reason(self.state, text, self.roles))
 
+    def test_self_fact_denials_and_other_reporters_are_not_the_speakers_assertion(self):
+        for text in ['私は未確定役職ですとは言っていません。',
+                     '私は昨日処刑されましたという意味ではありません。',
+                     'player-1は私は昨日処刑されましたと発言しました。',
+                     'player-1は私は未確定役職ですと主張しました。']:
+            with self.subTest(text=text):
+                self.assertIsNone(quality_reason(self.state, text, self.roles))
+        for text in ['私は未確定役職ですとは言っていませんが、私は昨日処刑されました。',
+                     'player-1は私は昨日処刑されましたと発言しました。私は未確定役職です。',
+                     'player-1は私を疑いますが、私は昨日処刑されました。']:
+            with self.subTest(text=text):
+                self.assertEqual(quality_reason(self.state, text, self.roles), 'self_fact_confusion')
+
     def test_empty_agreement_needs_content_but_refutation_and_answers_are_free(self):
         self.assertEqual(quality_reason(self.state, '私も同意します。', self.roles), 'empty_agreement')
         self.assertIsNone(quality_reason(self.state, '同意します。player-1の投票理由も一致します。', self.roles))
