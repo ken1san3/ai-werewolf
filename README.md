@@ -80,7 +80,7 @@ python -m ai_agent.play --seed 1
 ```
 server/aiwolf_core/   ゲームコア（ルール・進行・投票・夜行動・死亡・勝敗・イベント）
 server/network/       WebSocketサーバ（セッション・配送・プロトコル検証）
-protocol/             プロトコルのJSON Schema（v1.1が現役）
+protocol/             プロトコルのJSON Schema（v1.2が現役）
 content/              役職・陣営・ルールプリセット（YAML）
 ai_agent/             AIエージェント（作り直し中）
 tests/                テスト

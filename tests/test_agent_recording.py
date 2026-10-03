@@ -15,6 +15,14 @@ def chat(player, text, t):
 
 
 class RecordingTests(unittest.TestCase):
+    def test_unknown_private_notice_is_recorded_without_entering_public_transcript(self):
+        recorder = Recorder(['public'])
+        recorder.visible('player-0', 'game.event', {'visibility': 'private', 'event_type': 'CUSTOM_NOTICE', 'event_payload': {'text': 'ONLY-SELF'}})
+        self.assertEqual(recorder.rows, [])
+        self.assertEqual(recorder.private_results[0]['event_type'], 'CUSTOM_NOTICE')
+        recorder.visible('player-0', 'game.event', {'visibility': 'public', 'event_type': 'CUSTOM_ANNOUNCEMENT', 'event_payload': {'text': 'PUBLIC'}})
+        self.assertEqual([r['kind'] for r in recorder.rows], ['CUSTOM_ANNOUNCEMENT'])
+
     def test_public_stream_follows_protocol_order_and_does_not_duplicate_other_viewers(self):
         recorder = Recorder(["public"])
         death = GameEvent("PLAYER_DIED", EventVisibility.PUBLIC, {"player_id": "player-2"})
@@ -23,7 +31,7 @@ class RecordingTests(unittest.TestCase):
         recorder.visible("player-1", "chat.message", payload)
         self.assertEqual(recorder.rows, [])
         recorder.visible("player-0", "chat.message", payload)
-        recorder.visible("player-0", "game.event", {"event_type": death.type, "event_payload": dict(death.payload)})
+        recorder.visible("player-0", "game.event", {"event_type": death.type, "event_payload": dict(death.payload), "visibility": "public"})
         self.assertEqual([row["kind"] for row in recorder.rows], ["chat", "PLAYER_DIED"])
         self.assertEqual(text_checks(recorder.rows, [], [], set(), {})["dead_player_address_candidates"], [])
 

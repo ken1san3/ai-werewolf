@@ -19,7 +19,7 @@ ACTION_SEND_GUARD_SECONDS = 0.5
 def request(message_type: str, game_id: str, payload: dict[str, object]) -> str:
     return json.dumps({
         "type": message_type,
-        "protocol_version": "1.1",
+        "protocol_version": "1.2",
         "event_id": str(uuid4()),
         "game_id": game_id,
         "timestamp": 0,

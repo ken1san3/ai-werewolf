@@ -35,7 +35,7 @@ from server.network.session import UnaddressableRequest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GAME_ID = "123e4567-e89b-12d3-a456-426614174100"
-SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.2.schema.json"
 NON_CANONICAL_REQUEST_IDS = (
     "123e4567e89b12d3a456426614174101",
     "{123e4567-e89b-12d3-a456-426614174101}",
@@ -181,7 +181,7 @@ class SessionManagerTests(unittest.TestCase):
             )
 
     def test_non_exact_protocol_versions_and_unknown_player_are_rejected_without_token(self) -> None:
-        for version in ("1.0", "1.2", "2.0"):
+        for version in ("1.0", "1.1", "2.0"):
             with self.subTest(version=version), self.assertRaisesRegex(
                 UnaddressableRequest, "unsupported_protocol_version"
             ):
@@ -683,7 +683,7 @@ class ProtocolMessageValidatorTests(unittest.TestCase):
             "game_id": GAME_ID,
             "seq": 1,
             "timestamp": 0,
-            "payload": {"event_type": "PHASE_STARTED", "event_payload": {}},
+            "payload": {"event_type": "PHASE_STARTED", "event_payload": {}, "visibility": "public"},
         }
         validator.validate_server(event)
         with self.assertRaises(ProtocolValidationError):
@@ -1119,9 +1119,9 @@ class WebSocketGameServerTests(unittest.IsolatedAsyncioTestCase):
                 second_public = json.loads(await second.recv())
                 self.assertEqual([first_public["seq"], first_private["seq"]], [3, 4])
                 self.assertEqual(second_public["seq"], 3)
-                self.assertEqual(first_public["payload"], {"event_type": "TEST_PUBLIC", "event_payload": {"safe": "yes"}})
-                self.assertEqual(first_private["payload"], {"event_type": "TEST_PRIVATE", "event_payload": {"secret": "player-0-only"}})
-                self.assertNotIn("visibility", first_private["payload"])
+                self.assertEqual(first_public["payload"], {"event_type": "TEST_PUBLIC", "event_payload": {"safe": "yes"}, "visibility": "public"})
+                self.assertEqual(first_private["payload"], {"event_type": "TEST_PRIVATE", "event_payload": {"secret": "player-0-only"}, "visibility": "private"})
+                self.assertEqual(first_private["payload"]["visibility"], "private")
                 self.assertNotIn("recipient_player_id", first_private["payload"])
                 self.assertEqual(second_public["payload"], first_public["payload"])
                 with self.assertRaises(asyncio.TimeoutError):
