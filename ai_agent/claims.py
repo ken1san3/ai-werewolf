@@ -22,7 +22,14 @@ def team_claim(text, role_names, patterns=None):
             continue
         for pattern in (STRATEGIES['team_claim_patterns'] if patterns is None else patterns):
             match = re.search(pattern, clause)
-            if match and not re.search(r'^[^、,。！？]{0,24}(?:と|という|との|って)\s*(?:提案|発言|主張|説明|言|述|話|報告)', clause[match.end():]):
+            if not match:
+                continue
+            tail = clause[match.end():]
+            reported = re.search(r'^[^、,。！？]{0,24}(?:と|という|との|って)\s*(?:提案|発言|主張|説明|言|述|話|報告)', tail)
+            own_subject = re.search(r'(?:私|僕|俺|自分)(?:は|が|も|[、,])', clause)
+            own_proposal = re.search(r'と(?:提案|発言|主張|説明)(?:します|する|しましょう)(?!か|[？?])', tail)
+            denied_report = re.search(r'と(?:は)?(?:提案|発言|主張|説明|言)[^、,。！？]{0,8}(?:していません|していない|しません|しない|っていません|っていない)', tail)
+            if not denied_report and (not reported or own_subject or own_proposal):
                 return True
     return False
 

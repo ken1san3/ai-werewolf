@@ -96,6 +96,17 @@ class RoleStrategyTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
 
+    def test_own_proposal_is_detected_but_denied_or_questioned_proposals_are_not(self):
+        for text in ['私は村を混乱させましょうと提案します。',
+                     '村を混乱させましょうと提案します。',
+                     'player-2さん、村を混乱させましょうと提案します。']:
+            with self.subTest(text=text):
+                self.assertIsNotNone(disclosure_reason(self.state, text, self.game.content.roles))
+        for text in ['私は村を混乱させましょうと提案していません。',
+                     'player-2さん、村を混乱させましょうと提案しますか？']:
+            with self.subTest(text=text):
+                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
+
     def test_possible_late_pp_is_not_blocked_using_unreceived_role_truth(self):
         self.assertIsNone(disclosure_reason(self.state, '人狼です。狂人の方、player-2へ合わせてください。', self.game.content.roles,
                                            role_counts={'werewolf': 2, 'madman': 1, 'villager': 6}))
