@@ -2,6 +2,7 @@
 import json
 import re
 import unicodedata
+from .claims import self_claims
 from .strategy import STRATEGIES, strategy_for, under_pressure
 
 
@@ -57,10 +58,16 @@ def rule_explanation(rules):
     initial = data['first_night_seer'][rules.first_night_seer]
     timing = data['phase_names'][rules.medium.notify_timing]
     votes = data['vote_reveal'][rules.vote.reveal]
-    return f'{initial} 霊能の結果を受け取る時期は{timing}です。{votes}'
+    return ' '.join([initial, data['medium_notification'].format(timing=timing), data['public_co_rule'], votes])
 
 def public_summary(state, roles):
-    claims, days = {}, {}
+    claims, spoken_claims, days = {}, {}, {}
+    names = [r.name for r in roles.values()]
+    for chat in state.chats:
+        if chat['channel'] == 'public':
+            said = self_claims(chat['player_id'], chat['message'], names)
+            if said:
+                spoken_claims[chat['player_id']] = ' / '.join(said)
     for fact in state.facts:
         day = fact.get('day')
         if fact['type'] == 'CO_DECLARED':
@@ -71,7 +78,7 @@ def public_summary(state, roles):
         if fact['type'] == 'VOTE_RESOLVED':
             days.setdefault(day, {})['投票集計'] = fact.get('tallies', {})
             days[day]['処刑者'] = fact.get('lynched_player_id')
-    return {'公称役職（真偽は未確認）': claims,
+    return {'公称役職（真偽は未確認）': claims, '発言で名乗った役職（真偽は未確認）': spoken_claims,
             '日別の公開事実': [{'day': d, **days[d]} for d in sorted(k for k in days if isinstance(k, int))[-3:]]}
 
 def own_result_summary(state):
@@ -122,7 +129,7 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         "騙りの役職・偽の結果は秘密ではなく、公開本文に使ってよい内容です。"
         "通常の発言では発言本文だけを出力してください。選択を求められた場合は指定されたJSONだけを返し、IDを翻訳しないでください。"
     )
-    discussion = [c for c in state.chats if c["channel"] == channel and c["day"] == state.day][-40:]
+    discussion = [c for c in state.chats if c["channel"] in {"public", channel} and c["day"] == state.day][-40:]
     # Hidden channels must never enter the public discussion context.
     user = (
         f"第{state.day}日、フェーズID: {state.phase}。生存者: {', '.join(sorted(state.alive))}。"
