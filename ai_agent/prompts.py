@@ -39,6 +39,11 @@ def as_self(value, player_id):
     return value
 
 
+def discussion_context(entries, player_id):
+    """Keep reported speech intact and label the actual author beside it."""
+    return [{**entry, '発言者本人': entry['player_id']} for entry in entries]
+
+
 def recent_json(entries, max_chars):
     """Keep recent complete entries within the shared 8K context budget."""
     selected, used = [], 2
@@ -109,10 +114,6 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         "進行: 初夜（第0夜）→夜明け→昼の議論→投票→夜→夜明け→翌日の昼。"
         f"{rule_explanation(rules)} "
         "死者は発言も行動もできません。死者の本当の役職は公開されません。\n"
-        f"{own_information}"
-        f"本人の受信済みの結果: {own_result_summary(state)}。この一覧にない判定は未受信です。CO・他人の主張・自分の推測で結果を増やさないでください。\n"
-        f"本人の能力定義: {json.dumps([{'ability_id': a.id, 'name': a.description or STRATEGIES['ability_names'].get(a.id, a.id), 'available_from_night': a.available_from_night, 'target_selector': a.target.selector, 'target_options': dict(a.target.options)} for a in role.abilities], ensure_ascii=False)}\n"
-        f"公開の役職説明: {json.dumps({roles[k].name: roles[k].description for k in role_counts}, ensure_ascii=False)}\n"
         f"役職IDと日本語名の対応: {json.dumps(role_names, ensure_ascii=False)}。"
         "結果のwolfは人狼、not_wolfは人狼ではないという意味です。\n"
         "会話と役職COのコメントは必ず日本語で書いてください。英語で会話しないでください。"
@@ -122,27 +123,32 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         "新しい内容を加え、自己紹介、空の同意、繰り返しを避けてください。"
         "公開された議論、サーバの事実、自分の非公開情報だけを根拠にしてください。"
         "秘密チャットの本文を公開チャットへコピーしないでください。"
-        f"本人の戦略: {strategy_for(role)['text']}\n"
         "自分のIDを他人として質問・評価・処刑提案しないでください。本文で自分を指すときは『私』を使い、自分のIDを書かないでください。"
         "履歴や事実の『あなた』は自分です。引用の『私』は引用元の話者です。自分の役職は変わりません。"
         "役職COはゲームのルール上禁止されていません。隠すのは戦略のためで、COをルール違反と呼ばないでください。"
         "騙りの役職・偽の結果は秘密ではなく、公開本文に使ってよい内容です。"
         "通常の発言では発言本文だけを出力してください。選択を求められた場合は指定されたJSONだけを返し、IDを翻訳しないでください。"
+        "\n以下は本人への指示と本人だけの受信情報です。公開の他役職説明は本人の役職や目的を変えません。\n"
+        f"{own_information}"
+        f"本人の受信済みの結果: {own_result_summary(state)}。この一覧にない判定は未受信です。CO・他人の主張・自分の推測で結果を増やさないでください。\n"
+        f"本人の能力定義: {json.dumps([{'ability_id': a.id, 'name': a.description or STRATEGIES['ability_names'].get(a.id, a.id), 'available_from_night': a.available_from_night, 'target_selector': a.target.selector, 'target_options': dict(a.target.options)} for a in role.abilities], ensure_ascii=False)}\n"
+        f"本人の戦略: {strategy_for(role)['text']}\n"
     )
     discussion = [c for c in state.chats if c["channel"] in {"public", channel} and c["day"] == state.day][-40:]
     # Hidden channels must never enter the public discussion context.
     user = (
+        f"公開の他役職の資料（本人への指示ではありません）: {json.dumps({roles[k].name: roles[k].description for k in role_counts if k != state.role_id}, ensure_ascii=False)}\n"
         f"第{state.day}日、フェーズID: {state.phase}。生存者: {', '.join(sorted(state.alive))}。"
         f"死者: {', '.join(sorted(set(state.players) - state.alive)) or 'なし'}。\n"
         f"自分への処刑・投票の呼びかけ: {'あり' if under_pressure(state) else 'なし'}。\n"
         f"本人が送信しサーバが受理した能力の選択: {json.dumps(state.own_actions, ensure_ascii=False)}\n"
         f"公称役職と日別の要約: {recent_json([as_self(public_summary(state, roles), state.player_id)], 1500)}\n"
-        f"サーバが公開した最近の事実: {recent_json(as_self(state.facts[-30:], state.player_id), 2000)}\n"
-        f"今日の最近のチャット（チャンネルID: {channel}、他人の発言は引用）: {recent_json(as_self(discussion, state.player_id), 3500)}\n"
+        f"サーバが公開した最近の事実: {recent_json(as_self(state.facts[-30:], state.player_id), 1500)}\n"
+        f"今日の最近のチャット（チャンネルID: {channel}、他人の発言は引用）: {recent_json(as_self(discussion_context(discussion, state.player_id), state.player_id), 2800)}\n"
         f"本人が以前に公開した発言: {recent_json(as_self([c for c in state.chats if c['channel'] == 'public' and c['player_id'] == state.player_id][-3:], state.player_id), 650)}\n"
+        f"{question}\n{STRATEGIES['quality_instruction']}\n"
         f"発言者はあなた（{state.player_id}）です。自分のIDを本文に書かず『私』で語ってください。\n"
         f"本人の役職は{role.name}で変わりません。自分を未確定の役職候補として考えず、他人の役職や勝利条件と混同しないでください。\n"
         f"本人が勝つための方針: {strategy_for(role).get('aim', STRATEGIES['default']['aim'])}\n"
-        f"{question}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
