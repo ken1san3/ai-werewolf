@@ -102,12 +102,15 @@ def own_result_summary(state):
     return json.dumps(rows, ensure_ascii=False) if rows else 'なし（判定済みの相手はいません）'
 
 
-def messages(state, roles, role_counts, question, channel="public", *, rules=None):
+def messages(state, roles, role_counts, question, channel="public", *, rules=None, strategy_data=None, lessons=""):
     role = roles[state.role_id]
+    strategy = (strategy_data.get('roles', {}).get(role.id, strategy_data['default'])
+                if strategy_data is not None else strategy_for(role))
     counts = {roles[key].name: count for key, count in role_counts.items()}
     role_names = {key: value.name for key, value in roles.items()}
+    description = strategy_data.get('role_descriptions', {}).get(role.id, role.description) if strategy_data is not None else role.description
     own_information = (
-        f"あなたの非公開の役職: {role.name}。{role.description}\n"
+        f"あなたの非公開の役職: {role.name}。{description}\n"
         f"あなたが知っている仲間: {', '.join(state.teammates) or 'なし'}。\n"
         f"あなたの非公開の結果: {state.private_text()}。\n"
     )
@@ -135,7 +138,8 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"{own_information}"
         f"本人の受信済みの結果: {own_result_summary(state)}。この一覧にない判定は未受信です。CO・他人の主張・自分の推測で結果を増やさないでください。\n"
         f"本人の能力定義: {json.dumps([{'ability_id': a.id, 'name': a.description or STRATEGIES['ability_names'].get(a.id, a.id), 'available_from_night': a.available_from_night, 'target_selector': a.target.selector, 'target_options': dict(a.target.options)} for a in role.abilities], ensure_ascii=False)}\n"
-        f"本人の戦略: {strategy_for(role)['text']}\n"
+        f"本人の戦略: {strategy['text']}\n"
+        f"{('本人向けの教訓（結果の通知ではありません）: ' + lessons[:800]) if lessons else ''}\n"
     )
     discussion = [c for c in state.chats if c["channel"] in {"public", channel} and c["day"] == state.day][-40:]
     # Hidden channels must never enter the public discussion context.
@@ -151,6 +155,6 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"{question}\n{STRATEGIES['quality_instruction']}\n"
         f"発言者はあなた（{state.player_id}）です。自分のIDを本文に書かず『私』で語ってください。\n"
         f"本人の役職は{role.name}で変わりません。自分を未確定の役職候補として考えず、他人の役職や勝利条件と混同しないでください。\n"
-        f"本人が勝つための方針: {strategy_for(role).get('aim', STRATEGIES['default']['aim'])}\n"
+        f"本人が勝つための方針: {strategy.get('aim', STRATEGIES['default']['aim'])}\n"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

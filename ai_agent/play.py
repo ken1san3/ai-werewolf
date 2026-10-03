@@ -8,10 +8,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from random import Random
 import sys
+import time
 from uuid import uuid4
 
 from server.aiwolf_core import EventVisibility, GameState, InMemoryEventSink, PlayerConfig, load_content, load_preset
 from server.network import GameRegistry, WebSocketGameServer, monotonic_seconds
+from server.network.session import SessionManager, TickDriver
 
 from .agent import Agent
 from .llm import SharedLLM
@@ -30,9 +32,14 @@ class GameRun:
 
 
 async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
-                   timing_scale=1, timeout=2400, output=None, progress=False, cp3=False):
+                   timing_scale=1, timeout=2400, output=None, progress=False, cp3=False,
+                   clock_rate=1, strategy_data=None, lessons=None):
     if min(day, vote, night) < 2:
         raise ValueError("phase durations must be at least two seconds")
+    if not 0 < clock_rate <= 1:
+        raise ValueError('clock_rate must be in (0, 1]')
+    anchor = time.monotonic()
+    clock = monotonic_seconds if clock_rate == 1 else lambda: int(anchor + (time.monotonic() - anchor) * clock_rate)
     content = load_content(ROOT / "content")
     preset = load_preset(ROOT / "content" / "presets" / "standard_9.yaml", content)
     preset = replace(preset, rules=replace(preset.rules, day_seconds=day, vote_seconds=vote,
@@ -41,7 +48,7 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
     game_id = str(uuid4())
     recorder = Recorder((c.id for c in content.chat_channels.values() if c.is_public), progress=progress)
     game = GameState.create_from_preset(content, preset, players, game_id=game_id,
-                                       event_sink=InMemoryEventSink(), rng=Random(seed), started_at=monotonic_seconds())
+                                       event_sink=InMemoryEventSink(), rng=Random(seed), started_at=int(clock()))
     for event in game.event_bus.events:
         if event.visibility is EventVisibility.PUBLIC:
             recorder.core_event(event)
@@ -52,7 +59,8 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
                 print(event.type, dict(event.payload), flush=True)
         game.event_bus.subscribe(EventVisibility.PUBLIC, report)
     registry = GameRegistry({game_id: game})
-    server = WebSocketGameServer(registry, tick_interval_seconds=0.05)
+    server = WebSocketGameServer(registry, sessions=SessionManager(registry, clock=clock),
+                                ticker=TickDriver(registry, clock=clock), tick_interval_seconds=0.05)
     listener = await server.start("127.0.0.1", 0)
     uri = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}"
     tokens = registry.entry_tokens_for(game_id)
@@ -62,7 +70,8 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
     repetition = RepetitionFilter()
     agents = [Agent(p.player_id, tokens[p.player_id], uri, game_id,
                     content.roles, dict(preset.role_counts), llm, repetition, recorder.observe,
-                    seed=seed * 100 + i, timing_scale=timing_scale, rules=preset.rules) for i, p in enumerate(players)]
+                    seed=seed * 100 + i, timing_scale=timing_scale / clock_rate, rules=preset.rules,
+                    clock_rate=clock_rate, strategy_data=strategy_data, lessons=lessons) for i, p in enumerate(players)]
     errors = []
     tasks = [asyncio.create_task(a.run()) for a in agents]
     try:
@@ -83,7 +92,9 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
     from .metrics import mechanical_conditions
     checks['mechanical_conditions'] = mechanical_conditions(checks)
     checks["settings"] = {"seed": seed, "day_seconds": day, "vote_seconds": vote,
-                          "night_seconds": night, "silence_after_dawn_seconds": preset.rules.silence_after_dawn_seconds}
+                          "night_seconds": night, "silence_after_dawn_seconds": preset.rules.silence_after_dawn_seconds,
+                          "clock_rate": clock_rate}
+    recorder.server_record['accepted_votes'] = [{'player_id': a.state.player_id, **v} for a in agents for v in a.state.own_votes]
     if output is not None:
         recorder.save(output, checks)
     return GameRun(checks, agents, recorder)

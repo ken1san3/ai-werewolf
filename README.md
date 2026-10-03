@@ -93,6 +93,32 @@ Docs/analysis/        2026-10 の停滞分析と試作
 
 `AGENTS.md`（AI向けの作業ルール）、`ROADMAP.md`（計画）、`WORKLOG.md`（作業記録）を参照してください。
 
+## Stage 3 の独立実験
+
+いつもの8090のllama-serverを止め、Windows Updateを一時停止し、AC電源で実行します。
+ランナーが実験専用8091のLLMを1つずつ管理し、実行中のスリープを抑止します。
+PowerShellを開いたまま次を実行してください。Codexアプリは不要です。
+
+```powershell
+Set-Location C:\AIwolf
+python -m ai_agent.marathon --hours 38 --run runs\stage3_20261003
+```
+
+中断後も同じコマンドで再開します。初回の締切は延長せず、完了した場面・ゲーム・感想戦を飛ばします。
+新しい実験は別の `--run` を指定します。別のPowerShellで進み具合を確認できます。
+
+```powershell
+Set-Location C:\AIwolf
+python -m ai_agent.marathon --status --run runs\stage3_20261003
+```
+
+前半は `content/marathon_scenes.json` の12場面を各5回とseed 1のゲーム、後半は助言なしの戦略で感想戦と教訓を使う系列と対照系列を巡回します。
+`content/marathon_calibration.json` に試運転で測った倍率を保存しています。
+後半12時間と全モデルの最速設定を優先し、時間のかかる前半の設定は見送ります。
+区切りのCodexは読み取り専用で1回だけ呼び、使えなければ正答率と8ゲームの時間条件で自動選定します。
+教訓は役職ごと8件・全員向け8件、各80字・参加者IDなし。ゲーム中に渡すのは本人の役職と全員向けの合計800字以内です。
+結果・教訓の履歴・CSV・失敗・最終の `REPORT.md` は指定した `runs/` 内に残り、Gitには含めません。
+
 ## ライセンス
 
 未定です。現時点では全権利を留保しています。

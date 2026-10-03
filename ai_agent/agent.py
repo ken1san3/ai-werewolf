@@ -29,8 +29,9 @@ def request(kind, game_id, payload):
 
 class Agent:
     def __init__(self, player_id, token, uri, game_id, roles, role_counts, llm, repetition,
-                 observe, *, seed, timing_scale=1, rules=None):
-        self.state = PlayerState(player_id)
+                 observe, *, seed, timing_scale=1, rules=None, clock_rate=1, strategy_data=None, lessons=None):
+        self.state = PlayerState(player_id, clock_rate=clock_rate)
+        self.strategy_data, self.lessons = strategy_data, lessons or {}
         self.token, self.uri, self.game_id = token, uri, game_id
         self.roles, self.role_counts, self.rules = roles, role_counts, rules
         self.llm, self.repetition, self.observe = llm, repetition, observe
@@ -70,7 +71,7 @@ class Agent:
             if message['type'] in {'action.accepted', 'action.rejected'}:
                 selected = self.pending_actions.pop(message['payload'].get('request_event_id'), None)
                 if selected and message['type'] == 'action.accepted':
-                    self.state.own_actions.append(selected)
+                    (self.state.own_actions if 'ability_id' in selected else self.state.own_votes).append(selected)
             if message["type"] == "chat.message":
                 data = message["payload"]["message"]
                 if data["player_id"] != self.state.player_id and re.search(
@@ -86,12 +87,14 @@ class Agent:
         if timeout <= 0:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(self.llm.complete(
-            lambda: messages(self.state, self.roles, self.role_counts, question + "\n" + self.disclosure_cue(channel), channel, rules=self.rules),
+            lambda: messages(self.state, self.roles, self.role_counts, question + "\n" + self.disclosure_cue(channel), channel, rules=self.rules, strategy_data=self.strategy_data, lessons=self.lessons.get(self.state.role_id, '')),
             player_id=self.state.player_id, purpose=purpose,
             seed=self.rng.randrange(1, 10**9), schema=schema, max_tokens=max_tokens,
         ), timeout)
 
     def disclosure_cue(self, channel):
+        if self.strategy_data is not None:
+            return '戦略上の理由がない名乗りは弾かれて書き直しになります。秘密チャットの本文を公開へコピーしないでください。'
         if channel != 'public':
             return STRATEGIES['disclosure_cues']['private']
         if strategy_for(self.roles[self.state.role_id])['disclosure'] == 'open':
@@ -231,7 +234,7 @@ class Agent:
             self.stale_suppressed += 1
             return False
         encoded = request(kind, self.game_id, payload)
-        if kind == 'ability.use':
+        if kind in {'ability.use', 'vote.cast'}:
             self.pending_actions[json.loads(encoded)['event_id']] = {'day': key[0], 'phase': key[1], **payload}
         await self.ws.send(encoded)
         return True
@@ -257,7 +260,7 @@ class Agent:
             channel = private_chat['channel']
             if key not in self.private_spoke:
                 self.private_spoke[key] = None
-                budget = min(14, state.seconds_left() - 8 * min(1, self.timing_scale))
+                budget = min(14 / state.clock_rate, state.seconds_left() - 8 * min(1, self.timing_scale) / state.clock_rate)
                 sent = False
                 if budget > .25:
                     try:
@@ -275,7 +278,7 @@ class Agent:
                     return
             heard = any(c['channel'] == channel and c['day'] == state.day and c['player_id'] in buddies for c in state.chats)
             sent_at = self.private_spoke[key]
-            if sent_at is not None and not heard and time.monotonic() - sent_at < 4 and state.seconds_left() > 8:
+            if sent_at is not None and not heard and time.monotonic() - sent_at < 4 / state.clock_rate and state.seconds_left() > 8 / state.clock_rate:
                 return
         vote = state.action("vote")
         ability = state.action("ability")
@@ -294,7 +297,7 @@ class Agent:
                 question = "今日の投票で誰を処刑しますか？" if vote else (
                     f"使用可能な能力（ID: {action['ability_id']}）の対象を選んでください。{action.get('description', '')}"
                 )
-                if private_chat and not vote:
+                if private_chat and not vote and self.strategy_data is None:
                     question += ' 秘密相談の仲間の案を読んで生存対象へ合わせてください。案が割れたら生存する仲間のID順で最初の提案を優先し、通知された仲間を敵として扱わないでください。'
                 target = await self.choose(question, candidates, "vote" if vote else "ability", channel=private_chat["channel"] if private_chat and not vote else "public")
                 chosen.append(target)
@@ -312,7 +315,7 @@ class Agent:
         co = state.action("co_declare")
         has_co = any(f['type'] == 'CO_DECLARED' and f['player_id'] == state.player_id and
                      f.get('claimed_role_id') == state.role_id for f in state.facts)
-        if co and strategy_for(self.roles[state.role_id])['disclosure'] == 'pressure' and under_pressure(state) and not has_co and state.day not in self.defensive_co_days:
+        if self.strategy_data is None and co and strategy_for(self.roles[state.role_id])['disclosure'] == 'pressure' and under_pressure(state) and not has_co and state.day not in self.defensive_co_days:
             if state.role_id in co['claimed_role_ids']:
                 if await self.speak(f"自分への処刑・投票を避けるため、{self.roles[state.role_id].name}COして、受理済みの能力選択があればその対象を示してください。まだ選んでいなければそう伝え、自分を『私』と呼んでください。", 'defensive_co', key,
                                     'co.declare', {'claimed_role_id': state.role_id}, 'comment', 160):

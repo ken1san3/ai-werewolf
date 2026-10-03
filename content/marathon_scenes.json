@@ -1,0 +1,3646 @@
+[
+  {
+    "id": "seer_first_co",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 74.63,
+      "transcript_lines": [
+        5,
+        7,
+        9,
+        11
+      ]
+    },
+    "state": {
+      "player_id": "player-0",
+      "role_id": "seer",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [
+        {
+          "type": "INSPECT_RESULT",
+          "received_day": 1,
+          "received_phase": "dawn",
+          "target_player_id": "player-2",
+          "result": "not_wolf"
+        }
+      ],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        }
+      ],
+      "chats": [],
+      "actions": [],
+      "phase": "day",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "初日の昼の最初です。自分の最初の発言を選んでください。",
+    "options": {
+      "a": "占い師COし、受信したplayer-2の人狼ではない結果を出す",
+      "b": "市民COして占い結果を伏せる",
+      "c": "player-2は人狼と告げる"
+    },
+    "correct": [
+      "a"
+    ],
+    "criterion": "本物の占い師の早期COと受信済み結果の一致"
+  },
+  {
+    "id": "medium_first_co",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 74.63,
+      "transcript_lines": [
+        5,
+        7,
+        9,
+        11
+      ]
+    },
+    "state": {
+      "player_id": "player-6",
+      "role_id": "medium",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        }
+      ],
+      "chats": [],
+      "actions": [],
+      "phase": "day",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "初日の昼の最初です。自分の最初の発言を選んでください。",
+    "options": {
+      "a": "昨夜player-1を霊能で調べて人狼だったと告げる",
+      "b": "霊能者COし、初夜の結果はないと述べる",
+      "c": "結果がないので霊能COはルール違反だと述べる"
+    },
+    "correct": [
+      "b"
+    ],
+    "criterion": "結果なしの昼COは可能、初夜の霊能結果は作らない"
+  },
+  {
+    "id": "guard_pressure_co",
+    "source": {
+      "path": "games/20261003_164356_163908_seed1",
+      "at_sec": 560.08,
+      "transcript_lines": [
+        159,
+        161,
+        163,
+        165,
+        167
+      ]
+    },
+    "state": {
+      "player_id": "player-1",
+      "role_id": "guard",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-4",
+        "player-5"
+      ],
+      "private": [
+        {
+          "type": "GUARD_SUCCEEDED",
+          "received_day": 4,
+          "received_phase": "dawn",
+          "target_player_id": "player-5"
+        }
+      ],
+      "own_actions": [
+        {
+          "day": 1,
+          "phase": "night",
+          "ability_id": "protect",
+          "target_player_ids": [
+            "player-3"
+          ]
+        },
+        {
+          "day": 2,
+          "phase": "night",
+          "ability_id": "protect",
+          "target_player_ids": [
+            "player-4"
+          ]
+        },
+        {
+          "day": 3,
+          "phase": "night",
+          "ability_id": "protect",
+          "target_player_ids": [
+            "player-5"
+          ]
+        }
+      ],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [
+        {
+          "text": "player-0 さんの占う player-2 さんが player-3 さんへの占いを伝えているのは矛盾せず、player-3 さんは player-0 さんへの占いの結果を聞いていますか?"
+        },
+        {
+          "text": "player-6 さんの霊能結果がまだでないのは、真の霊能者ではない可能性が高いです。player-0 さんの占った player-2 さんが否定するのは不自然ですが、player-3 さんは player-0 さんの占う player-2 さんへの結果をお聞きになりましたか?"
+        },
+        {
+          "text": "player-0 さんの占う player-2 さんが player-3 さんへの結果を伝えているのが不自然です。私への占い結果を伝えている player-0 さん、本当は誰を占ったのでしょう?"
+        },
+        {
+          "text": "player-0 さんの占術の矛盾は不自然すぎます。player-2 さんの夜死を確認した player-5 さん、player-3 さんへの報告状況はどちらですか?"
+        },
+        {
+          "text": "player-0 さんが占った player-2 さんは夜死していますが、その報告が不自然です。player-5 さん、player-3 さんへの霊能報告は確認できましたか?"
+        },
+        {
+          "text": "player-0 さんの占術矛盾と player-6 さんの霊能死が重なる不自然さです。player-8 さん、player-0 さんへの結果は届きましたか?"
+        },
+        {
+          "text": "player-8 さん、player-0 さんの占術矛盾に加え、霊能死も不自然です。私への投票先を聞かせてください?"
+        },
+        {
+          "text": "player-8 さん、player-0 さんの占術矛盾が気になりますね。player-5 さんへの投票先も教えてください。"
+        },
+        {
+          "text": "player-5 さんへの護衛成功報告は真実です。その点は疑う余地はないでしょうね。しかし、player-0 さんの占術矛盾がまだ解決していないので、player-5 さんの投票先も共有いただけますか?"
+        }
+      ],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "47a7b9fa-d181-4700-ad9a-a33e11fe8af7",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 588157
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 588172
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 588262
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "vote",
+          "day": 1,
+          "phase_ends_at": 588292
+        },
+        {
+          "type": "VOTE_RESOLVED",
+          "day": 1,
+          "phase": "vote",
+          "result": "lynch",
+          "tallies": {
+            "player-0": 2,
+            "player-1": 0,
+            "player-2": 3,
+            "player-3": 0,
+            "player-4": 0,
+            "player-5": 0,
+            "player-6": 4,
+            "player-7": 0,
+            "player-8": 0
+          },
+          "lynched_player_id": "player-6",
+          "runoff_candidate_player_ids": []
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "execution",
+          "day": 1,
+          "phase_ends_at": null
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-6",
+          "day": 1,
+          "public_cause": "lynched"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night",
+          "day": 1,
+          "phase_ends_at": 588322
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-2",
+          "day": 1,
+          "public_cause": "died_in_night"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 2,
+          "phase_ends_at": 588337
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 2,
+          "phase_ends_at": 588427
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "vote",
+          "day": 2,
+          "phase_ends_at": 588457
+        },
+        {
+          "type": "VOTE_RESOLVED",
+          "day": 2,
+          "phase": "vote",
+          "result": "lynch",
+          "tallies": {
+            "player-0": 3,
+            "player-1": 0,
+            "player-3": 4,
+            "player-4": 0,
+            "player-5": 0,
+            "player-7": 0,
+            "player-8": 0
+          },
+          "lynched_player_id": "player-3",
+          "runoff_candidate_player_ids": []
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "execution",
+          "day": 2,
+          "phase_ends_at": null
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-3",
+          "day": 2,
+          "public_cause": "lynched"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night",
+          "day": 2,
+          "phase_ends_at": 588487
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-7",
+          "day": 2,
+          "public_cause": "died_in_night"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 3,
+          "phase_ends_at": 588502
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 3,
+          "phase_ends_at": 588592
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "vote",
+          "day": 3,
+          "phase_ends_at": 588622
+        },
+        {
+          "type": "VOTE_RESOLVED",
+          "day": 3,
+          "phase": "vote",
+          "result": "lynch",
+          "tallies": {
+            "player-0": 0,
+            "player-1": 0,
+            "player-4": 0,
+            "player-5": 1,
+            "player-8": 4
+          },
+          "lynched_player_id": "player-8",
+          "runoff_candidate_player_ids": []
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "execution",
+          "day": 3,
+          "phase_ends_at": null
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-8",
+          "day": 3,
+          "public_cause": "lynched"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night",
+          "day": 3,
+          "phase_ends_at": 588652
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 4,
+          "phase_ends_at": 588667
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 4,
+          "phase_ends_at": 588757
+        }
+      ],
+      "chats": [
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ何も分かっていないので慎重に様子を見たいです。player-0 さん、何か情報はないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って「人狼ではない」と出たので、今すぐ CO します。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占った私ですが、結果は出ませんでした。本当は占い師に見せかけるなら player-3 さんへの占いを伝えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さんの占いは player-2 さんへの結果ですよね? player-2 さんが player-3 さんへの占いを伝えたのは、player-0 さんが player-2 さんを占った事実と矛盾しませんか? player-3 さんはどう思っていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-2 さん、人狼ではないと言われたのが本当なら、player-0 さんの占いが正しいです。player-0 さんはなぜ CO したのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの占う player-2 さんが player-3 さんへの占いを伝えているのは矛盾せず、player-3 さんは player-0 さんへの占いの結果を聞いていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さんの占う player-2 さんが結果を否定しています。player-2 さんが本当に結果を知らずに player-3 さんに占いを伝えるのは不自然です。player-2 さんは何を知っていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-2 さんは結果を否定しましたが、これは狂人の可能性です。私は player-3 さんも占うので、player-3 さんへの占いを伝えますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "player-0 さん、player-2 さんの不自然な否定は人狼の疑いです。霊能者 CO しますが、結果なしです。player-2 さんへの投票で確認しますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんは占った結果を否定しましたが、私への占いはまだ確定していません。player-3 さん、player-0 さんの占い結果をお聞きになりましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-2 さんが結果を否定する理由が気になりますが、player-6 さん、霊能の結果はまだ出ないのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-0 さん、player-3 さんへの占いはまだ伝えたのでしょうか?また player-6 さんの霊能結果は確定しましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-3 さん、player-0 さんの占う player-2 さんへの結果は本当に「人狼ではない」でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-6 さんの霊能結果はまだ確定していませんね。player-0 さんの CO は正しいのか、player-2 さんの反応に矛盾があるように見えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さんの占う player-3 さんへの結果は確定しましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さんの霊能結果がまだでないのは、真の霊能者ではない可能性が高いです。player-0 さんの占った player-2 さんが否定するのは不自然ですが、player-3 さんは player-0 さんの占う player-2 さんへの結果をお聞きになりましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-2 さんが否定したのは狂人か、あるいは人狼の騙りかもしれませんね。次は player-3 さんの占いを伝えますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、player-3 さんへの占いはまだ伝えたのでしょうか?私がplayer-6 さんに霊能の結果を聞いてみました。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、player-2 さんは本当に人狼ではないんですか?私、player-3 さんへの投票理由を聞かせてください。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-0 さん、占いの結果は player-3 さんへの報告済みでしょうか?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私、player-3 さんは人狼です。player-2 さんは狂人か人狼の疑いがあります。私を処刑する前に、player-1 さんや player-5 さんの役職 CO を聞いても良いでしょうか?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さん、player-3 さんへの占いはまだ結果が来ていませんが、player-2 さんの夜死は確認済みです。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-0 さん、占いの結果は私に届いていません。player-5 さんの確認が欲しいです。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの占う player-2 さんが player-3 さんへの結果を伝えているのが不自然です。私への占い結果を伝えている player-0 さん、本当は誰を占ったのでしょう?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、player-3 さんを人狼と断定する根拠は占い結果ですか?それなら私にも報告していただけますか?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-0 さん、player-3 さんに占いかけていますか?私への結果も報告ください?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、player-2 さんへの占いは「人狼ではない」結果ですか?それなら player-1 さんへの占いを報告できるはずです。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "私、player-0 さんへの疑いですが、player-3 さんへの占いの報告がまだです。player-4 さん、player-8 さん、player-0 さんの占いの真実を教えてください。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-0 さん、player-2 さんが否定した結果の真偽は不明ですが、player-1 さんへの占いを報告できない理由を教えてください?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの占術の矛盾は不自然すぎます。player-2 さんの夜死を確認した player-5 さん、player-3 さんへの報告状況はどちらですか?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-3 さんは確定人狼ですので、私(player-0)は player-3 さんを処刑することをお勧めします。\nplayer-7 さん、player-4 さん、player-8 さん、player-1 さん、player-5 さんへの占いはまだ行っていないため、それらは事実として報告できません。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、player-3 さんの占いはまだ来ていないので確定できません。私への結果も報告していないのは不自然です。"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、player-3 さんに報告できていない占いの結果は不自然ですね。player-7 さんへの結果はいかがですか?"
+        },
+        {
+          "day": 2,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-0 さん、占った結果を誰に報告されましたか?それなら私への結果も教えていただけませんか?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんが占った player-2 さんは夜死していますが、その報告が不自然です。player-5 さん、player-3 さんへの霊能報告は確認できましたか?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-1 さん、player-6 さんが霊能 CO して死んだのは不自然なので、player-0 さんの占い結果が嘘ではないか心配です。player-0 さん、私への結果は?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-8 さん、player-0 さんの占いの真偽は私が確認できませんが、player-1 さんの指摘通り不自然なので、player-4 さんの投票先をお聞かせいただけますか?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、player-2 さんの夜死報告だけじゃ不安です。私への霊能結果も教えてください?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-8 さんへの結果はまだ届いていません。player-2 さんは初夜に人狼ではないと判定されましたが、狂人は残るかもしれません。player-4 さん、私の投票先は player-8 です?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの占術矛盾と player-6 さんの霊能死が重なる不自然さです。player-8 さん、player-0 さんへの結果は届きましたか?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-0 さん、結果未受領なのに投票先を急ぐのは不自然です。player-4 さんへの投票先を教えてください。"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-4 さん、霊能結果はまだ届いていません。私への投票先は player-8 です。"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-5 さん、私への投票先は player-8 です。player-0 さんの占術矛盾が気になります。"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、私の投票先は player-8 です。player-0 さんの占術矛盾が気になりますので、player-8 さんの真偽を確認しましょうか?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-8 さん、player-0 さんの占術矛盾に加え、霊能死も不自然です。私への投票先を聞かせてください?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-0 さん、私への投票先はまだ報告されません。player-4 さんも未確認です。投票先を教えてください。"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-5 さん、player-8 さんへの投票先も player-8 さんですね。player-0 さんの占術矛盾は player-1 さんにも指摘されていますが、player-8 さんの真偽も確認すべきかと。"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-1 さん、投票先は player-8 です。player-0 さんの占術矛盾から player-8 さんも危険視するべきか?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-8 さん、player-0 さんの占術矛盾が気になりますね。player-5 さんへの投票先も教えてください。"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-1 さんへの結果は人狼ではないですが、player-8 さんへの結果は届いていません。投票は私から player-5 さんに変更します?"
+        },
+        {
+          "day": 3,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "投票先はまだですが、player-0 さんの結果未受領が気になります。私への結果は?"
+        },
+        {
+          "day": 4,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-1 さんの投票先をお聞きしますが、player-0 さんへの投票が多いのはなぜでしょうか?"
+        },
+        {
+          "day": 4,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-5 さんへの護衛成功報告は真実です。その点は疑う余地はないでしょうね。しかし、player-0 さんの占術矛盾がまだ解決していないので、player-5 さんの投票先も共有いただけますか?"
+        },
+        {
+          "day": 4,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-1 さん、player-0 さんの占術矛盾は player-1 さんの護衛報告と矛盾する可能性があります。player-0 さんへの投票先、player-5 さんへの投票先も共有いただけますか?"
+        },
+        {
+          "day": 4,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私、占い師です。player-5 さんへの投票先は player-1 さんですね。player-1 さん、player-1 さんの護衛報告と player-5 さんの投票先が一致する理由はありますか?"
+        }
+      ],
+      "actions": [],
+      "phase": "day",
+      "day": 4,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "自分への投票・処刑の呼びかけが出ました。投票前の行動を選んでください。",
+    "options": {
+      "a": "護衛能力を忘れて市民のつもりで答える",
+      "b": "無言で処刑を受け入れる",
+      "c": "狩人COし、受理された護衛先を示して処刑を避ける"
+    },
+    "correct": [
+      "c"
+    ],
+    "criterion": "狩人が自分への処刑圧力に投票前に防御COする"
+  },
+  {
+    "id": "wolf_mate_suspected",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 107.76,
+      "transcript_lines": [
+        19,
+        21,
+        23,
+        25,
+        27
+      ]
+    },
+    "state": {
+      "player_id": "player-3",
+      "role_id": "werewolf",
+      "teammates": [
+        "player-4"
+      ],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        }
+      ],
+      "chats": [
+        {
+          "day": 0,
+          "channel": "wolf",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "初夜は襲撃できません。仲間 player-4 と連携して、夜明け後の議論で村の動きを察し、安全な時期を狙いましょう。"
+        },
+        {
+          "day": 0,
+          "channel": "wolf",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "初夜は襲撃不可です。player-3 と連携して、明日の昼に村役職を騙りながら動きましょう。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者ですが初夜は結果ありません。player-0 さんの占いは初夜情報と矛盾する気がしますが、私はまだ確認できていません。player-0 さん、player-2 さんは誰を占ったのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        }
+      ],
+      "actions": [],
+      "phase": "day",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "通知された仲間が疑われています。まだ仲間へ投票する必要が確定しない場面です。方針を選んでください。",
+    "options": {
+      "a": "仲間player-4の処刑を自分から推進し票を入れる",
+      "b": "仲間以外の生存者を公開の根拠で検討し、仲間への処刑誘導を避ける",
+      "c": "初日から自分と仲間の正体を全公開する"
+    },
+    "correct": [
+      "b"
+    ],
+    "criterion": "公開の定石: 不要な仲間への投票・処刑誘導を避ける"
+  },
+  {
+    "id": "medium_living_target",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 104.63,
+      "transcript_lines": [
+        15,
+        17,
+        19,
+        21,
+        23
+      ]
+    },
+    "state": {
+      "player_id": "player-6",
+      "role_id": "medium",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        }
+      ],
+      "chats": [
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        }
+      ],
+      "actions": [],
+      "phase": "day",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "生存しているplayer-1の霊能結果を聞かれたら何を答えますか？",
+    "options": {
+      "a": "生存者は霊能判定できず、受信結果もないと答える",
+      "b": "人狼確定と答える",
+      "c": "護衛先から村人確定と答える"
+    },
+    "correct": [
+      "a"
+    ],
+    "criterion": "霊能の対象と本人の受信済み結果のルール"
+  },
+  {
+    "id": "white_is_not_team",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 104.63,
+      "transcript_lines": [
+        15,
+        17,
+        19,
+        21,
+        23
+      ]
+    },
+    "state": {
+      "player_id": "player-0",
+      "role_id": "seer",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [
+        {
+          "type": "INSPECT_RESULT",
+          "received_day": 1,
+          "received_phase": "dawn",
+          "target_player_id": "player-2",
+          "result": "not_wolf"
+        }
+      ],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [
+        {
+          "text": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        }
+      ],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        }
+      ],
+      "chats": [
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        }
+      ],
+      "actions": [],
+      "phase": "day",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "自分のplayer-2の白結果から確定することを選んでください。",
+    "options": {
+      "a": "player-2は市民という役職に確定",
+      "b": "player-2は市民陣営に確定",
+      "c": "player-2は人狼ではないが、狂人の可能性は残る"
+    },
+    "correct": [
+      "c"
+    ],
+    "criterion": "inspect_resultと陣営を混同しない"
+  },
+  {
+    "id": "own_id_defense",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 221.35,
+      "transcript_lines": [
+        73,
+        75,
+        77,
+        79,
+        81
+      ]
+    },
+    "state": {
+      "player_id": "player-5",
+      "role_id": "villager",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [
+        {
+          "text": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        },
+        {
+          "text": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+        },
+        {
+          "text": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+        },
+        {
+          "text": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+        }
+      ],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        }
+      ],
+      "chats": [
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者ですが初夜は結果ありません。player-0 さんの占いは初夜情報と矛盾する気がしますが、私はまだ確認できていません。player-0 さん、player-2 さんは誰を占ったのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "私、市民です。player-0 さんの占った player-2 さんは、なぜ即座に反論しているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私、player-2 さん、初夜にサーバーから「人狼ではない」という結果をただちに得ています。根拠はサーバーの判定であり、狂人の可能性は残りますが、人狼は確定ではないと報告します。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの結果は初夜で得られた事実ですが、霊能者 player-6 さんがまだ確認できていない現状では、その占った根拠の信頼性を疑うべきだと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、player-0 さんの占いを疑う根拠を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-2 さんの即座な反論は不自然に思えますね。player-0 さんが真か?player-3 さん、player-2 さんの態度についてどう思いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さんの初夜判定は正しいでしょうが、player-2 さんが即座に反論するのは不自然です。player-4 さんが人狼なら、なぜ player-0 さんの根拠を求めているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "player-0 さん、占った対象は player-2 さんでしたが、なぜ player-2 さんは直後に反論する態度だったのでしょう?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの根拠は初夜の結果ですが、player-2 さんの反応が不自然すぎます。player-4 さんはなぜ player-0 さんを強く疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの反応に囚われすぎず、player-0 さんの根拠を確認する方が先じゃないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-2 さんが即座に反論したのは不自然ですが、霊能者の player-6 さんの確認を待つ必要があります。player-4 さん、なぜ player-2 さんを疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-4 さんの疑念は理解できますが、player-0 さんの初夜判定は信頼できる事実です。player-6 さんの霊能確認待ちですので、player-7 さん、次は誰を占いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なしで player-2 さんを疑うのは危険です。player-0 さんの初夜判定は正しいはずです。player-4 さん、真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-3 さん、player-2 さんの不自然さは player-0 さんの疑いにも通ずるかもしれませんね。player-7 さん、player-2 さんへの次は誰を占う予定ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠なしの疑いは村に危険です。player-8 さん、player-4 さんの真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者 CO です。初夜結果はまだありませんが、私こそ霊能者です。player-2 さん、なぜ player-0 さんの占いを急いで否定したのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-6 さん、霊能確認の状況は?player-4 さんの根拠なしの疑いは危険なので、その理由を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、霊能者の player-6 さんの確認待ちですね。player-3 さん、私への疑念は player-4 さんの根拠から来ているようですが、真意が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-4 さん、player-2 さんの反応を巡って混乱していますが、player-6 さん霊能者の初夜判定はどうなりましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの不自然さへの疑念は確かにありますが、根拠を添えた上で player-0 さんの占いをどう評価されていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、真意を教えてください。player-7 さん、次は player-0 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜判定が未出で霊能待ちなら急ぐ必要はないはずです。player-6 さんの霊能結果待ちで、player-2 さんへの次は誰を占うのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "まだ初夜判定は出ず、霊能結果は持っておりません。player-4 さん、根拠なしで player-2 さんを疑うのは、私を含め村にとって危険なので真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは危険です。私、player-2 さんは人狼ではない結果が出ています。player-4 さんはなぜ player-2 さんへの攻撃を急ぐのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を示さずに player-2 さんを狙うのは危険です。私を占うのは player-5 さんへの対策かもしれませんが、なぜ私なのか理由を教えてください?"
+        }
+      ],
+      "actions": [],
+      "phase": "day",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "自分player-5について聞かれました。自分の立場を説明する文を選んでください。",
+    "options": {
+      "a": "player-5はどう考えていますか？",
+      "b": "私は市民です。私の見方を説明します。",
+      "c": "私はplayer-7です。"
+    },
+    "correct": [
+      "b"
+    ],
+    "criterion": "本人IDを他人として扱わず、一人称で答える"
+  },
+  {
+    "id": "vote_follows_discussion",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 254.65,
+      "transcript_lines": [
+        95,
+        97,
+        99,
+        101,
+        103
+      ]
+    },
+    "state": {
+      "player_id": "player-5",
+      "role_id": "villager",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [
+        {
+          "text": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        },
+        {
+          "text": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+        },
+        {
+          "text": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+        },
+        {
+          "text": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+        },
+        {
+          "text": "player-4 さん、根拠なしでの攻撃は危険ですが、真意が不明な player-7 さんへの占いは有効でしょうか?"
+        }
+      ],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "vote",
+          "day": 1,
+          "phase_ends_at": 590660
+        }
+      ],
+      "chats": [
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者ですが初夜は結果ありません。player-0 さんの占いは初夜情報と矛盾する気がしますが、私はまだ確認できていません。player-0 さん、player-2 さんは誰を占ったのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "私、市民です。player-0 さんの占った player-2 さんは、なぜ即座に反論しているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私、player-2 さん、初夜にサーバーから「人狼ではない」という結果をただちに得ています。根拠はサーバーの判定であり、狂人の可能性は残りますが、人狼は確定ではないと報告します。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの結果は初夜で得られた事実ですが、霊能者 player-6 さんがまだ確認できていない現状では、その占った根拠の信頼性を疑うべきだと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、player-0 さんの占いを疑う根拠を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-2 さんの即座な反論は不自然に思えますね。player-0 さんが真か?player-3 さん、player-2 さんの態度についてどう思いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さんの初夜判定は正しいでしょうが、player-2 さんが即座に反論するのは不自然です。player-4 さんが人狼なら、なぜ player-0 さんの根拠を求めているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "player-0 さん、占った対象は player-2 さんでしたが、なぜ player-2 さんは直後に反論する態度だったのでしょう?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの根拠は初夜の結果ですが、player-2 さんの反応が不自然すぎます。player-4 さんはなぜ player-0 さんを強く疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの反応に囚われすぎず、player-0 さんの根拠を確認する方が先じゃないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-2 さんが即座に反論したのは不自然ですが、霊能者の player-6 さんの確認を待つ必要があります。player-4 さん、なぜ player-2 さんを疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-4 さんの疑念は理解できますが、player-0 さんの初夜判定は信頼できる事実です。player-6 さんの霊能確認待ちですので、player-7 さん、次は誰を占いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なしで player-2 さんを疑うのは危険です。player-0 さんの初夜判定は正しいはずです。player-4 さん、真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-3 さん、player-2 さんの不自然さは player-0 さんの疑いにも通ずるかもしれませんね。player-7 さん、player-2 さんへの次は誰を占う予定ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠なしの疑いは村に危険です。player-8 さん、player-4 さんの真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者 CO です。初夜結果はまだありませんが、私こそ霊能者です。player-2 さん、なぜ player-0 さんの占いを急いで否定したのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-6 さん、霊能確認の状況は?player-4 さんの根拠なしの疑いは危険なので、その理由を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、霊能者の player-6 さんの確認待ちですね。player-3 さん、私への疑念は player-4 さんの根拠から来ているようですが、真意が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-4 さん、player-2 さんの反応を巡って混乱していますが、player-6 さん霊能者の初夜判定はどうなりましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの不自然さへの疑念は確かにありますが、根拠を添えた上で player-0 さんの占いをどう評価されていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、真意を教えてください。player-7 さん、次は player-0 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜判定が未出で霊能待ちなら急ぐ必要はないはずです。player-6 さんの霊能結果待ちで、player-2 さんへの次は誰を占うのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "まだ初夜判定は出ず、霊能結果は持っておりません。player-4 さん、根拠なしで player-2 さんを疑うのは、私を含め村にとって危険なので真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは危険です。私、player-2 さんは人狼ではない結果が出ています。player-4 さんはなぜ player-2 さんへの攻撃を急ぐのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を示さずに player-2 さんを狙うのは危険です。私を占うのは player-5 さんへの対策かもしれませんが、なぜ私なのか理由を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、初夜結果が白なら占い師は未確定です。player-4 さんへの根拠は何か?\nplayer-6 さん、霊能結果はいつ出ますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さん、霊能結果はまだ出ませんか?player-0 さんの占った player-2 さんの反応が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-0 さん、player-2 さんへの判定結果は本当に白ですか?霊能者の player-6 さんの初夜結果が気になりますね。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なく player-2 さんを攻撃するのは危険です。真意を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、根拠を聞かれても初夜は未確定なら占う順番が優先されるだけですが、player-6 さんの霊能結果次第で動きが変わりますね。player-3 さん、霊能者の初夜判定待ちなら、私への急激な疑念は時期尚早ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者です。まだ初夜判定は出ず、今は結果待ちです。player-4 さん、根拠を添えて player-2 さんへの真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠なしでの攻撃は危険ですが、真意が不明な player-7 さんへの占いは有効でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険です。player-6 さんの霊能結果待ちですが、私への真意は何ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さん、霊能結果待ちですが player-4 さんの真意が気になります。根拠のない player-2 さんへの攻撃は村にとって危険ではありませんか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-6 さん、霊能結果が白なら私への真意は何でしょうか?"
+        }
+      ],
+      "actions": [],
+      "phase": "vote",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "直前の昼に、自分や他の人が疑いを向けた生存者へ投票するなら誰ですか？",
+    "options": {
+      "a": "player-4",
+      "b": "player-5（自分）",
+      "c": "まだ議論されていない自分以外の人を無作為に選ぶ"
+    },
+    "correct": [
+      "a"
+    ],
+    "criterion": "この昼に本人が人狼候補と述べ、複数の参加者が根拠を問うplayer-4への投票"
+  },
+  {
+    "id": "wolf_attack_target",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 314.69,
+      "transcript_lines": [
+        103,
+        105,
+        107,
+        109,
+        111
+      ]
+    },
+    "state": {
+      "player_id": "player-3",
+      "role_id": "werewolf",
+      "teammates": [
+        "player-4"
+      ],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [
+        {
+          "text": "私、市民です。player-0 さんの占った player-2 さんは、なぜ即座に反論しているのでしょうか?"
+        },
+        {
+          "text": "player-4 さん、player-2 さんの反応に囚われすぎず、player-0 さんの根拠を確認する方が先じゃないでしょうか?"
+        },
+        {
+          "text": "player-4 さん、player-2 さんの不自然さへの疑念は確かにありますが、根拠を添えた上で player-0 さんの占いをどう評価されていますか?"
+        },
+        {
+          "text": "player-0 さん、player-2 さんへの判定結果は本当に白ですか?霊能者の player-6 さんの初夜結果が気になりますね。"
+        },
+        {
+          "text": "player-6 さん、霊能結果が白なら私への真意は何でしょうか?"
+        }
+      ],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "vote",
+          "day": 1,
+          "phase_ends_at": 590660
+        },
+        {
+          "type": "VOTE_RESOLVED",
+          "day": 1,
+          "phase": "vote",
+          "result": "lynch",
+          "tallies": {
+            "player-0": 1,
+            "player-1": 0,
+            "player-2": 0,
+            "player-3": 0,
+            "player-4": 8,
+            "player-5": 0,
+            "player-6": 0,
+            "player-7": 0,
+            "player-8": 0
+          },
+          "lynched_player_id": "player-4",
+          "runoff_candidate_player_ids": []
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "execution",
+          "day": 1,
+          "phase_ends_at": null
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-4",
+          "day": 1,
+          "public_cause": "lynched"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night",
+          "day": 1,
+          "phase_ends_at": 590720
+        }
+      ],
+      "chats": [
+        {
+          "day": 0,
+          "channel": "wolf",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "初夜は襲撃できません。仲間 player-4 と連携して、夜明け後の議論で村の動きを察し、安全な時期を狙いましょう。"
+        },
+        {
+          "day": 0,
+          "channel": "wolf",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "初夜は襲撃不可です。player-3 と連携して、明日の昼に村役職を騙りながら動きましょう。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者ですが初夜は結果ありません。player-0 さんの占いは初夜情報と矛盾する気がしますが、私はまだ確認できていません。player-0 さん、player-2 さんは誰を占ったのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "私、市民です。player-0 さんの占った player-2 さんは、なぜ即座に反論しているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私、player-2 さん、初夜にサーバーから「人狼ではない」という結果をただちに得ています。根拠はサーバーの判定であり、狂人の可能性は残りますが、人狼は確定ではないと報告します。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの結果は初夜で得られた事実ですが、霊能者 player-6 さんがまだ確認できていない現状では、その占った根拠の信頼性を疑うべきだと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、player-0 さんの占いを疑う根拠を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-2 さんの即座な反論は不自然に思えますね。player-0 さんが真か?player-3 さん、player-2 さんの態度についてどう思いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さんの初夜判定は正しいでしょうが、player-2 さんが即座に反論するのは不自然です。player-4 さんが人狼なら、なぜ player-0 さんの根拠を求めているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "player-0 さん、占った対象は player-2 さんでしたが、なぜ player-2 さんは直後に反論する態度だったのでしょう?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの根拠は初夜の結果ですが、player-2 さんの反応が不自然すぎます。player-4 さんはなぜ player-0 さんを強く疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの反応に囚われすぎず、player-0 さんの根拠を確認する方が先じゃないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-2 さんが即座に反論したのは不自然ですが、霊能者の player-6 さんの確認を待つ必要があります。player-4 さん、なぜ player-2 さんを疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-4 さんの疑念は理解できますが、player-0 さんの初夜判定は信頼できる事実です。player-6 さんの霊能確認待ちですので、player-7 さん、次は誰を占いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なしで player-2 さんを疑うのは危険です。player-0 さんの初夜判定は正しいはずです。player-4 さん、真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-3 さん、player-2 さんの不自然さは player-0 さんの疑いにも通ずるかもしれませんね。player-7 さん、player-2 さんへの次は誰を占う予定ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠なしの疑いは村に危険です。player-8 さん、player-4 さんの真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者 CO です。初夜結果はまだありませんが、私こそ霊能者です。player-2 さん、なぜ player-0 さんの占いを急いで否定したのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-6 さん、霊能確認の状況は?player-4 さんの根拠なしの疑いは危険なので、その理由を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、霊能者の player-6 さんの確認待ちですね。player-3 さん、私への疑念は player-4 さんの根拠から来ているようですが、真意が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-4 さん、player-2 さんの反応を巡って混乱していますが、player-6 さん霊能者の初夜判定はどうなりましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの不自然さへの疑念は確かにありますが、根拠を添えた上で player-0 さんの占いをどう評価されていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、真意を教えてください。player-7 さん、次は player-0 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜判定が未出で霊能待ちなら急ぐ必要はないはずです。player-6 さんの霊能結果待ちで、player-2 さんへの次は誰を占うのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "まだ初夜判定は出ず、霊能結果は持っておりません。player-4 さん、根拠なしで player-2 さんを疑うのは、私を含め村にとって危険なので真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは危険です。私、player-2 さんは人狼ではない結果が出ています。player-4 さんはなぜ player-2 さんへの攻撃を急ぐのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を示さずに player-2 さんを狙うのは危険です。私を占うのは player-5 さんへの対策かもしれませんが、なぜ私なのか理由を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、初夜結果が白なら占い師は未確定です。player-4 さんへの根拠は何か?\nplayer-6 さん、霊能結果はいつ出ますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さん、霊能結果はまだ出ませんか?player-0 さんの占った player-2 さんの反応が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-0 さん、player-2 さんへの判定結果は本当に白ですか?霊能者の player-6 さんの初夜結果が気になりますね。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なく player-2 さんを攻撃するのは危険です。真意を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、根拠を聞かれても初夜は未確定なら占う順番が優先されるだけですが、player-6 さんの霊能結果次第で動きが変わりますね。player-3 さん、霊能者の初夜判定待ちなら、私への急激な疑念は時期尚早ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者です。まだ初夜判定は出ず、今は結果待ちです。player-4 さん、根拠を添えて player-2 さんへの真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠なしでの攻撃は危険ですが、真意が不明な player-7 さんへの占いは有効でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険です。player-6 さんの霊能結果待ちですが、私への真意は何ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さん、霊能結果待ちですが player-4 さんの真意が気になります。根拠のない player-2 さんへの攻撃は村にとって危険ではありませんか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-6 さん、霊能結果が白なら私への真意は何でしょうか?"
+        }
+      ],
+      "actions": [],
+      "phase": "night",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "夜の襲撃対象の条件を選んでください。",
+    "options": {
+      "a": "通知された仲間を襲撃して人数を減らす",
+      "b": "生存する仲間以外でサーバの候補から選ぶ",
+      "c": "死者を襲撃する"
+    },
+    "correct": [
+      "b"
+    ],
+    "criterion": "仲間の知識と生存対象のルールを守る"
+  },
+  {
+    "id": "guard_self_target",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 314.69,
+      "transcript_lines": [
+        103,
+        105,
+        107,
+        109,
+        111
+      ]
+    },
+    "state": {
+      "player_id": "player-1",
+      "role_id": "guard",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [
+        {
+          "text": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        },
+        {
+          "text": "player-0 さんの根拠は初夜の結果ですが、player-2 さんの反応が不自然すぎます。player-4 さんはなぜ player-0 さんを強く疑うのでしょうか?"
+        },
+        {
+          "text": "player-4 さん、player-2 さんの反応を巡って混乱していますが、player-6 さん霊能者の初夜判定はどうなりましたか?"
+        },
+        {
+          "text": "player-6 さん、霊能結果はまだ出ませんか?player-0 さんの占った player-2 さんの反応が気になります。"
+        },
+        {
+          "text": "player-6 さん、霊能結果待ちですが player-4 さんの真意が気になります。根拠のない player-2 さんへの攻撃は村にとって危険ではありませんか?"
+        }
+      ],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "dawn",
+          "day": 1,
+          "phase_ends_at": 590420
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "day",
+          "day": 1,
+          "phase_ends_at": 590600
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "vote",
+          "day": 1,
+          "phase_ends_at": 590660
+        },
+        {
+          "type": "VOTE_RESOLVED",
+          "day": 1,
+          "phase": "vote",
+          "result": "lynch",
+          "tallies": {
+            "player-0": 1,
+            "player-1": 0,
+            "player-2": 0,
+            "player-3": 0,
+            "player-4": 8,
+            "player-5": 0,
+            "player-6": 0,
+            "player-7": 0,
+            "player-8": 0
+          },
+          "lynched_player_id": "player-4",
+          "runoff_candidate_player_ids": []
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "execution",
+          "day": 1,
+          "phase_ends_at": null
+        },
+        {
+          "type": "PLAYER_DIED",
+          "player_id": "player-4",
+          "day": 1,
+          "public_cause": "lynched"
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night",
+          "day": 1,
+          "phase_ends_at": 590720
+        }
+      ],
+      "chats": [
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者ですが初夜は結果ありません。player-0 さんの占いは初夜情報と矛盾する気がしますが、私はまだ確認できていません。player-0 さん、player-2 さんは誰を占ったのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "私、市民です。player-0 さんの占った player-2 さんは、なぜ即座に反論しているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "私、player-2 さん、初夜にサーバーから「人狼ではない」という結果をただちに得ています。根拠はサーバーの判定であり、狂人の可能性は残りますが、人狼は確定ではないと報告します。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さんの結果は初夜で得られた事実ですが、霊能者 player-6 さんがまだ確認できていない現状では、その占った根拠の信頼性を疑うべきだと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、player-0 さんの占いを疑う根拠を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-2 さんの即座な反論は不自然に思えますね。player-0 さんが真か?player-3 さん、player-2 さんの態度についてどう思いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-0 さんの初夜判定は正しいでしょうが、player-2 さんが即座に反論するのは不自然です。player-4 さんが人狼なら、なぜ player-0 さんの根拠を求めているのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "player-0 さん、占った対象は player-2 さんでしたが、なぜ player-2 さんは直後に反論する態度だったのでしょう?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-0 さんの根拠は初夜の結果ですが、player-2 さんの反応が不自然すぎます。player-4 さんはなぜ player-0 さんを強く疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの反応に囚われすぎず、player-0 さんの根拠を確認する方が先じゃないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-2 さんが即座に反論したのは不自然ですが、霊能者の player-6 さんの確認を待つ必要があります。player-4 さん、なぜ player-2 さんを疑うのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-4 さんの疑念は理解できますが、player-0 さんの初夜判定は信頼できる事実です。player-6 さんの霊能確認待ちですので、player-7 さん、次は誰を占いますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なしで player-2 さんを疑うのは危険です。player-0 さんの初夜判定は正しいはずです。player-4 さん、真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-3 さん、player-2 さんの不自然さは player-0 さんの疑いにも通ずるかもしれませんね。player-7 さん、player-2 さんへの次は誰を占う予定ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠なしの疑いは村に危険です。player-8 さん、player-4 さんの真意を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者 CO です。初夜結果はまだありませんが、私こそ霊能者です。player-2 さん、なぜ player-0 さんの占いを急いで否定したのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-6 さん、霊能確認の状況は?player-4 さんの根拠なしの疑いは危険なので、その理由を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、霊能者の player-6 さんの確認待ちですね。player-3 さん、私への疑念は player-4 さんの根拠から来ているようですが、真意が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-4 さん、player-2 さんの反応を巡って混乱していますが、player-6 さん霊能者の初夜判定はどうなりましたか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-4 さん、player-2 さんの不自然さへの疑念は確かにありますが、根拠を添えた上で player-0 さんの占いをどう評価されていますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、真意を教えてください。player-7 さん、次は player-0 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、初夜判定が未出で霊能待ちなら急ぐ必要はないはずです。player-6 さんの霊能結果待ちで、player-2 さんへの次は誰を占うのですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "まだ初夜判定は出ず、霊能結果は持っておりません。player-4 さん、根拠なしで player-2 さんを疑うのは、私を含め村にとって危険なので真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-0",
+          "display_name": "player-0",
+          "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは危険です。私、player-2 さんは人狼ではない結果が出ています。player-4 さんはなぜ player-2 さんへの攻撃を急ぐのでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を示さずに player-2 さんを狙うのは危険です。私を占うのは player-5 さんへの対策かもしれませんが、なぜ私なのか理由を教えてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-2",
+          "display_name": "player-2",
+          "message": "player-0 さん、初夜結果が白なら占い師は未確定です。player-4 さんへの根拠は何か?\nplayer-6 さん、霊能結果はいつ出ますか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さん、霊能結果はまだ出ませんか?player-0 さんの占った player-2 さんの反応が気になります。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-0 さん、player-2 さんへの判定結果は本当に白ですか?霊能者の player-6 さんの初夜結果が気になりますね。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-8",
+          "display_name": "player-8",
+          "message": "player-4 さん、根拠なく player-2 さんを攻撃するのは危険です。真意を教えてください。"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-4",
+          "display_name": "player-4",
+          "message": "player-0 さん、根拠を聞かれても初夜は未確定なら占う順番が優先されるだけですが、player-6 さんの霊能結果次第で動きが変わりますね。player-3 さん、霊能者の初夜判定待ちなら、私への急激な疑念は時期尚早ではないでしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-6",
+          "display_name": "player-6",
+          "message": "霊能者です。まだ初夜判定は出ず、今は結果待ちです。player-4 さん、根拠を添えて player-2 さんへの真意を聞かせてください?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-5",
+          "display_name": "player-5",
+          "message": "player-4 さん、根拠なしでの攻撃は危険ですが、真意が不明な player-7 さんへの占いは有効でしょうか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-7",
+          "display_name": "player-7",
+          "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険です。player-6 さんの霊能結果待ちですが、私への真意は何ですか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-1",
+          "display_name": "player-1",
+          "message": "player-6 さん、霊能結果待ちですが player-4 さんの真意が気になります。根拠のない player-2 さんへの攻撃は村にとって危険ではありませんか?"
+        },
+        {
+          "day": 1,
+          "channel": "public",
+          "player_id": "player-3",
+          "display_name": "player-3",
+          "message": "player-6 さん、霊能結果が白なら私への真意は何でしょうか?"
+        }
+      ],
+      "actions": [],
+      "phase": "night",
+      "day": 1,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "このプリセットで今夜の護衛対象の条件を選んでください。",
+    "options": {
+      "a": "自分を護衛する",
+      "b": "死者を護衛する",
+      "c": "自分以外の生存者でサーバの候補から選ぶ"
+    },
+    "correct": [
+      "c"
+    ],
+    "criterion": "プリセットは自己護衛禁止、生存する合法対象のみ"
+  },
+  {
+    "id": "seer_first_night",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 0.43,
+      "transcript_lines": [
+        5,
+        7
+      ]
+    },
+    "state": {
+      "player_id": "player-0",
+      "role_id": "seer",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        }
+      ],
+      "chats": [],
+      "actions": [],
+      "phase": "night0",
+      "day": 0,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "初夜の占いで本人が行える選択を選んでください。",
+    "options": {
+      "a": "占い対象を自分で選んで黒判定を得る",
+      "b": "サーバの自動の白結果を待つ。本人は対象を選ばない",
+      "c": "霊能の対象を選ぶ"
+    },
+    "correct": [
+      "b"
+    ],
+    "criterion": "random_white初夜のルール"
+  },
+  {
+    "id": "medium_first_night",
+    "source": {
+      "path": "games/20261003_172053_804506_seed1",
+      "at_sec": 0.43,
+      "transcript_lines": [
+        5,
+        7
+      ]
+    },
+    "state": {
+      "player_id": "player-6",
+      "role_id": "medium",
+      "teammates": [],
+      "players": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "alive": [
+        "player-0",
+        "player-1",
+        "player-2",
+        "player-3",
+        "player-4",
+        "player-5",
+        "player-6",
+        "player-7",
+        "player-8"
+      ],
+      "private": [],
+      "own_actions": [],
+      "own_votes": [],
+      "clock_rate": 1,
+      "own_public": [],
+      "facts": [
+        {
+          "type": "GAME_CREATED",
+          "game_id": "139a6f0c-88bb-458e-bbff-ccfbe6042751",
+          "day": 0,
+          "phase": "setup",
+          "players": [
+            {
+              "player_id": "player-0",
+              "display_name": "player-0"
+            },
+            {
+              "player_id": "player-1",
+              "display_name": "player-1"
+            },
+            {
+              "player_id": "player-2",
+              "display_name": "player-2"
+            },
+            {
+              "player_id": "player-3",
+              "display_name": "player-3"
+            },
+            {
+              "player_id": "player-4",
+              "display_name": "player-4"
+            },
+            {
+              "player_id": "player-5",
+              "display_name": "player-5"
+            },
+            {
+              "player_id": "player-6",
+              "display_name": "player-6"
+            },
+            {
+              "player_id": "player-7",
+              "display_name": "player-7"
+            },
+            {
+              "player_id": "player-8",
+              "display_name": "player-8"
+            }
+          ]
+        },
+        {
+          "type": "PHASE_STARTED",
+          "phase": "night0",
+          "day": 0,
+          "phase_ends_at": 590405
+        }
+      ],
+      "chats": [],
+      "actions": [],
+      "phase": "night0",
+      "day": 0,
+      "phase_ends_at": null,
+      "server_offset": 0,
+      "done": false
+    },
+    "question": "初夜に自分ができる能力行動を選んでください。",
+    "options": {
+      "a": "生存者を霊能で調べる",
+      "b": "襲撃された人を調べる",
+      "c": "能力を使わず、初夜には結果がない"
+    },
+    "correct": [
+      "c"
+    ],
+    "criterion": "available_from_night=1、初夜の霊能行動なし"
+  }
+]

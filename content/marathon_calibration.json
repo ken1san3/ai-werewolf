@@ -1,0 +1,123 @@
+{
+  "reference": "runs/stage3_pilot/qwen_game/checks.json",
+  "reference_public_messages": 68,
+  "reference_calls": 252,
+  "weights": {
+    "decision": 90,
+    "speech": 82,
+    "choice": 75
+  },
+  "method": "実ゲームの判断・本文・選択の呼出比率で試運転の実測時間を重み付けし、入力長差を補正。10%の余裕。発言品質による破棄増は倍率で揃わないためREPORTで差を記す。",
+  "settings": {
+    "qwen35-9b/off": {
+      "rate": 1,
+      "generation_tps": 79.97692334969605,
+      "prompt_tps": 2523.814555597178,
+      "load_sec": 4.4,
+      "expected_call_sec": 1.5404412632399327,
+      "supported": true,
+      "expected_game_sec": 750,
+      "expected_scene_sec": 110
+    },
+    "qwen35-9b/on": {
+      "rate": 0.073,
+      "generation_tps": 85.34525040228276,
+      "prompt_tps": 2064.4617810982263,
+      "load_sec": 4.4,
+      "expected_call_sec": 18.991638635889263,
+      "supported": true,
+      "expected_game_sec": 10274,
+      "expected_scene_sec": 1353
+    },
+    "swallow-20b/low": {
+      "rate": 0.083,
+      "generation_tps": 49.09711108594537,
+      "prompt_tps": 692.0456941417301,
+      "load_sec": 10.6,
+      "expected_call_sec": 16.56416647570149,
+      "supported": true,
+      "expected_game_sec": 9036,
+      "expected_scene_sec": 661
+    },
+    "swallow-20b/high": {
+      "rate": 0.07,
+      "generation_tps": 49.23038570332672,
+      "prompt_tps": 843.8034970813358,
+      "load_sec": 10.6,
+      "expected_call_sec": 19.773521882117244,
+      "supported": true,
+      "expected_game_sec": 10714,
+      "expected_scene_sec": 540
+    },
+    "gemma4-12b/off": {
+      "rate": 0.301,
+      "generation_tps": 24.608171327716413,
+      "prompt_tps": 1003.3486916104644,
+      "load_sec": 7.56,
+      "expected_call_sec": 4.594848098973392,
+      "supported": true,
+      "expected_game_sec": 2492,
+      "expected_scene_sec": 278
+    },
+    "gemma4-12b/on": {
+      "rate": 0.036,
+      "generation_tps": 25.608746766875257,
+      "prompt_tps": 1045.2403489547917,
+      "load_sec": 7.56,
+      "expected_call_sec": 37.57509123176342,
+      "supported": true,
+      "expected_game_sec": 20833,
+      "expected_scene_sec": 1147
+    },
+    "gemma4-26b/off": {
+      "rate": 0.213,
+      "generation_tps": 46.82206844709921,
+      "prompt_tps": 438.0278377187558,
+      "load_sec": 12.54,
+      "expected_call_sec": 6.49838240893674,
+      "supported": true,
+      "expected_game_sec": 3521,
+      "expected_scene_sec": 608
+    },
+    "gemma4-26b/on": {
+      "rate": 0.053,
+      "generation_tps": 51.002568473188006,
+      "prompt_tps": 544.6140439275702,
+      "load_sec": 12.54,
+      "expected_call_sec": 25.788283260737412,
+      "supported": true,
+      "expected_game_sec": 14151,
+      "expected_scene_sec": 1449
+    },
+    "qwen36-35b/off": {
+      "rate": 0.15,
+      "generation_tps": 48.43798810976931,
+      "prompt_tps": 286.62037060997153,
+      "load_sec": 12.61,
+      "expected_call_sec": 9.201576746219779,
+      "supported": true,
+      "expected_game_sec": 5000,
+      "expected_scene_sec": 929
+    },
+    "qwen36-35b/on": {
+      "rate": 0.04,
+      "generation_tps": 51.018193114713554,
+      "prompt_tps": 268.40777403656807,
+      "load_sec": 12.61,
+      "expected_call_sec": 34.1051848531222,
+      "supported": true,
+      "expected_game_sec": 18750,
+      "expected_scene_sec": 1965
+    },
+    "qwen38-27b/off": {
+      "rate": 0.061,
+      "generation_tps": 4.925458636517465,
+      "prompt_tps": 249.32600488073473,
+      "load_sec": 12.49,
+      "expected_call_sec": 22.410692526137936,
+      "supported": true,
+      "expected_game_sec": 12295,
+      "expected_scene_sec": 1101
+    }
+  }
+}

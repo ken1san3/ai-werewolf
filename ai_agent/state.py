@@ -15,6 +15,8 @@ class PlayerState:
     alive: set[str] = field(default_factory=set)
     private: list[dict] = field(default_factory=list)
     own_actions: list[dict] = field(default_factory=list)
+    own_votes: list[dict] = field(default_factory=list)
+    clock_rate: float = 1
     own_public: list[dict] = field(default_factory=list)
     facts: list[dict] = field(default_factory=list)
     chats: list[dict] = field(default_factory=list)
@@ -32,7 +34,7 @@ class PlayerState:
     def seconds_left(self):
         if self.phase_ends_at is None:
             return 0
-        return self.phase_ends_at - (time.monotonic() + self.server_offset)
+        return (self.phase_ends_at - (time.monotonic() * self.clock_rate + self.server_offset)) / self.clock_rate
 
     def action(self, kind):
         return next((a for a in self.actions if a["type"] == kind), None)
@@ -41,7 +43,7 @@ class PlayerState:
         if isinstance(message.get("timestamp"), int):
             # Server timestamps are integer seconds. Use the upper bound so
             # quantization cannot make a nearly expired action look fresh.
-            self.server_offset = message["timestamp"] + 1 - time.monotonic()
+            self.server_offset = message["timestamp"] + 1 - time.monotonic() * self.clock_rate
         kind, payload = message["type"], message["payload"]
         if kind == "game.state_sync":
             if payload["self"]["player_id"] != self.player_id:
