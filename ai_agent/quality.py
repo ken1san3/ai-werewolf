@@ -1,6 +1,6 @@
 """Public wording checks using the player's received living/dead state."""
 import re
-from .claims import denied_statement, unquoted
+from .claims import unquoted
 from .strategy import STRATEGIES
 
 
@@ -24,21 +24,13 @@ def quality_reason(state, text, roles):
     data = STRATEGIES['quality_patterns']
     if any(re.search(pattern, plain) for pattern in data['meta']):
         return 'meta_refusal'
-    facts = [*data['self_role_unknown'], *(data['self_dead'] if state.player_id in state.alive else [])]
-    contrast = r'(?<=ません)(?:が|けど|けれど)\s*[、,]?\s*|(?<=ない)(?:が|けど|けれど)\s*[、,]?\s*'
-    for clause in re.split(r'[。！？.!?]|' + contrast, plain):
-        if re.search(r'もし|仮に|なら|だったら|とすれば', clause):
-            continue
-        for pattern in facts:
-            for match in re.finditer(pattern, clause):
-                tail = clause[match.end():]
-                if denied_statement(tail):
-                    continue
-                reporter = re.search(r'(player-\d+)\s*(?:さん|君)?\s*(?:は|が)\s*[、,]?\s*$', clause[:match.start()])
-                reported = re.match(r'\s*(?:と|という)\s*(?:発言|主張|説明|報告|言|述)', tail)
-                if reporter and reporter.group(1) != state.player_id and reported:
-                    continue
-                return 'self_fact_confusion'
+    if any(re.search(pattern, plain) for pattern in data['self_role_unknown']):
+        return 'self_fact_confusion'
+    if state.player_id in state.alive:
+        for clause in re.split(r'[。！？.!?]', plain):
+            if not re.search(r'もし|仮に|なら|だったら|とすれば|(?:では|して)(?:ない|いない|ありません)', clause):
+                if any(re.search(pattern, clause) for pattern in data['self_dead']):
+                    return 'self_fact_confusion'
     if re.fullmatch(data['empty_agreement'], plain.strip()):
         return 'empty_agreement'
     dead = set(state.players) - state.alive
