@@ -4,7 +4,6 @@ import re
 from .checks import speech, timing_summary
 from .claims import self_claims, team_claim, unquoted
 from .prompts import self_reference, strip_introduction
-from .quality import addressed_dead_players
 from .repetition import normalize, similarity
 from .strategy import STRATEGIES, vote_pressure
 
@@ -73,9 +72,9 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
             candidates["Q2"].append(location)
         if normalize(strip_introduction(text, player)) != normalize(text.strip().strip('"')):
             candidates["Q6"].append(location)
-        addressed = addressed_dead_players(text, dead, names)
-        if addressed:
-            candidates["Q5"].append({**location, "targets": sorted(addressed)})
+        addressed = re.findall(r"(?:^|[。！？]\s*|@)(player-\d+)\s*(?:さん|君)?\s*[,、:]", normalize(text))
+        if dead.intersection(addressed):
+            candidates["Q5"].append({**location, "targets": sorted(dead.intersection(addressed))})
         if role and not false_co(role, public_claims.get(player, [])):
             issues = []
             effects = {effect.id for ability in role.abilities for effect in ability.effects}

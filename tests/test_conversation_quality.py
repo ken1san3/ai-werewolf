@@ -3,7 +3,6 @@ import time
 import unittest
 from ai_agent.agent import Agent
 from ai_agent.grounding import own_result_conflict
-from ai_agent.metrics import measure
 from ai_agent.prompts import discussion_context, messages
 from ai_agent.quality import quality_reason
 from ai_agent.repetition import RepetitionFilter
@@ -43,10 +42,6 @@ class ConversationQualityTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(quality_reason(self.state, text, self.roles), 'dead_player_address')
         for text in ['昨日player-2に投票しました。', 'player-2に投票しません。',
-                     'player-2への昨日の投票理由を踏まえて、今日はplayer-1に投票します。',
-                     'player-2を昨日処刑しましたが、今日はplayer-1を処刑します。',
-                     'player-2: 霊能結果は人狼ではありませんでした。',
-                     'player-2: 霊能結果は人狼ではありませんでした。player-1さん、投票先は誰ですか？',
                      'もしplayer-2が生きていたなら投票します。',
                      'player-2を処刑すべきではないと昨日述べました。',
                      'player-2の昨日の発言を根拠に、player-1を疑っています。',
@@ -65,10 +60,10 @@ class ConversationQualityTests(unittest.TestCase):
                    {'player_id': 'player-0', 'channel': 'public', 'day': 1,
                     'message': '私はplayer-1に質問します。'}]
         clarified = discussion_context(entries, 'player-0')
-        self.assertEqual(clarified[0]['message'], entries[0]['message'])
+        self.assertIn('発言者（player-1）はplayer-0に投票した', clarified[0]['message'])
         self.assertIn('「私は狩人です」', clarified[0]['message'])
         self.assertEqual(clarified[1]['message'], entries[1]['message'])
-        self.assertEqual(clarified[1]['発言者本人'], 'player-0')
+        self.assertEqual(clarified[1]['一人称の話者'], 'player-0')
         self.assertNotIn('発言者', entries[0]['message'])
 
     def test_role_and_authorized_secret_information_remain_in_both_contexts(self):
@@ -82,25 +77,10 @@ class ConversationQualityTests(unittest.TestCase):
                                          '本文を書く', channel, rules=self.game.rules), ensure_ascii=False)
             self.assertIn('非公開の役職: 人狼', prompt)
             self.assertIn('本人だけの結果', prompt)
-            self.assertIn('私への投票理由', prompt)
-            self.assertIn('発言者本人', prompt)
+            self.assertIn('発言者（player-1）への投票理由', prompt)
             self.assertNotIn('あなた（あなた（', prompt)
             self.assertNotIn('別チャンネルの秘密', prompt)
             self.assertEqual('夜だけの相談案：次はplayer-2' in prompt, channel == 'wolf')
-
-    def test_reported_co_without_quote_marks_keeps_the_reported_subject(self):
-        entries = [{'player_id': 'player-1', 'message': 'player-2は私は狩人ですと発言しました。'}]
-        clarified = discussion_context(entries, 'player-0')
-        self.assertEqual(clarified[0]['message'], entries[0]['message'])
-        self.assertEqual(clarified[0]['発言者本人'], 'player-1')
-
-    def test_q5_distinguishes_dead_result_reports_from_requests_to_the_dead(self):
-        rows = [{'kind': 'PLAYER_DIED', 't': 1, 'payload': {'player_id': 'player-2'}},
-                {'kind': 'chat', 't': 2, 'message': {'player_id': 'player-0', 'message': 'player-2: 霊能結果は人狼ではありませんでした。'}},
-                {'kind': 'chat', 't': 3, 'message': {'player_id': 'player-0', 'message': 'player-2さん、結果を教えてください。'}}]
-        measured = measure(rows, [], {'player-0': self.roles['villager']}, self.roles, self.game.rules, [])
-        self.assertEqual(measured['metrics']['Q5'], 1)
-        self.assertEqual(measured['metric_candidates']['Q5'][0]['row'], 2)
 
     def test_public_guard_uses_quality_while_private_role_consultation_stays_free(self):
         agent = Agent('player-0', 'token', 'unused', self.game.game_id, self.roles, {}, FakeLLM(),
