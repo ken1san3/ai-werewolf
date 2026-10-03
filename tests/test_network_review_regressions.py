@@ -113,6 +113,7 @@ class ReplayRetentionTests(unittest.TestCase):
             self.game.event_bus.publish(event)
             replies.append(self.manager.server_event(self.joined.context, "game.event", {
                 "event_type": event.type, "event_payload": dict(event.payload),
+                "visibility": event.visibility.value,
             }))
         history = self.manager.session_for(GAME_ID)._history_by_player["player-0"]
         self.assertEqual(list(history), replies[-3:])

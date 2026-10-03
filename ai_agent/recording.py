@@ -6,7 +6,6 @@ import time
 
 from .checks import redact, text_checks, timing_summary
 from .metrics import measure, mechanical_conditions
-from .state import PRIVATE_RESULTS
 
 
 class Recorder:
@@ -14,13 +13,11 @@ class Recorder:
         self.public_channels = set(public_channels)
         self.started = time.monotonic()
         self.public_viewer, self.progress = public_viewer, progress
-        self.public_types = set()
         self.rows, self.rejections = [], []
         self.private_messages, self.private_results, self.tokens = [], [], set()
         self._viewer_counts, self._recorded_counts = Counter(), Counter()
 
     def core_event(self, event):
-        self.public_types.add(event.type)
         # GAME_CREATED precedes player assignment and is absent from client
         # histories. All subsequent public rows follow the observer's seq order.
         if event.type == "GAME_CREATED":
@@ -42,10 +39,10 @@ class Recorder:
         if kind not in {"chat.message", "game.event"}:
             return
         if kind == "game.event":
-            if payload["event_type"] in PRIVATE_RESULTS:
+            if payload.get("visibility") == "private" and payload["event_type"] != "ROLE_ASSIGNED":
                 self.private_results.append({"t": round(time.monotonic() - self.started, 2),
                                              "player_id": viewer, **payload})
-            elif viewer == self.public_viewer and payload["event_type"] in self.public_types:
+            elif payload.get("visibility") == "public" and viewer == self.public_viewer:
                 self.rows.append({"t": round(time.monotonic() - self.started, 2),
                                   "kind": payload["event_type"], "payload": payload["event_payload"]})
             return
