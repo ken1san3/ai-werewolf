@@ -103,32 +103,26 @@ class Agent:
         self.speech_generations += 1
         key = self.state.phase_key
         record = None
-        focus_ids = ['none', *sorted(self.state.alive - {self.state.player_id})]
-        public_roles = ['none', *self.roles]
         try:
-            schema = {"type": "object", "additionalProperties": False, "required": ["facts", "aim", "reason", "suspicion", "reveal_role", "focus_player", "public_role"],
+            schema = {"type": "object", "additionalProperties": False, "required": ["facts", "aim", "reason", "suspicion", "reveal_role"],
                       "properties": {"facts": {"type": "array", "maxItems": 2,
                                                "items": {"type": "string", "maxLength": 24}},
                                      "aim": {"type": "string", "maxLength": 24},
                                      "reason": {"type": "string", "maxLength": 32},
                                      "suspicion": {"type": "string", "enum": ["low", "medium", "high"]},
-                                     "reveal_role": {"type": "boolean"},
-                                     "focus_player": {"type": "string", "enum": focus_ids},
-                                     "public_role": {"type": "string", "enum": public_roles}}}
+                                     "reveal_role": {"type": "boolean"}}}
             plan_text = await self.generate(
                 question + ' 発言前の判断だけをJSONで返してください。factsは確認した事実を最大2件、aimは狙い、reasonは行動を選ぶ短い理由です。'
                 'facts/aim/reasonは日本語で10〜20字にしてください。suspicionは自分への疑いの強さ(low/medium/high)、'
                 'reveal_roleは今、本当の役職を明かすか(true/false)です。本人の戦略と公開の処刑圧力を考慮してください。'
-                'focus_playerは今回の議論・作戦の対象ID（自分以外の生存者、対象なしはnone）、public_roleは公開で名乗る役職ID（COしないならnone）です。'
-                '本当の役職と公開で演じる役職は別です。偽COと偽結果は自由で、狙いは本人の陣営の勝利に結びつけてください。'
-                '他人のCOは公称と区別し、本人の能力や受信結果を変えないでください。この短い判断JSONは公開しません。',
-                purpose + "_decision", schema, 256, channel=channel)
+                '自分を他人と取り違えず、他人の発言は公称と区別しサーバの事実を優先してください。このJSONは公開しません。',
+                purpose + "_decision", schema, 192, channel=channel)
             record = {"player_id": self.state.player_id, "day": key[0], "phase": key[1],
                       "at_monotonic": time.monotonic(), "purpose": purpose, "channel": channel, "status": "planned"}
             self.decisions.append(record)
             try:
                 plan = json.loads(plan_text)
-                if not isinstance(plan, dict) or set(plan) != {"facts", "aim", "reason", "suspicion", "reveal_role", "focus_player", "public_role"} or not isinstance(plan["facts"], list) or not all(isinstance(f, str) for f in plan["facts"]) or not all(isinstance(plan[k], str) for k in ("aim", "reason")) or plan['suspicion'] not in {'low', 'medium', 'high'} or not isinstance(plan['reveal_role'], bool) or plan['focus_player'] not in focus_ids or plan['public_role'] not in public_roles:
+                if not isinstance(plan, dict) or set(plan) != {"facts", "aim", "reason", "suspicion", "reveal_role"} or not isinstance(plan["facts"], list) or not all(isinstance(f, str) for f in plan["facts"]) or not all(isinstance(plan[k], str) for k in ("aim", "reason")) or plan['suspicion'] not in {'low', 'medium', 'high'} or not isinstance(plan['reveal_role'], bool):
                     raise ValueError("invalid decision fields")
             except (ValueError, TypeError):
                 record.update(status="discarded", discard_reason="invalid_decision_json", raw=plan_text)
@@ -142,14 +136,6 @@ class Agent:
                 return None
             record["body_context"] = "own_private"
             instruction = f"発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。"
-            if channel == 'public':
-                stance = '今はCOせず、本人の能力だけを自分の行動として話す' if plan['public_role'] == 'none' else f"{self.roles[plan['public_role']].name}として公開で話す（偽CO・偽結果も可）"
-                instruction += (f"公開の立場: {stance}。本人の本当の目的は非公開で、本文には表向きの根拠を話してください。"
-                                f"議論の対象: {plan['focus_player']}。対象のIDを『私』に変えず、自分への投票要求と自分の投票先を分けてください。"
-                                "他の役職の能力を自分が使うとは言わず、騙る時は選んだ公開の立場で一貫して話してください。")
-            else:
-                instruction += (f"秘密の相談です。公開の立場は演技の予定で、ここでは通知された仲間へ本当の作戦を率直に話してください。"
-                                f"作戦の対象: {plan['focus_player']}。本人と対象を取り違えず、仲間と襲撃・投票の対象を相談してください。")
             confirmed = (f"\n判断記録よりサーバの事実を優先してください。本人の本当の役職は{self.roles[self.state.role_id].name}で変わりません。"
                          f"今の生存者は{', '.join(sorted(self.state.alive))}、死者は{', '.join(sorted(set(self.state.players) - self.state.alive)) or 'なし'}です。本文の私は本人で、死者の発言の私ではありません。"
                          f"本人の受信済み結果は{own_result_summary(self.state)}。この一覧にない自分の判定を作らないでください。"

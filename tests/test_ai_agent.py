@@ -18,7 +18,7 @@ from tests.test_network_sessions import make_game
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLAN = json.dumps({"facts": [], "aim": "投票理由を確認する", "reason": "根拠のある投票をしたい", "suspicion": "low", "reveal_role": False, "focus_player": "none", "public_role": "none"}, ensure_ascii=False)
+PLAN = json.dumps({"facts": [], "aim": "投票理由を確認する", "reason": "根拠のある投票をしたい", "suspicion": "low", "reveal_role": False}, ensure_ascii=False)
 
 
 class FakeLLM:
@@ -225,7 +225,7 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         agent.state.role_id, agent.state.day, agent.state.phase = "werewolf", 1, "day"
         agent.state.alive = {f"player-{i}" for i in range(9)}
         agent.state.phase_ends_at = int(time.monotonic()) + 20
-        plan = {"facts": ["私は人狼", "player-1は仲間"], "aim": "人狼として襲撃を隠す", "reason": "仲間を守って勝つ", "suspicion": "low", "reveal_role": False, "focus_player": "none", "public_role": "none"}
+        plan = {"facts": ["私は人狼", "player-1は仲間"], "aim": "人狼として襲撃を隠す", "reason": "仲間を守って勝つ", "suspicion": "low", "reveal_role": False}
         agent.generate = AsyncMock(side_effect=[json.dumps(plan, ensure_ascii=False), "player-2さん、根拠を教えてください。"])
         await agent.generate_speech("発言してください。", "chat", 160)
         body_call = agent.generate.call_args_list[1]
@@ -234,36 +234,6 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("仲間を守って勝つ", body_call.args[0])
         self.assertEqual(agent.decisions[-1]["decision"], plan)
         self.assertEqual(agent.decisions[-1]["body_context"], "own_private")
-
-    async def test_plan_separates_true_role_public_bluff_and_focus_without_hiding_secrets(self):
-        game = make_game()
-        agent = Agent('player-0', 'token', 'unused', game.game_id, game.content.roles, {},
-                      FakeLLM(), RepetitionFilter(), lambda *_: None, seed=1)
-        agent.state.role_id, agent.state.day, agent.state.phase = 'werewolf', 2, 'day'
-        agent.state.alive = {'player-0', 'player-1', 'player-2'}
-        agent.state.phase_ends_at = int(time.monotonic()) + 20
-        plan = json.loads(PLAN)
-        plan.update(facts=['私は人狼', 'player-1は仲間'], focus_player='player-2', public_role='seer')
-        agent.generate = AsyncMock(side_effect=[json.dumps(plan, ensure_ascii=False), '私は占い師です。player-2は人狼です。'])
-        await agent.generate_speech('発言してください。', 'chat', 160)
-        body = agent.generate.call_args_list[1].args[0]
-        self.assertIn('占い師として公開で話す', body)
-        self.assertIn('議論の対象: player-2', body)
-        self.assertIn('私は人狼', body)
-        self.assertIn('偽CO・偽結果も可', body)
-        self.assertEqual(agent.decisions[-1]['decision'], plan)
-        for field, value in [('focus_player', 'player-0'), ('focus_player', 'player-9'), ('public_role', 'nonexistent')]:
-            with self.subTest(field=field, value=value):
-                invalid = {**plan, field:value}
-                agent.generate = AsyncMock(return_value=json.dumps(invalid, ensure_ascii=False))
-                self.assertIsNone(await agent.generate_speech('発言してください。', 'chat', 160))
-                self.assertEqual(agent.decisions[-1]['discard_reason'], 'invalid_decision_json')
-        agent.generate = AsyncMock(side_effect=[json.dumps(plan, ensure_ascii=False), 'player-1さん、player-2を襲撃しませんか？'])
-        await agent.generate_speech('相談してください。', 'private_chat', 160, channel='wolf')
-        body = agent.generate.call_args_list[1].args[0]
-        self.assertIn('本当の作戦を率直に', body)
-        self.assertNotIn('占い師として公開で話す', body)
-        self.assertIn('私は人狼', body)
 
     async def test_intro_is_removed_without_retry_and_expired_chat_never_regenerates(self):
         game = make_game()
