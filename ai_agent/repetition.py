@@ -6,7 +6,7 @@ import unicodedata
 
 # Existing Japanese logs: a response adding a point scored 0.513, while a
 # nearly copied refusal scored 0.786. Keep the former and reject the latter.
-SIMILARITY_THRESHOLD = 0.55
+SIMILARITY_THRESHOLD = 0.60
 
 
 def normalize(text):

@@ -56,32 +56,6 @@ class RoleStrategyTests(unittest.TestCase):
                 self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
         self.assertIsNotNone(disclosure_reason(self.state, '私には人狼の役職があります。', self.game.content.roles))
 
-    def test_affirmative_private_intent_survives_an_unrelated_following_hypothesis(self):
-        for text in ['player-2さん、投票したのは私が村を混乱させる意図からで、理由はありません。',
-                     '私の投票はただの村の混乱策に過ぎません。',
-                     'この混乱に乗じて村の票を割く狙いですが、player-2の占いが真なら別です。']:
-            with self.subTest(text=text):
-                self.assertEqual(disclosure_reason(self.state, text, self.game.content.roles), 'unjustified_self_disclosure')
-        for text in ['私が村を混乱させる意図からではありません。',
-                     'player-2は私が村を混乱させる意図から投票したと言いました。',
-                     'player-2は村の票を割く狙いですが、player-1の占いが真なら別です。',
-                     '村の票を割く狙いですか？', 'もし村の票を割く狙いなら疑います。',
-                     'player-2は「私の投票はただの村の混乱策に過ぎません」と言った。']:
-            with self.subTest(text=text):
-                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
-
-    def test_truth_telling_preface_is_an_assertion_but_real_hypotheses_stay_free(self):
-        statement = '真実を告げるなら、私は狼です。'
-        self.assertEqual(self_claims('player-0', statement, ['人狼']), ['人狼'])
-        self.assertEqual(disclosure_reason(self.state, statement, self.game.content.roles), 'unjustified_self_disclosure')
-        for text in ['もし私が狼なら、その投票はしません。',
-                     'player-2が真実を告げるなら、私は狼です。',
-                     'player-2は「真実を告げるなら、私は狼です」と言った。']:
-            with self.subTest(text=text):
-                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
-        self.state.alive = {'player-0', 'player-1', 'player-2'}
-        self.assertIsNone(disclosure_reason(self.state, statement + 'player-2へ票を合わせましょう。', self.game.content.roles))
-
     def test_hidden_vote_disruption_intent_and_changed_army_co_are_guarded(self):
         for text in ['player-2さんに疑いを持たせ、混乱で票が割れるよう仕向けます。',
                      'player-2への疑いで混乱で票が割れるよう誘導します。',

@@ -14,8 +14,7 @@ def unquoted(text, role_names):
 
 def team_claim(text, role_names, patterns=None):
     plain = unquoted(text, role_names)
-    contrast = (r'(?<=ません)(?:が|けど|けれど)\s*[、,]?\s*|(?<=ない)(?:が|けど|けれど)\s*[、,]?\s*|[、,]\s*(?:しかし|でも)\s*'
-                r'|(?<=ですが)[、,]\s*(?=player-\d+[^。！？]*?(?:なら|だったら|とすれば))')
+    contrast = r'(?<=ません)(?:が|けど|けれど)\s*[、,]?\s*|(?<=ない)(?:が|けど|けれど)\s*[、,]?\s*|[、,]\s*(?:しかし|でも)\s*'
     for clause in re.split(r'[。！？.!?]|' + contrast, plain):
         if re.search(r'もし|なら|だったら|とすれば|救うのでは(?:ない|ありません)|助けて(?:いない|いません)|仲間では(?:ない|ありません)|とは言っていない', clause):
             continue
@@ -37,8 +36,6 @@ def team_claim(text, role_names, patterns=None):
 
 def self_claims(player, text, role_names):
     text = unquoted(text, role_names)
-    for pattern in STRATEGIES.get('claim_introduction_patterns', []):
-        text = re.sub(pattern, '', text)
     text = re.sub(r'(私たち|私|僕|俺)\s*\(\s*player-\d+\s*\)\s*', r'\1', text)
     text = re.sub(r'[^。！？]*(?:調べた|占った|護衛した|守った)(?:そう|らしい)[^。！？]*', '', text)
     claims = []
