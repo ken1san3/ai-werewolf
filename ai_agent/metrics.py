@@ -77,11 +77,23 @@ def result_value(text):
     return None
 
 
+def role_claims_for(player, text, roles, formal_claim=None):
+    claims = self_claims(player, text, [r.name for r in roles.values()])
+    if formal_claim in roles:
+        claims.append(roles[formal_claim].name)
+    return claims
+
+
+def false_co(role, claims):
+    return any(name != role.name for name in claims)
+
+
 def measure(rows, private_results, roles, content_roles, rules, calls, *, generated=None, discards=None):
     names = [r.name for r in content_roles.values()]
     candidates = {f"Q{i}": [] for i in range(1, 7)}
     disclosures, questions, pairs, prior = [], [], [], []
     dead, day, reactions, similar, public_count, line = set(), 0, 0, 0, 0, 5
+    public_claims = {}
     first_day_at = next((r['t'] for r in rows if r['kind'] == 'PHASE_STARTED' and
                          r['payload'].get('day') == 1 and r['payload'].get('phase') == 'day'), None)
     for index, row in enumerate(rows):
@@ -98,11 +110,9 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
         location = {"row": index, "line": row_line, "t": row["t"], "player_id": player, "text": text}
         role = roles.get(player)
         confused_id = self_reference(strip_introduction(text, player), player)
-        claims = self_claims(player, text, names)
-        if row["kind"] == "CO_DECLARED":
-            claimed = content_roles.get(row["payload"]["claimed_role_id"])
-            if claimed:
-                claims.append(claimed.name)
+        claims = role_claims_for(player, text, content_roles, row['payload']['claimed_role_id'] if row['kind'] == 'CO_DECLARED' else None)
+        if claims:
+            public_claims[player] = claims
         if role:
             team_claim = bool(re.search(r"(?:私は|僕は|俺は|^|[。！？]\s*)(?:人狼|狼)陣営(?:です|に属|の一員)", unquoted(text, names)))
             true_role = role.name in claims
@@ -125,7 +135,7 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
         addressed = re.findall(r"(?:^|[。！？]\s*|@)(player-\d+)\s*(?:さん|君)?\s*[,、:]", normalize(text))
         if dead.intersection(addressed):
             candidates["Q5"].append({**location, "targets": sorted(dead.intersection(addressed))})
-        if role:
+        if role and not false_co(role, public_claims.get(player, [])):
             issues = []
             effects = {effect.id for ability in role.abilities for effect in ability.effects}
             own = [p for p in private_results if p["player_id"] == player and p["t"] <= row["t"]]
@@ -135,7 +145,10 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
             for clause in re.split(r"[。！？.!?\n]", unquoted(result_text, names)):
                 can_initial = any(a.available_from_night == 0 for a in role.abilities)
                 actor_body = r"(?:(?!(?:私|僕|俺|自分)(?:は|が)|player-\d+\s*(?:さん)?\s*(?:は|が))[^。！？])*?"
-                other_actor = re.search(rf"(?:(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?|あなた)\s*(?:が|は){actor_body}(?:占った|調べた|護衛した|守った|襲撃した|判定した)", clause)
+                other_subject = rf"(?:(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?|あなた)\s*(?:が|は)"
+                other_actor = re.search(rf"{other_subject}{actor_body}(?:占った|占いました|調べた|調べました|護衛した|護衛しました|守った|襲撃した)", clause)
+                report_body = r'(?:(?!(?:私|僕|俺|自分)(?:は|が))[^。！？])*?'
+                other_actor = other_actor or re.search(rf'{other_subject}{report_body}player-\d+{report_body}(?:判定した|判定しました)', clause)
                 attributed = re.search(r"(?:調べた|占った|護衛した|守った)(?:そう|らしい)|(?:と|という)(?:発言|説明|主張|報告)", clause)
                 attributed = attributed or re.search(r"player-\d+\s*(?:さん|君)?\s*(?:は|が)\s*(?:私|僕|俺|自分)を[^。！？]*(?:断定|判定|疑)", clause)
                 hypothetical = re.search(r"もし|なら|場合|仮に|だったら|かもしれ", clause)
@@ -166,7 +179,8 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                         issues.append({"reason": "result_mismatch", "target": target, "claimed": claimed_result, "server_results": sorted(expected)})
                     explicit_own_report = own_report or re.match(rf"\s*{re.escape(role.name)}として", clause) or re.search(
                         r"(?:私|僕|俺|自分)(?:は|が|の)[^。！？]*(?:占った|占って|調べた|判定|結果)", clause)
-                    if claimed_result and effects.intersection({"inspect", "medium_inspect"}) and own and not expected and explicit_own_report and not hypothetical:
+                    explicit_own_report = explicit_own_report or re.search(r'(?:判定しました|判定した|占いました|占った|調べました|調べた)(?:ので|ため|から|[、,\s]|$)', clause)
+                    if claimed_result and effects.intersection({"inspect", "medium_inspect"}) and not expected and explicit_own_report and not hypothetical:
                         issues.append({"reason": "unreceived_result", "target": target, "claimed": claimed_result})
                     if "medium_inspect" in effects and target not in dead and (re.search(r"霊能|霊媒|判定|調べ", clause) or own_report) and claimed_result:
                         issues.append({"reason": "medium_living_target", "target": target})

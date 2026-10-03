@@ -24,6 +24,17 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["Q3"], 1)
         self.assertEqual([r["row"] for r in result["role_team_disclosure_candidates"]], [0, 4])
 
+    def test_false_co_excludes_current_and_later_fake_results_from_q4_only(self):
+        roles = {'player-0': self.game.content.roles['medium']}
+        private = [{'t': 0, 'player_id': 'player-0', 'event_payload': {'target_player_id': 'player-1', 'result': 'not_wolf'}}]
+        rows = [chat('player-0', '私は占い師です。初夜にplayer-1は人狼でした。', 1),
+                chat('player-0', '初夜にplayer-1を占って人狼と判定しました。', 2),
+                chat('player-0', '霊能者です。player-1は人狼と判定しました。', 3)]
+        result = self.metrics(rows, roles, private)
+        self.assertEqual([c['row'] for c in result['metric_candidates']['Q4']], [2])
+        rows[0] = {'kind': 'CO_DECLARED', 't': 1, 'payload': {'player_id': 'player-0', 'claimed_role_id': 'seer', 'comment': '占い師です。'}}
+        self.assertEqual([c['row'] for c in self.metrics(rows, roles, private)['metric_candidates']['Q4']], [2])
+
     def test_meta_rejection_intro_and_dead_address_have_locations(self):
         rows = [{"kind": "PLAYER_DIED", "t": 0, "payload": {"player_id": "player-2"}},
                 chat("player-0", "player-0 です。\n申し訳ありませんが、お断りします。", 1),

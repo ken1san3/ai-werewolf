@@ -15,6 +15,7 @@ class PlayerState:
     alive: set[str] = field(default_factory=set)
     private: list[dict] = field(default_factory=list)
     own_actions: list[dict] = field(default_factory=list)
+    own_public: list[dict] = field(default_factory=list)
     facts: list[dict] = field(default_factory=list)
     chats: list[dict] = field(default_factory=list)
     actions: list[dict] = field(default_factory=list)
@@ -49,6 +50,7 @@ class PlayerState:
             self.players = [p["player_id"] for p in payload["players"]]
             self.alive = set(self.players)
             self.teammates, self.private, self.facts, self.chats = [], [], [], []
+            self.own_public = []
             for entry in payload["history"]:
                 self._visible(entry["type"], entry["payload"])
             self.alive -= {d["player_id"] for d in payload["deaths"]}
@@ -72,6 +74,8 @@ class PlayerState:
     def _visible(self, kind, payload):
         if kind == "chat.message":
             self.chats.append({"day": self.day, "channel": payload["channel"], **payload["message"]})
+            if payload['channel'] == 'public' and payload['message']['player_id'] == self.player_id:
+                self.own_public.append({'text': payload['message']['message']})
         elif kind == "game.event":
             event, data = payload["event_type"], payload["event_payload"]
             if event == "ROLE_ASSIGNED":
@@ -83,6 +87,8 @@ class PlayerState:
                 self.private.append({"type": event, "received_day": self.day, "received_phase": self.phase, **data})
             else:
                 self.facts.append({"type": event, **data})
+                if event == 'CO_DECLARED' and data['player_id'] == self.player_id:
+                    self.own_public.append({'text': data.get('comment', ''), 'formal_claim': data['claimed_role_id']})
                 if event == "PHASE_STARTED":
                     self.actions = []
                     self.phase, self.day = data["phase"], data["day"]

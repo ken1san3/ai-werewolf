@@ -59,3 +59,22 @@ class ResultGroundingTests(unittest.TestCase):
         text = '私は霊能者ではなく市民であり、私を処刑すべきです。'
         result = measure([chat('player-0', text, 1)], [], {'player-0': self.roles['medium']}, self.roles, self.game.rules, [])
         self.assertEqual(result['metrics']['Q3'], 1)
+
+    def test_no_received_results_still_blocks_a_fabricated_own_verdict(self):
+        self.state.role_id, self.state.private = 'medium', []
+        self.state.facts.append({'type': 'PLAYER_DIED', 'player_id': 'player-1', 'day': 1, 'public_cause': 'died_in_night'})
+        self.assertTrue(self.conflict('夜に死亡したplayer-1は人狼と判定しました。'))
+        self.assertFalse(self.conflict('player-2さんがplayer-1は人狼と判定しました。'))
+
+    def test_formal_and_informal_false_co_continue_until_a_real_co(self):
+        self.state.role_id, self.state.private = 'medium', []
+        for formal in (False, True):
+            self.state.own_public = []
+            self.state.receive({'type': 'game.event', 'payload': {'visibility': 'public', 'event_type': 'CO_DECLARED',
+                                'event_payload': {'player_id': 'player-0', 'claimed_role_id': 'seer', 'comment': '占い師です。'}}}
+                               if formal else {'type': 'chat.message', 'payload': {'channel': 'public',
+                                               'message': {'player_id': 'player-0', 'message': '私は占い師です。'}}})
+            self.assertFalse(self.conflict('初夜にplayer-1を占って人狼と判定しました。'))
+            self.state.receive({'type': 'chat.message', 'payload': {'channel': 'public',
+                                'message': {'player_id': 'player-0', 'message': '私は霊能者です。'}}})
+            self.assertTrue(self.conflict('初夜にplayer-1は人狼と判定しました。'))
