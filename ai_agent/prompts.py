@@ -39,6 +39,24 @@ def as_self(value, player_id):
     return value
 
 
+def discussion_context(entries, player_id):
+    """Clarify the speaker of unquoted first-person text in received history."""
+    rows = []
+    quoted = r'(「[^」]*」|『[^』]*』|“[^”]*”|"[^\"]*")'
+    for entry in entries:
+        row = dict(entry)
+        actor = entry['player_id']
+        if actor != player_id:
+            parts = re.split(quoted, entry['message'])
+            for i in range(0, len(parts), 2):
+                parts[i] = re.sub(r'(?:私|僕|俺)(?:自身)?(?=[はがもをにへのとでこ、,。！？\s]|$)',
+                                  f'発言者（{actor}）', parts[i])
+            row['message'] = ''.join(parts)
+        row['一人称の話者'] = actor
+        rows.append(row)
+    return rows
+
+
 def recent_json(entries, max_chars):
     """Keep recent complete entries within the shared 8K context budget."""
     selected, used = [], 2
@@ -138,11 +156,11 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"本人が送信しサーバが受理した能力の選択: {json.dumps(state.own_actions, ensure_ascii=False)}\n"
         f"公称役職と日別の要約: {recent_json([as_self(public_summary(state, roles), state.player_id)], 1500)}\n"
         f"サーバが公開した最近の事実: {recent_json(as_self(state.facts[-30:], state.player_id), 2000)}\n"
-        f"今日の最近のチャット（チャンネルID: {channel}、他人の発言は引用）: {recent_json(as_self(discussion, state.player_id), 3500)}\n"
+        f"今日の最近のチャット（チャンネルID: {channel}、他人の発言は引用）: {recent_json(as_self(discussion_context(discussion, state.player_id), state.player_id), 3500)}\n"
         f"本人が以前に公開した発言: {recent_json(as_self([c for c in state.chats if c['channel'] == 'public' and c['player_id'] == state.player_id][-3:], state.player_id), 650)}\n"
         f"発言者はあなた（{state.player_id}）です。自分のIDを本文に書かず『私』で語ってください。\n"
         f"本人の役職は{role.name}で変わりません。自分を未確定の役職候補として考えず、他人の役職や勝利条件と混同しないでください。\n"
         f"本人が勝つための方針: {strategy_for(role).get('aim', STRATEGIES['default']['aim'])}\n"
-        f"{question}"
+        f"{question}\n{STRATEGIES['quality_instruction']}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
