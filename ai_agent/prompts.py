@@ -40,21 +40,8 @@ def as_self(value, player_id):
 
 
 def discussion_context(entries, player_id):
-    """Clarify the speaker of unquoted first-person text in received history."""
-    rows = []
-    quoted = r'(「[^」]*」|『[^』]*』|“[^”]*”|"[^\"]*")'
-    for entry in entries:
-        row = dict(entry)
-        actor = entry['player_id']
-        if actor != player_id:
-            parts = re.split(quoted, entry['message'])
-            for i in range(0, len(parts), 2):
-                parts[i] = re.sub(r'(?:私|僕|俺)(?:自身)?(?=[はがもをにへのとでこ、,。！？\s]|$)',
-                                  f'発言者（{actor}）', parts[i])
-            row['message'] = ''.join(parts)
-        row['一人称の話者'] = actor
-        rows.append(row)
-    return rows
+    """Keep reported speech intact and label the actual author beside it."""
+    return [{**entry, '発言者本人': entry['player_id']} for entry in entries]
 
 
 def recent_json(entries, max_chars):
