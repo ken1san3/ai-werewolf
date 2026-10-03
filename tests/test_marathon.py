@@ -207,6 +207,54 @@ def test_two_failures_disable_only_one_series(tmp_path):
     assert len(runner.state['failures']) == 2
 
 
+def test_a_only_runs_without_b_reserve_and_waits_on_resume(tmp_path):
+    class Backend:
+        deadline = 0
+        played = []
+        closed = 0
+        def prepare(self, setting):
+            return 0
+        def scenes(self, *args):
+            return {'accuracy': 1}
+        def game(self, setting, seed, destination, timeout, **kwargs):
+            self.played.append((setting['id'], seed))
+            return {'completed': True, 'wall_sec': 600, 'public_messages': 60, 'llm_calls': 200,
+                    'metrics': {}, 'experiment': {}, 'transcript': str(destination/'transcript.md')}
+        def close(self):
+            self.closed += 1
+    backend = Backend()
+    def never_pick(*args, **kwargs):
+        pytest.fail('前半のみでは区切りのCodexと後半を実行しない')
+    runner = Marathon(tmp_path, backend, hours=1, configurations=[settings()[0]], checkpoint=never_pick)
+    runner.run(phase_a_only=True)
+    assert backend.played == [('qwen35-9b/off', 1)]
+    assert backend.closed == 1 and runner.state['phase'] == 'checkpoint'
+    assert runner.state['phase_a_only'] and not runner.state['finished']
+    resumed = Marathon(tmp_path, backend, checkpoint=never_pick)
+    resumed.run()
+    assert len(backend.played) == 1 and backend.closed == 2
+    assert (tmp_path/'REPORT.md').exists()
+
+
+def test_separate_b_deadline_is_started_once_and_a_must_finish(tmp_path):
+    clock = [100]
+    backend = type('Backend', (), {'deadline': 0})()
+    runner = Marathon(tmp_path, backend, hours=1, now=lambda: clock[0])
+    with pytest.raises(ValueError):
+        runner.begin_b(38)
+    runner.state.update(phase='checkpoint', phase_a_only=True)
+    runner.save()
+    clock[0] = 10000
+    runner.begin_b(38)
+    assert runner.state['deadline'] == 10000 + 38*3600
+    assert backend.deadline == runner.state['deadline']
+    assert not runner.state['phase_a_only']
+    clock[0] += 600
+    resumed = Marathon(tmp_path, backend, now=lambda: clock[0])
+    resumed.begin_b(38)
+    assert resumed.state['deadline'] == runner.state['deadline']
+
+
 def test_worker_is_stopped_if_ownership_query_fails(tmp_path):
     backend = LocalBackend(tmp_path, 8091)
     with patch('ai_agent.marathon.subprocess.Popen') as spawn, patch('ai_agent.marathon.powershell', side_effect=OSError('CIM unavailable')):

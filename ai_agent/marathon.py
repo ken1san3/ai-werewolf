@@ -235,9 +235,10 @@ class Marathon:
         return self.backend.game(setting, seed, destination, min(estimate * 2.5 + 30, self.remaining()),
                                  learning_profile=learning_profile, lessons=lessons)
 
-    def run_a(self):
+    def run_a(self, *, reserve_b=True):
+        reserve = 12 * 3600 if reserve_b else 0
         if hasattr(self.backend, 'deadline'):
-            self.backend.deadline = self.state['deadline'] - 12 * 3600
+            self.backend.deadline = self.state['deadline'] - reserve
         scenes = read_json(ROOT / 'content/marathon_scenes.json')
         done = {r['id'] for r in self.state['a']}
         for index, setting in enumerate(self.state['settings']):
@@ -251,7 +252,7 @@ class Marathon:
                 if future['model'] not in evaluated:
                     cost = future.get('expected_game_sec', 750/future['rate']) + future.get('expected_scene_sec', 300/future['rate']) + 90
                     reserve_models[future['model']] = min(cost, reserve_models.get(future['model'], float('inf')))
-            if not setting.get('supported', True) or self.remaining() - estimate - sum(reserve_models.values()) < 12 * 3600:
+            if not setting.get('supported', True) or self.remaining() - estimate - sum(reserve_models.values()) < reserve:
                 LOG.info('前半を見送り: %s（後半と未評価モデルの時間を確保）', setting['id'])
                 self.state['a'].append({**setting, 'status': 'skipped', 'reason': '未評価モデルの最速設定と後半12時間を残すため、または試運転で未対応'})
                 self.save()
@@ -263,7 +264,7 @@ class Marathon:
                 game = self.play(key, setting, 1, 750 / setting['rate'])
                 return {**setting, 'status': 'completed', 'load_sec': load, 'scene': score, 'game': game}
             row = self.unit(key, setting, work)
-            if row is None and failure_count(self.state['units'], key) < 2 and self.remaining() > 12 * 3600 + estimate:
+            if row is None and failure_count(self.state['units'], key) < 2 and self.remaining() > reserve + estimate:
                 row = self.unit(key, setting, work)
             self.state['a'].append(row or {**setting, 'status': 'failed'})
             self.save()
@@ -339,12 +340,33 @@ class Marathon:
             self.state['round'] += 1
             self.save()
 
-    def run(self, *, max_rounds=None):
+    def begin_b(self, hours):
+        """Give a separately launched second half its own deadline, once only."""
+        if self.state.get('b_started') or self.state['phase'] in {'B', 'finished'}:
+            return
+        if self.state['phase'] != 'checkpoint' or not self.state.get('phase_a_only'):
+            raise ValueError('前半のみの実行が終わってから --begin-b を指定してください')
+        self.state['deadline'] = self.now() + hours * 3600
+        self.state['phase_a_only'] = False
+        self.state['b_started'] = self.now()
+        if hasattr(self.backend, 'deadline'):
+            self.backend.deadline = self.state['deadline']
+        self.save()
+
+    def run(self, *, max_rounds=None, phase_a_only=False):
         try:
             if self.state['finished']:
                 return
+            if phase_a_only:
+                if self.state['phase'] not in {'A', 'checkpoint'}:
+                    raise ValueError('後半に入った実験は --phase-a-only で再開できません')
+                self.state['phase_a_only'] = True
+                self.save()
             if self.state['phase'] == 'A':
-                self.run_a()
+                self.run_a(reserve_b=not self.state.get('phase_a_only'))
+            if self.state.get('phase_a_only'):
+                LOG.info('前半終了。LLMを停止して後半の開始を待ちます')
+                return
             if self.state['phase'] == 'checkpoint':
                 self.pick()
             self.run_b(max_rounds=max_rounds)
@@ -411,6 +433,9 @@ def main():
     parser.add_argument('--run', type=Path, help='状態を保存する場所。同じ指定で再開')
     parser.add_argument('--port', type=int, default=8091)
     parser.add_argument('--status', action='store_true')
+    parser.add_argument('--phase-a-only', action='store_true', help='前半のみ実行し、後半の開始を待つ')
+    parser.add_argument('--shortest-first', action='store_true', help='前半をゲームの見込み時間が短い順に実行')
+    parser.add_argument('--begin-b', action='store_true', help='前半のみの完了後、後半の締切を --hours で新しく設定')
     args = parser.parse_args()
     candidates = sorted((ROOT / 'runs').glob('*/state.json'), key=lambda p: p.stat().st_mtime, reverse=True)
     unfinished = next((p.parent for p in candidates if not read_json(p).get('finished')), None)
@@ -426,6 +451,8 @@ def main():
         return
     if args.hours <= 0:
         parser.error('--hours は正の時間を指定してください')
+    if args.phase_a_only and args.begin_b:
+        parser.error('--phase-a-only と --begin-b は同時に指定できません')
     directory.mkdir(parents=True, exist_ok=True)
     import msvcrt
     with (directory / 'runner.lock').open('a+b') as lock:
@@ -447,8 +474,13 @@ def main():
                 raise RuntimeError('別のllama-serverが稼働中です（8090も停止してください）')
             LOG.info('出発前チェック: %s', check_resources())
             runner = Marathon(directory, backend, hours=args.hours)
+            if args.shortest_first and runner.state['phase'] == 'A':
+                runner.state['settings'].sort(key=lambda s: s.get('expected_game_sec', 750/s['rate']))
+                runner.save()
+            if args.begin_b:
+                runner.begin_b(args.hours)
             with Awake():
-                runner.run()
+                runner.run(phase_a_only=args.phase_a_only)
         except KeyboardInterrupt:
             LOG.info('中断しました。同じ --run 指定で再開できます')
         except Exception:

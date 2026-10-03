@@ -112,6 +112,21 @@ Set-Location C:\AIwolf
 python -m ai_agent.marathon --status --run runs\stage3_20261003
 ```
 
+出張前の前半だけを、1ゲームの見込み時間が短い順に進める場合:
+
+```powershell
+python -m ai_agent.marathon --phase-a-only --shortest-first --hours 38 --run runs\stage3_20261004_predeparture
+python -m ai_agent.marathon --status --run runs\stage3_20261004_predeparture
+```
+
+この実行は前半が終わるとLLMを停止し、区切りの判断と後半を待ちます。
+通常の再開でも前半のみの指定を維持します。前半の完了後、後半を始めるときだけ次を使います。
+`--begin-b` は後半の締切を初回に限り設定し直し、繰り返しても延長しません。
+
+```powershell
+python -m ai_agent.marathon --begin-b --hours 38 --run runs\stage3_20261004_predeparture
+```
+
 前半は `content/marathon_scenes.json` の12場面を各5回とseed 1のゲーム、後半は助言なしの戦略で感想戦と教訓を使う系列と対照系列を巡回します。
 `content/marathon_calibration.json` に試運転で測った倍率を保存しています。
 後半12時間と全モデルの最速設定を優先し、時間のかかる前半の設定は見送ります。
