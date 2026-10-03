@@ -12,15 +12,18 @@ def unquoted(text, role_names):
     return re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”|"[^\"]*"', '', text)
 
 
-def team_claim(text, role_names):
+def team_claim(text, role_names, patterns=None):
     plain = unquoted(text, role_names)
-    for clause in re.split(r'[。！？.!?]', plain):
+    contrast = r'(?<=ません)(?:が|けど|けれど)\s*[、,]?\s*|(?<=ない)(?:が|けど|けれど)\s*[、,]?\s*|[、,]\s*(?:しかし|でも)\s*'
+    for clause in re.split(r'[。！？.!?]|' + contrast, plain):
         if re.search(r'もし|なら|だったら|とすれば|救うのでは(?:ない|ありません)|助けて(?:いない|いません)|仲間では(?:ない|ありません)|とは言っていない', clause):
             continue
         if any(re.search(pattern, clause) for pattern in STRATEGIES.get('team_claim_negative_patterns', [])):
             continue
-        if any(re.search(pattern, clause) for pattern in STRATEGIES['team_claim_patterns']):
-            return True
+        for pattern in (STRATEGIES['team_claim_patterns'] if patterns is None else patterns):
+            match = re.search(pattern, clause)
+            if match and not re.search(r'^[^、,。！？]{0,24}(?:と|という|との|って)\s*(?:提案|発言|主張|説明|言|述|話|報告)', clause[match.end():]):
+                return True
     return False
 
 

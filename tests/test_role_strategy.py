@@ -78,6 +78,23 @@ class RoleStrategyTests(unittest.TestCase):
         self.assertIsNone(disclosure_reason(self.state, '私は人狼COではなく、狂人COです。',
                                            self.game.content.roles,
                                            role_counts={'werewolf': 2, 'madman': 1, 'villager': 6}))
+        self.assertIsNotNone(disclosure_reason(self.state, '混乱で票が割れるよう誘導します。',
+                                              self.game.content.roles,
+                                              role_counts={'werewolf': 2, 'madman': 1, 'villager': 6}))
+
+    def test_a_negated_predicate_does_not_hide_another_positive_army_claim(self):
+        for text in ['私は村を混乱させませんが、人狼を救うのが私の目的です。',
+                     '私は村を混乱させませんが人狼を救うのが私の仕事です。',
+                     '私は村を混乱させないけど、人狼陣営です。']:
+            with self.subTest(text=text):
+                self.assertEqual(disclosure_reason(self.state, text, self.game.content.roles), 'unjustified_self_disclosure')
+
+    def test_question_about_someone_elses_unquoted_proposal_is_not_own_disclosure(self):
+        for text in ['player-2さん、村を混乱させましょうと提案した理由を教えてください？',
+                     'player-2さん、混乱で票が割れるよう仕向けますと発言した理由は？',
+                     'player-2さん、村を混乱させましょうという提案は村に不利です。']:
+            with self.subTest(text=text):
+                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
 
     def test_possible_late_pp_is_not_blocked_using_unreceived_role_truth(self):
         self.assertIsNone(disclosure_reason(self.state, '人狼です。狂人の方、player-2へ合わせてください。', self.game.content.roles,

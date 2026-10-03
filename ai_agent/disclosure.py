@@ -9,6 +9,8 @@ def disclosure_reason(state, text, roles, *, formal_claim=None, role_counts=None
     role = roles[state.role_id]
     names = [r.name for r in roles.values()]
     plain = unquoted(text, names)
+    if role.attributes.team == 'wolf' and team_claim(text, names, STRATEGIES['public_disruption_patterns']):
+        return 'unjustified_self_disclosure'
     true_role = role.name in self_claims(state.player_id, text, [role.name]) or formal_claim == role.id
     claimed = roles.get(formal_claim)
     wolf_names = [r.name for r in roles.values() if r.attributes.team == "wolf"]
