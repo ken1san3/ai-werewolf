@@ -40,7 +40,7 @@ def self_claims(player, text, role_names):
         named_members = rf'{role_word}(?:は|が)\s*(?:私たち|私|僕|俺|自分)(?:と\s*player-\d+|です|[。！])'
         alternatives = '|'.join(re.escape(n) for n in role_names)
         changed_role = rf'(?:{subject})(?:{alternatives})ではなく\s*{role_word}{tail}'
-        possessed = rf'私には\s*{role_word}(?:の)?役職(?:が|を)|私の役職は\s*{role_word}'
+        possessed = rf'私には\s*{role_word}(?:の)?役職(?:が(?:あります|ある|あり|あって)(?!ません|かもしれ|なら|とすれば)|を(?:持|与))'
         pattern = rf'(?:{subject})(?:真の|本当の|唯一の)?{role_word}{tail}|{bare}|{named_intro}|{own_predicate}|{inverse}|{named_members}|{changed_role}|{possessed}'
         definite = False
         for match in re.finditer(pattern, text):

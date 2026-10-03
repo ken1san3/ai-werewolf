@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import unittest
@@ -54,6 +55,23 @@ class RoleStrategyTests(unittest.TestCase):
         self.assertIsNotNone(disclosure_reason(self.state, '人狼です。', self.game.content.roles,
                                               role_counts={'werewolf': 2, 'villager': 7}))
 
+    def test_publicly_claimed_helper_is_not_counted_twice(self):
+        self.state.alive = {'player-0', 'player-2', 'player-3', 'player-4', 'player-5'}
+        self.state.chats = [{'channel': 'public', 'day': 1, 'player_id': 'player-2', 'message': '狂人です。'}]
+        counts = {'werewolf': 2, 'madman': 1, 'villager': 6}
+        self.assertIsNotNone(disclosure_reason(self.state, '人狼です。', self.game.content.roles, role_counts=counts))
+        self.state.chats = []
+        self.state.facts = [{'type': 'CO_DECLARED', 'player_id': 'player-2', 'claimed_role_id': 'madman'}]
+        self.assertIsNotNone(disclosure_reason(self.state, '人狼です。', self.game.content.roles, role_counts=counts))
+
+    def test_role_and_buddy_denial_hypothesis_remain_free(self):
+        for text in ['私の役職は人狼ではありません。', '私には人狼の役職がありません。',
+                     'player-1は私の仲間ではありません。', '私の仲間はplayer-1ではありません。',
+                     'もしplayer-1が私の仲間なら、私を疑うはずです。']:
+            with self.subTest(text=text):
+                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
+        self.assertIsNotNone(disclosure_reason(self.state, '私の役職は人狼です。', self.game.content.roles))
+
     def test_private_context_has_authorized_chats_and_public_information_only(self):
         self.state.chats = [{'channel': c, 'day': 1, 'player_id': 'player-1', 'message': text}
                             for c, text in [('public', 'PUBLIC'), ('wolf', 'OWN-CHANNEL'), ('fox', 'OTHER-CHANNEL')]]
@@ -81,6 +99,63 @@ class RoleStrategyTests(unittest.TestCase):
 
 
 class PrivateChatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_private_json_still_selects_ability_and_is_not_retried(self):
+        game = make_game()
+        agent = Agent('player-0', 'token', 'unused', game.game_id, game.content.roles, {}, FakeLLM(),
+                      RepetitionFilter(), lambda *_: None, seed=1, rules=game.rules)
+        state = agent.state
+        state.role_id, state.phase, state.day = 'werewolf', 'night', 1
+        state.players, state.alive, state.teammates = ['player-0', 'player-1', 'player-2'], {'player-0', 'player-1', 'player-2'}, ['player-1']
+        state.phase_ends_at = int(time.monotonic()) + 25
+        state.actions = [{'type': 'ability', 'ability_id': 'attack', 'valid_targets': ['player-2'], 'target_count': 1},
+                         {'type': 'chat', 'channel': 'wolf'}]
+        agent.generate = AsyncMock(side_effect=['invalid', 'invalid', 'invalid', '{"target":"player-2"}'])
+        agent.ws = AsyncMock()
+        await agent.step()
+        self.assertEqual(json.loads(agent.ws.send.call_args.args[0])['type'], 'ability.use')
+        self.assertEqual(agent.generate.call_count, 4)
+        self.assertEqual(agent.speech_discards['invalid_decision_json'], 3)
+        await agent.step()
+        self.assertEqual(agent.generate.call_count, 4)
+
+    async def test_short_remaining_night_reserves_ability_time(self):
+        game = make_game()
+        agent = Agent('player-0', 'token', 'unused', game.game_id, game.content.roles, {}, FakeLLM(),
+                      RepetitionFilter(), lambda *_: None, seed=1, rules=game.rules)
+        state = agent.state
+        state.role_id, state.phase, state.day = 'werewolf', 'night', 1
+        state.players, state.alive, state.teammates = ['player-0', 'player-1', 'player-2'], {'player-0', 'player-1', 'player-2'}, ['player-1']
+        state.phase_ends_at = int(time.monotonic()) + 7
+        state.actions = [{'type': 'ability', 'ability_id': 'attack', 'valid_targets': ['player-2'], 'target_count': 1},
+                         {'type': 'chat', 'channel': 'wolf'}]
+        agent.generate = AsyncMock(return_value='{"target":"player-2"}')
+        agent.ws = AsyncMock()
+        await agent.step()
+        self.assertEqual(json.loads(agent.ws.send.call_args.args[0])['type'], 'ability.use')
+        self.assertEqual(agent.speech_generations, 0)
+
+    async def test_private_timeout_keeps_ability_time_and_counts_its_own_reason(self):
+        game = make_game()
+        agent = Agent('player-0', 'token', 'unused', game.game_id, game.content.roles, {}, FakeLLM(),
+                      RepetitionFilter(), lambda *_: None, seed=1, rules=game.rules)
+        state = agent.state
+        state.role_id, state.phase, state.day = 'werewolf', 'night', 1
+        state.players, state.alive, state.teammates = ['player-0', 'player-1', 'player-2'], {'player-0', 'player-1', 'player-2'}, ['player-1']
+        state.phase_ends_at = int(time.monotonic()) + 10
+        state.actions = [{'type': 'ability', 'ability_id': 'attack', 'valid_targets': ['player-2'], 'target_count': 1},
+                         {'type': 'chat', 'channel': 'wolf'}]
+        async def generate(question, purpose, *args, **kwargs):
+            if purpose == 'private_chat_decision':
+                await asyncio.sleep(3)
+                return PLAN
+            return '{"target":"player-2"}'
+        agent.generate = generate
+        agent.ws = AsyncMock()
+        await agent.step()
+        self.assertEqual(json.loads(agent.ws.send.call_args.args[0])['type'], 'ability.use')
+        self.assertEqual(agent.speech_discards['private_chat_budget'], 1)
+        self.assertEqual(agent.speech_discards['phase_expired'], 0)
+
     async def test_private_chat_precedes_ability_and_public_filters_do_not_hide_own_role(self):
         game = make_game()
         agent = Agent('player-0', 'token', 'unused', game.game_id, game.content.roles, {}, FakeLLM(),

@@ -139,9 +139,10 @@ class Agent:
             return await self.generate(question + "\n" + instruction + confirmed + "本文だけを書き、JSONを会話に出さないでください。", purpose,
                                        max_tokens=max_tokens, channel=channel)
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            self.speech_discards["phase_expired"] += 1
+            reason = 'private_chat_budget' if channel != 'public' and fresh(self.state, key) else 'phase_expired'
+            self.speech_discards[reason] += 1
             if record is not None:
-                record.update(status="discarded", discard_reason="phase_expired")
+                record.update(status="discarded", discard_reason=reason)
             raise
 
     def speech_rejection(self, text, key, formal_claim=None, *, channel="public"):
@@ -243,12 +244,21 @@ class Agent:
         if private_chat and buddies:
             channel = private_chat['channel']
             if key not in self.private_spoke:
-                if await self.speak('仲間へ、公開の発言を踏まえた襲撃・投票の方針と対象の案を日本語で短く伝えてください。初夜に襲撃できない場合は翌日以降の相談にしてください。',
-                                    'private_chat', key, 'chat.send', {'channel_id': channel}, 'message', 160):
+                self.private_spoke[key] = None
+                budget = min(12, state.seconds_left() - 8 * min(1, self.timing_scale))
+                sent = False
+                if budget > .25:
+                    try:
+                        sent = await asyncio.wait_for(self.speak('仲間へ、公開の発言を踏まえた襲撃・投票の方針と対象の案を日本語で短く伝えてください。初夜に襲撃できない場合は翌日以降の相談にしてください。',
+                                                               'private_chat', key, 'chat.send', {'channel_id': channel}, 'message', 160), budget)
+                    except asyncio.TimeoutError:
+                        pass
+                if sent:
                     self.private_spoke[key] = time.monotonic()
-                return
+                    return
             heard = any(c['channel'] == channel and c['day'] == state.day and c['player_id'] in buddies for c in state.chats)
-            if not heard and time.monotonic() - self.private_spoke[key] < 4 and state.seconds_left() > 5:
+            sent_at = self.private_spoke[key]
+            if sent_at is not None and not heard and time.monotonic() - sent_at < 4 and state.seconds_left() > 8:
                 return
         vote = state.action("vote")
         ability = state.action("ability")
