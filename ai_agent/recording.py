@@ -77,7 +77,7 @@ class Recorder:
         discards = Counter()
         for agent in agents:
             discards.update(agent.speech_discards)
-        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "unjustified_self_disclosure", "invalid_decision_json"):
+        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "unjustified_self_disclosure", "invalid_decision_json", "self_id_confusion"):
             discards.setdefault(reason, 0)
         measurements = measure(self.rows, self.private_results, roles, game.content.roles, game.rules, safe_calls,
                                generated=sum(a.speech_generations for a in agents), discards=dict(discards))
@@ -95,7 +95,8 @@ class Recorder:
             **text_result,
             **redact(measurements, self.tokens),
             "strategic_disclosure_review": {"status": "pending", "leaks": None,
-                                            "note": "Codex reviews context and strategy; uncertain cases go to the user."},
+                                            "uncertain_candidates": [],
+                                            "note": "Codex classifies provisionally without stopping; uncertain cases are collected for CP3."},
             "public_messages": sum(row["kind"] == "chat" for row in self.rows),
             "private_messages_compared": len(self.private_messages),
             "private_results_compared": len(self.private_results),

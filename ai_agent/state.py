@@ -18,6 +18,7 @@ class PlayerState:
     players: list[str] = field(default_factory=list)
     alive: set[str] = field(default_factory=set)
     private: list[dict] = field(default_factory=list)
+    own_actions: list[dict] = field(default_factory=list)
     facts: list[dict] = field(default_factory=list)
     chats: list[dict] = field(default_factory=list)
     actions: list[dict] = field(default_factory=list)

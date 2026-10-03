@@ -3,6 +3,7 @@ import re
 
 from .metrics import self_claims, unquoted
 from .repetition import normalize
+from .strategy import strategy_for, under_pressure
 
 
 def disclosure_reason(state, text, roles, *, formal_claim=None):
@@ -17,7 +18,10 @@ def disclosure_reason(state, text, roles, *, formal_claim=None):
         r"(?:私は|僕は|俺は|^|[。！？]\s*)(?:人狼|狼)陣営(?:です|に属|の一員)", plain))
     if not true_role and not team_claim:
         return None  # Claims that disclose neither the true role nor army remain free.
-    if role.attributes.team == "wolf":
+    policy = strategy_for(role)["disclosure"]
+    if policy == "hidden":
+        return "unjustified_self_disclosure"
+    if policy == "endgame_vote":
         supporters = {state.player_id, *state.teammates} & state.alive
         for chat in state.chats:
             player = chat["player_id"]
@@ -33,13 +37,13 @@ def disclosure_reason(state, text, roles, *, formal_claim=None):
         if late_helper or len(supporters) > len(state.alive) / 2:
             return None
         return "unjustified_self_disclosure"
-    if any(effect.id == "protect" for ability in role.abilities for effect in ability.effects):
-        target = re.escape(state.player_id) + r"\s*(?:さん|君)?\s*"
-        pressure = rf"{target}(?:を\s*(?:処刑|吊)|に\s*(?:投票|入れ))|(?:投票先|処刑対象|吊り先)(?:は|を|に)?\s*{target}"
-        for chat in state.chats[-15:]:
+    if policy == "pressure":
+        if under_pressure(state):
+            return None
+        for chat in state.chats:
             if chat["channel"] != "public" or chat["player_id"] == state.player_id or chat["player_id"] not in state.alive or chat["day"] != state.day:
                 continue
-            if re.search(pressure, normalize(chat["message"])) or role.name in self_claims(chat["player_id"], chat["message"], [role.name]):
+            if role.name in self_claims(chat["player_id"], chat["message"], [role.name]):
                 return None
         if any(f["type"] == "CO_DECLARED" and f["player_id"] != state.player_id and f["player_id"] in state.alive and f.get("claimed_role_id") == role.id
                for f in state.facts):

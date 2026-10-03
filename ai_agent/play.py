@@ -30,7 +30,7 @@ class GameRun:
 
 
 async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
-                   timing_scale=1, timeout=2400, output=None, progress=False):
+                   timing_scale=1, timeout=2400, output=None, progress=False, cp3=False):
     if min(day, vote, night) < 2:
         raise ValueError("phase durations must be at least two seconds")
     content = load_content(ROOT / "content")
@@ -79,6 +79,9 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
         if owned_llm:
             await llm.close()
     checks = recorder.checks(game, agents, errors, getattr(llm, "calls", []))
+    checks['require_strategic_disclosures'] = cp3
+    from .metrics import mechanical_conditions
+    checks['mechanical_conditions'] = mechanical_conditions(checks)
     checks["settings"] = {"seed": seed, "day_seconds": day, "vote_seconds": vote,
                           "night_seconds": night, "silence_after_dawn_seconds": preset.rules.silence_after_dawn_seconds}
     if output is not None:
@@ -96,10 +99,11 @@ def main():
     parser.add_argument("--vote", type=int, default=60)
     parser.add_argument("--night", type=int, default=60)
     parser.add_argument("--out", type=Path)
+    parser.add_argument('--cp3', action='store_true')
     args = parser.parse_args()
     output = args.out or ROOT / "games" / (datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d_%H%M%S_%f") + f"_seed{args.seed}")
     result = asyncio.run(run_game(seed=args.seed, day=args.day, vote=args.vote, night=args.night,
-                                 output=output, progress=True))
+                                 output=output, progress=True, cp3=args.cp3))
     print("output", output.resolve(), flush=True)
     print({k: v for k, v in result.checks.items() if k in {
         "completed", "winner", "outcome", "players", "finished_agents", "server_rejections",

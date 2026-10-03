@@ -2,6 +2,7 @@
 import json
 import re
 import unicodedata
+from .strategy import strategy_for, under_pressure
 
 
 def strip_introduction(text, player_id):
@@ -20,6 +21,23 @@ def japanese_message(text):
     return bool(re.search(r"[ぁ-ゖァ-ヺ一-龯]", text)) and not re.search(r"[A-Za-z]", without_ids)
 
 
+def self_reference(text, player_id):
+    """Own ID in unquoted speech invites treating oneself as another player."""
+    plain = re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”|"[^\"]*"', "", unicodedata.normalize("NFKC", text))
+    plain = re.sub(rf"(?:私|僕|俺|自分)\s*\(\s*{re.escape(player_id)}\s*\)", "私", plain, flags=re.I)
+    return bool(re.search(rf"(?<![A-Za-z0-9_-]){re.escape(player_id)}(?![A-Za-z0-9_-])", plain, re.I))
+
+
+def as_self(value, player_id):
+    if isinstance(value, str):
+        return re.sub(rf"(?<![A-Za-z0-9_-]){re.escape(player_id)}(?![A-Za-z0-9_-])", f"あなた（{player_id}）", value, flags=re.I)
+    if isinstance(value, list):
+        return [as_self(v, player_id) for v in value]
+    if isinstance(value, dict):
+        return {k: as_self(v, player_id) for k, v in value.items()}
+    return value
+
+
 def recent_json(entries, max_chars):
     """Keep recent complete entries within the shared 8K context budget."""
     selected, used = [], 2
@@ -32,7 +50,7 @@ def recent_json(entries, max_chars):
     return json.dumps(list(reversed(selected)), ensure_ascii=False)
 
 
-def messages(state, roles, role_counts, question, channel="public", *, include_private=True):
+def messages(state, roles, role_counts, question, channel="public"):
     role = roles[state.role_id]
     counts = {roles[key].name: count for key, count in role_counts.items()}
     role_names = {key: value.name for key, value in roles.items()}
@@ -40,9 +58,6 @@ def messages(state, roles, role_counts, question, channel="public", *, include_p
         f"あなたの非公開の役職: {role.name}。{role.description}\n"
         f"あなたが知っている仲間: {', '.join(state.teammates) or 'なし'}。\n"
         f"あなたの非公開の結果: {state.private_text()}。\n"
-    ) if include_private else (
-        "公開議論だけを根拠に、役職・所属・自分の能力行動を名乗らずに会話してください。"
-        "正式COのコメントを求められた場合だけ、依頼された公称の役職に合わせてください。\n"
     )
     system = (
         f"あなたは{state.player_id}です。リアルタイムの人狼ゲームに参加しています。"
@@ -59,13 +74,11 @@ def messages(state, roles, role_counts, question, channel="public", *, include_p
         "新しい内容を加え、自己紹介、空の同意、繰り返しを避けてください。"
         "公開された議論、サーバの事実、自分の非公開情報だけを根拠にしてください。"
         "秘密チャットの本文を公開チャットへコピーしないでください。"
-        "自分の本当の役職を公表する場合は、今の盤面で必要な理由があるときだけです。"
-        "人狼陣営は、序盤に本当の役職・陣営・仲間・自分の襲撃を公表せず、村側として議論し騙ってください。"
+        f"本人の戦略: {strategy_for(role)['text']}\n"
+        "自分のIDを他人として質問・評価・処刑提案しないでください。本文で自分を指すときは『私』を使い、自分のIDを書かないでください。"
+        "履歴や事実の『あなた』は自分です。引用の『私』は引用元の話者です。自分の役職は変わりません。"
         "役職COはゲームのルール上禁止されていません。隠すのは戦略のためで、COをルール違反と呼ばないでください。"
-        "終盤、公開の仲間COと通知された生存する仲間で投票の過半数を取れるなら、名乗って票を合わせられます。"
-        "狂人など人間の人狼陣営は、生存3人以下の終盤なら名乗って人狼に票合わせを呼びかけられます。"
-        "狩人は、他人から自分への処刑・投票提案が出た場合や対抗狩人COがある場合に限り、COして処刑回避や対抗できます。"
-        "占い師・霊能者は自分の役職と受け取った結果を公表できます。"
+        "騙りの役職・偽の結果は秘密ではなく、公開本文に使ってよい内容です。"
         "通常の発言では発言本文だけを出力してください。選択を求められた場合は指定されたJSONだけを返し、IDを翻訳しないでください。"
     )
     discussion = [c for c in state.chats if c["channel"] == channel and c["day"] == state.day][-40:]
@@ -73,8 +86,11 @@ def messages(state, roles, role_counts, question, channel="public", *, include_p
     user = (
         f"第{state.day}日、フェーズID: {state.phase}。生存者: {', '.join(sorted(state.alive))}。"
         f"死者: {', '.join(sorted(set(state.players) - state.alive)) or 'なし'}。\n"
-        f"サーバが公開した最近の事実: {recent_json(state.facts[-30:], 2000)}\n"
-        f"今日の最近のチャット（チャンネルID: {channel}）: {recent_json(discussion, 3500)}\n"
+        f"自分への処刑・投票の呼びかけ: {'あり' if under_pressure(state) else 'なし'}。\n"
+        f"本人が送信しサーバが受理した能力の選択: {json.dumps(state.own_actions, ensure_ascii=False)}\n"
+        f"サーバが公開した最近の事実: {recent_json(as_self(state.facts[-30:], state.player_id), 2000)}\n"
+        f"今日の最近のチャット（チャンネルID: {channel}、他人の発言は引用）: {recent_json(as_self(discussion, state.player_id), 3500)}\n"
+        f"発言者はあなた（{state.player_id}）です。自分のIDを本文に書かず『私』で語ってください。\n"
         f"{question}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

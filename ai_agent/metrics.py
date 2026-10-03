@@ -2,8 +2,9 @@
 import re
 
 from .checks import speech, timing_summary
-from .prompts import strip_introduction
+from .prompts import self_reference, strip_introduction
 from .repetition import normalize, similarity
+from .strategy import vote_pressure
 
 
 def unquoted(text, role_names):
@@ -67,9 +68,9 @@ def self_claims(player, text, role_names):
 
 def result_value(text):
     text = re.sub(r'[「」『』“”"]', "", text)
-    if re.search(r"(?:人狼|狼)で(?:は)?(?:ない|ありません)|非人狼|(?:清白|白)(?:です|でした|と|に|判定|確定)|人間(?:です|でした|と)|村人(?:です|でした|と)", text):
+    if re.search(r"(?:人狼|狼)で(?:は)?(?:ない|ありません)|非人狼|無狼|(?:清白|白)(?:です|でした|と|に|判定|確定)|人間(?:です|でした|と)|村人(?:です|でした|と)", text):
         return "not_wolf"
-    if re.search(r"(?:人狼|狼)(?:です|でした|だった|と|だと|である|確定)|黒(?:です|でした|と|判定|確定)", text):
+    if re.search(r"(?:人狼|狼)(?:です|でした|だった|と|だと|である|確定)|黒(?:です|でした|と|判定|確定)|(?:人狼|狼|黒)(?=[、,]|\s*$)", text):
         return "wolf"
     return None
 
@@ -79,6 +80,8 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
     candidates = {f"Q{i}": [] for i in range(1, 7)}
     disclosures, questions, pairs, prior = [], [], [], []
     dead, day, reactions, similar, public_count, line = set(), 0, 0, 0, 0, 5
+    first_day_at = next((r['t'] for r in rows if r['kind'] == 'PHASE_STARTED' and
+                         r['payload'].get('day') == 1 and r['payload'].get('phase') == 'day'), None)
     for index, row in enumerate(rows):
         row_line = line
         line += 2 + (row["message"]["message"].count("\n") if row["kind"] == "chat" else 0)
@@ -92,6 +95,7 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
         player, text = spoken
         location = {"row": index, "line": row_line, "t": row["t"], "player_id": player, "text": text}
         role = roles.get(player)
+        confused_id = self_reference(strip_introduction(text, player), player)
         claims = self_claims(player, text, names)
         if row["kind"] == "CO_DECLARED":
             claimed = content_roles.get(row["payload"]["claimed_role_id"])
@@ -101,17 +105,22 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
             team_claim = bool(re.search(r"(?:私は|僕は|俺は|^|[。！？]\s*)(?:人狼|狼)陣営(?:です|に属|の一員)", unquoted(text, names)))
             true_role = role.name in claims
             wolf_claim = role.attributes.team == "wolf" and (team_claim or any(r.name in claims for r in content_roles.values() if r.attributes.team == "wolf"))
-            if true_role or wolf_claim:
+            if (true_role or wolf_claim) and not confused_id:
                 disclosures.append({**location, "role_id": role.id, "team": role.attributes.team, "day": day})
-            if wolf_claim:
+            if wolf_claim and not confused_id:
                 candidates["Q1"].append(location)
             if role.attributes.team == "village" and any(name != role.name for name in claims):
                 candidates["Q3"].append({**location, "claimed_roles": sorted(set(claims)), "actual_role": role.name})
+        if confused_id:
+            if candidates['Q3'] and candidates['Q3'][-1]['row'] == index:
+                candidates['Q3'][-1]['self_id_confusion'] = True
+            else:
+                candidates['Q3'].append({**location, 'self_id_confusion': True})
         if re.search(r"お断り|申し訳ありませんが|(?:ai|人工知能|言語モデル)として|このチャットへの参加|対応できません|回答できません", normalize(text)):
             candidates["Q2"].append(location)
         if normalize(strip_introduction(text, player)) != normalize(text.strip().strip('"')):
             candidates["Q6"].append(location)
-        addressed = re.findall(r"(?:^|[。！？]\s*|@)(player-\d+)(?:さん|君)?\s*[,、:]", normalize(text))
+        addressed = re.findall(r"(?:^|[。！？]\s*|@)(player-\d+)\s*(?:さん|君)?\s*[,、:]", normalize(text))
         if dead.intersection(addressed):
             candidates["Q5"].append({**location, "targets": sorted(dead.intersection(addressed))})
         if role:
@@ -126,8 +135,9 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                 actor_body = r"(?:(?!(?:私|僕|俺|自分)(?:は|が)|player-\d+\s*(?:さん)?\s*(?:は|が))[^。！？])*?"
                 other_actor = re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:が|は){actor_body}(?:占った|調べた|護衛した|守った|襲撃した)", clause)
                 attributed = re.search(r"(?:調べた|占った|護衛した|守った)(?:そう|らしい)|(?:と|という)(?:発言|説明|主張|報告)", clause)
+                attributed = attributed or re.search(r"player-\d+\s*(?:さん|君)?\s*(?:は|が)\s*(?:私|僕|俺|自分)を[^。！？]*(?:断定|判定|疑)", clause)
                 hypothetical = re.search(r"もし|なら|場合|仮に|だったら|かもしれ", clause)
-                initial_action = re.search(r"初夜.*(?:占った|調べた|調べました|護衛した|守った|襲撃した|判定.*(?:出た|出ました)|(?:調査|占い)(?:で|の結果).*(?:確認した|確認しました|判定した|確定した|判明した))", clause)
+                initial_action = re.search(r"(?:初夜|第0夜).*(?:占った|調べた|調べました|護衛した|守った|襲撃した|判定した|判定しました|判定.*(?:出た|出ました)|(?:調査|占い)(?:で|の結果).*(?:確認した|確認しました|判定した|確定した|判明した))", clause)
                 if not can_initial and not other_actor and not attributed and not hypothetical and initial_action:
                     issues.append({"reason": "unavailable_initial_action"})
                 if other_actor or attributed or hypothetical:
@@ -139,6 +149,13 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                     target = match.group()
                     after = re.split(r"player-\d+", clause[match.end():], maxsplit=1)[0]
                     claimed_result = result_value(after)
+                    if 'inspect' in effects and re.search(r'初夜|第0夜', clause) and claimed_result:
+                        initial = [p for p in own if first_day_at is not None and p['t'] < first_day_at and
+                                   p['event_payload'].get('target_player_id') == target]
+                        if rules.first_night_seer == 'none' or (rules.first_night_seer == 'random_white' and claimed_result == 'wolf'):
+                            issues.append({'reason': 'initial_result_not_allowed_by_preset', 'target': target})
+                        elif first_day_at is not None and not initial:
+                            issues.append({'reason': 'initial_unreceived_result', 'target': target})
                     target_results = [p for p in own if p["event_payload"].get("target_player_id") == target]
                     expected = {p["event_payload"]["result"] for p in target_results
                                 if p["event_payload"].get("result") in {"wolf", "not_wolf"}}
@@ -167,11 +184,11 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                               "answer_line": location["line"], "target": player, "delay_sec": round(row["t"] - question["t"], 2)})
         addressees = set()
         for clause in re.split(r"(?<=[。！？?])", text):
-            direct = set(re.findall(r"(player-\d+)(?:さん|君)?\s*[,、:]", normalize(clause)))
+            direct = set(re.findall(r"(player-\d+)\s*(?:さん|君)?\s*[,、:]", normalize(clause)))
             if direct:
                 addressees = direct
             if "？" in clause or "?" in clause:
-                subject = set(re.findall(r"(player-\d+)(?:さん|君)?\s*は\s*(?=どう|誰|何|なぜ|どの)", normalize(clause)))
+                subject = set(re.findall(r"(player-\d+)\s*(?:さん|君)?\s*は\s*(?=どう|誰|何|なぜ|どの)", normalize(clause)))
                 for target in (direct or subject or addressees) - {player}:
                     questions.append({**location, "target": target})
         prior.append(location)
@@ -185,15 +202,55 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                    "similarity_over_0_45_rate": similar / public_count if public_count else 0})
     return {"metrics": values, "metric_candidates": candidates, "question_answer_pairs": pairs,
             "role_team_disclosure_candidates": disclosures,
+            "strategy_metrics": strategy_metrics(rows, roles, content_roles),
             "speech_generations": generated, "speech_discards": discards,
             "measurement_scope": "Q4 is a text candidate check against received server results and dead/initial-action facts; Q1 includes permitted disclosures. G2/G3 count ID/time proxies, not semantic understanding. Unknown old generation telemetry stays null."}
+
+
+def strategy_metrics(rows, roles, content_roles):
+    guards = {p for p, role in roles.items() if any(e.id == 'protect' for a in role.abilities for e in a.effects)}
+    wolves = {p for p, role in roles.items() if role.attributes.count_as == 'wolf'}
+    pressured, revealed, failures = set(), set(), []
+    day, phase, dead, public, wolf_public = 0, None, set(), 0, 0
+    votes = {str(d): {p: 0 for p in sorted(wolves)} for d in (1, 2)}
+    for index, row in enumerate(rows):
+        if row['kind'] == 'PHASE_STARTED':
+            day, phase = row['payload']['day'], row['payload']['phase']
+        if row['kind'] == 'VOTE_RESOLVED' and day in (1, 2):
+            for p in wolves:
+                votes[str(day)][p] += row['payload']['tallies'].get(p, 0)
+        spoken = speech(row)
+        if spoken:
+            player, text = spoken
+            own_role = player in guards and re.search(rf'(?:私|僕|俺|自分)(?:は|が|も|こそが|[、,])\s*{re.escape(roles[player].name)}(?:です|で|として|[。！])', unquoted(text, [roles[player].name]))
+            if player in guards and (own_role or roles[player].name in self_claims(player, text, [roles[player].name]) or
+               row['kind'] == 'CO_DECLARED' and row['payload']['claimed_role_id'] == roles[player].id):
+                revealed.add(player)
+            if row['kind'] == 'chat':
+                public += 1
+                wolf_public += player in wolves
+            if phase == 'day':
+                for p in guards - dead - {player}:
+                    if vote_pressure(p, text):
+                        pressured.add((day, p))
+        if row['kind'] == 'PLAYER_DIED':
+            p = row['payload']['player_id']
+            if row['payload'].get('public_cause') == 'lynched' and (day, p) in pressured and p not in revealed:
+                failures.append({'row': index, 'day': day, 'player_id': p})
+            dead.add(p)
+    return {'pressure_no_co_lynches': len(failures), 'pressure_no_co_candidates': failures,
+            'wolf_public_messages': wolf_public, 'wolf_public_speech_share': wolf_public / public if public else 0,
+            'wolf_votes_days1_2': votes,
+            'note': 'Vote pressure is a text candidate; votes sum all resolved rounds in each day. Role truth is evaluator-only.'}
 
 
 def mechanical_conditions(checks):
     zero_lists = ("private_channel_body_matches", "authentication_token_leaks", "other_private_result_literal_matches",
                   "immediate_sentence_repetitions", "sentences_repeated_three_times")
     review = checks.get("strategic_disclosure_review", {})
-    return {"completed": bool(checks.get("completed")), "server_rejections": checks.get("server_rejections") == 0,
+    result = {"completed": bool(checks.get("completed")), "server_rejections": checks.get("server_rejections") == 0,
             "crashes": checks.get("crashes") == 0, **{key: not checks[key] for key in zero_lists},
-            "llm_http_errors": checks.get("llm_http_errors") == 0,
-            "strategic_disclosures": review.get("status") == "complete" and review.get("leaks") == 0}
+            "llm_http_errors": checks.get("llm_http_errors") == 0}
+    if checks.get('require_strategic_disclosures'):
+        result['strategic_disclosures'] = review.get('status') == 'complete' and review.get('leaks') == 0
+    return result

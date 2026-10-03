@@ -11,8 +11,9 @@ from uuid import uuid4
 from websockets.asyncio.client import connect
 
 from .disclosure import disclosure_reason
-from .prompts import japanese_message, messages, strip_introduction
+from .prompts import japanese_message, messages, self_reference, strip_introduction
 from .state import PlayerState
+from .strategy import strategy_for, under_pressure
 from .timing import fresh, speech_pause
 
 
@@ -35,6 +36,8 @@ class Agent:
         self.speech_generations = 0
         self.speech_discards = Counter()
         self.decisions = []
+        self.pending_actions = {}
+        self.defensive_co_days = set()
 
     async def run(self):
         async with connect(self.uri, max_size=2**22) as self.ws:
@@ -58,6 +61,10 @@ class Agent:
             message = json.loads(raw)
             self.observe(self.state.player_id, message)
             self.state.receive(message)
+            if message['type'] in {'action.accepted', 'action.rejected'}:
+                selected = self.pending_actions.pop(message['payload'].get('request_event_id'), None)
+                if selected and message['type'] == 'action.accepted':
+                    self.state.own_actions.append(selected)
             if message["type"] == "chat.message":
                 data = message["payload"]["message"]
                 if data["player_id"] != self.state.player_id and re.search(
@@ -68,12 +75,12 @@ class Agent:
             if self.state.done:
                 return
 
-    async def generate(self, question, purpose, schema=None, max_tokens=160, *, public_only=False):
+    async def generate(self, question, purpose, schema=None, max_tokens=160):
         timeout = self.state.seconds_left() - 0.25
         if timeout <= 0:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(self.llm.complete(
-            lambda: messages(self.state, self.roles, self.role_counts, question, include_private=not public_only),
+            lambda: messages(self.state, self.roles, self.role_counts, question),
             player_id=self.state.player_id, purpose=purpose,
             seed=self.rng.randrange(1, 10**9), schema=schema, max_tokens=max_tokens,
         ), timeout)
@@ -83,21 +90,25 @@ class Agent:
         key = self.state.phase_key
         record = None
         try:
-            schema = {"type": "object", "additionalProperties": False, "required": ["facts", "aim", "reason"],
+            schema = {"type": "object", "additionalProperties": False, "required": ["facts", "aim", "reason", "suspicion", "reveal_role"],
                       "properties": {"facts": {"type": "array", "maxItems": 2,
                                                "items": {"type": "string", "maxLength": 32}},
                                      "aim": {"type": "string", "maxLength": 32},
-                                     "reason": {"type": "string", "maxLength": 48}}}
+                                     "reason": {"type": "string", "maxLength": 48},
+                                     "suspicion": {"type": "string", "enum": ["low", "medium", "high"]},
+                                     "reveal_role": {"type": "boolean"}}}
             plan_text = await self.generate(
                 question + ' 発言前の判断だけをJSONで返してください。factsは確認した事実を最大2件、aimは狙い、reasonは行動を選ぶ短い理由です。'
-                '各文字列は日本語で10〜20字にしてください。他人の発言は公称と区別し、サーバの事実を優先してください。このJSONは公開しません。',
-                purpose + "_decision", schema, 224)
+                'facts/aim/reasonは日本語で10〜20字にしてください。suspicionは自分への疑いの強さ(low/medium/high)、'
+                'reveal_roleは今、本当の役職を明かすか(true/false)です。本人の戦略と公開の処刑圧力を考慮してください。'
+                '自分を他人と取り違えず、他人の発言は公称と区別しサーバの事実を優先してください。このJSONは公開しません。',
+                purpose + "_decision", schema, 256)
             record = {"player_id": self.state.player_id, "day": key[0], "phase": key[1],
                       "at_monotonic": time.monotonic(), "purpose": purpose, "status": "planned"}
             self.decisions.append(record)
             try:
                 plan = json.loads(plan_text)
-                if not isinstance(plan, dict) or set(plan) != {"facts", "aim", "reason"} or not isinstance(plan["facts"], list) or not all(isinstance(f, str) for f in plan["facts"]) or not all(isinstance(plan[k], str) for k in ("aim", "reason")):
+                if not isinstance(plan, dict) or set(plan) != {"facts", "aim", "reason", "suspicion", "reveal_role"} or not isinstance(plan["facts"], list) or not all(isinstance(f, str) for f in plan["facts"]) or not all(isinstance(plan[k], str) for k in ("aim", "reason")) or plan['suspicion'] not in {'low', 'medium', 'high'} or not isinstance(plan['reveal_role'], bool):
                     raise ValueError("invalid decision fields")
             except (ValueError, TypeError):
                 record.update(status="discarded", discard_reason="invalid_decision_json", raw=plan_text)
@@ -109,20 +120,10 @@ class Agent:
                 self.speech_discards["phase_expired"] += 1
                 self.stale_suppressed += 1
                 return None
-            public_only = bool(disclosure_reason(self.state, "", self.roles, formal_claim=self.state.role_id))
-            if public_only:
-                # The private plan remains saved, but its facts/reason can
-                # contain the hidden role, teammates or planned attack.
-                aim = plan["aim"]
-                secret_words = (self.roles[self.state.role_id].name, "人狼陣営", "狼陣営", "狼側", "襲撃", "仲間")
-                aim = "" if any(word in aim for word in secret_words) else aim
-                record.update(body_context="public_only", public_aim=aim)
-                instruction = f"公開の狙い: {aim}。" if aim else ""
-            else:
-                record["body_context"] = "own_private"
-                instruction = f"発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。"
+            record["body_context"] = "own_private"
+            instruction = f"発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。"
             return await self.generate(question + "\n" + instruction + "本文だけを書き、JSONを会話に出さないでください。", purpose,
-                                       max_tokens=max_tokens, public_only=public_only)
+                                       max_tokens=max_tokens)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             self.speech_discards["phase_expired"] += 1
             if record is not None:
@@ -134,6 +135,8 @@ class Agent:
             return "phase_expired"
         if not japanese_message(text):
             return "japanese_check"
+        if self_reference(text, self.state.player_id):
+            return "self_id_confusion"
         disclosure = disclosure_reason(self.state, text, self.roles, formal_claim=formal_claim)
         if disclosure:
             return disclosure
@@ -162,7 +165,8 @@ class Agent:
                     return False
                 explanation = {"japanese_check": "日本語以外または空の本文", "own_previous_sentence": "自分の直前の文の再使用",
                                "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似",
-                               "unjustified_self_disclosure": "場面の根拠がない自分の本当の役職・陣営・能力行動の公表"}.get(reason, reason)
+                               "self_id_confusion": "自分のIDを他人として書いていた。自分は『私』と書いて",
+                               "unjustified_self_disclosure": "正体が分かる発言だった。隠して書き直して"}.get(reason, reason)
                 question = original_question + f" 前の生成は送信しませんでした（理由: {explanation}）。その内容を避け、議論に使える別の発言を書いてください。"
                 continue
             self.repetition.reserve(self.state.player_id, text)
@@ -188,7 +192,10 @@ class Agent:
         if not fresh(self.state, key):
             self.stale_suppressed += 1
             return False
-        await self.ws.send(request(kind, self.game_id, payload))
+        encoded = request(kind, self.game_id, payload)
+        if kind == 'ability.use':
+            self.pending_actions[json.loads(encoded)['event_id']] = {'day': key[0], 'phase': key[1], **payload}
+        await self.ws.send(encoded)
         return True
 
     async def behave(self):
@@ -236,9 +243,19 @@ class Agent:
             return
         spoke_key = (state.day, "public")
         spoken = self.spoke.get(spoke_key, 0)
+        co = state.action("co_declare")
+        has_co = any(f['type'] == 'CO_DECLARED' and f['player_id'] == state.player_id and
+                     f.get('claimed_role_id') == state.role_id for f in state.facts)
+        if co and strategy_for(self.roles[state.role_id])['disclosure'] == 'pressure' and under_pressure(state) and not has_co and state.day not in self.defensive_co_days:
+            if state.role_id in co['claimed_role_ids']:
+                if await self.speak(f"自分への処刑・投票を避けるため、{self.roles[state.role_id].name}COして、受理済みの能力選択があればその対象を示してください。まだ選んでいなければそう伝え、自分を『私』と呼んでください。", 'defensive_co', key,
+                                    'co.declare', {'claimed_role_id': state.role_id}, 'comment', 160):
+                    self.defensive_co_days.add(state.day)
+                    self.co_decided.add(state.day)
+                    self.spoke[spoke_key] = spoken + 1
+                return
         if spoken >= 5:
             return
-        co = state.action("co_declare")
         if co and state.day not in self.co_decided and spoken:
             self.co_decided.add(state.day)
             candidates = ["none", *co["claimed_role_ids"]]

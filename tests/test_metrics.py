@@ -37,7 +37,9 @@ class MetricTests(unittest.TestCase):
         rows = [chat("player-0", "player-0さんは昨夜にplayer-1を倒した唯一の狼であり、連携しました。", 1),
                 chat("player-0", "私でplayer-1を襲ったのです。", 2),
                 chat("player-0", "私も狼の特定に協力します。", 3)]
-        self.assertEqual(self.metrics(rows, roles)["metrics"]["Q1"], 2)
+        result = self.metrics(rows, roles)
+        self.assertEqual(result["metrics"]["Q1"], 1)
+        self.assertEqual(result['metrics']['Q3'], 1)
 
     def test_connected_self_disclosure_is_counted_without_counting_hypotheses(self):
         roles = {"player-0": self.game.content.roles["werewolf"]}
@@ -67,7 +69,7 @@ class MetricTests(unittest.TestCase):
         rows.append(chat("player-1", "私がplayer-2を信じているなら、なぜ昨夜player-3を襲撃した狼が私を狙わなかったのでしょう。", 6))
         rows.append(chat("player-1", "霊能者の場合、初夜に占った結果を隠す手もあります。", 7))
         result = self.metrics(rows, roles)
-        self.assertEqual(result["metrics"]["Q3"], 0)
+        self.assertEqual(result["metrics"]["Q3"], 2)
         self.assertEqual(result["metrics"]["Q4"], 0)
 
     def test_result_mismatch_alive_medium_and_unavailable_initial_action(self):
@@ -167,6 +169,14 @@ class MetricTests(unittest.TestCase):
         rows[-1]["t"] = 61
         self.assertEqual(self.metrics(rows)["metrics"]["G3"], 1)
 
+    def test_question_address_allows_spaces_around_japanese_honorific(self):
+        for addressed in ('player-1さん', 'player-1 さん', 'player-1  さん '):
+            with self.subTest(addressed=addressed):
+                rows = [chat('player-0', addressed + '、player-2への結果は?', 1),
+                        chat('player-2', '占われた側です。', 2),
+                        chat('player-1', '人狼ではありませんでした。', 61)]
+                self.assertEqual(self.metrics(rows)['metrics']['G3'], 1)
+
     def test_http_unknown_is_not_machine_pass_and_own_disclosure_is_not_literal_leak(self):
         checks = {"completed": True, "server_rejections": 0, "crashes": 0,
                   "strategic_disclosure_review": {"status": "complete", "leaks": 0},
@@ -176,7 +186,51 @@ class MetricTests(unittest.TestCase):
         checks["llm_http_errors"] = 0
         self.assertTrue(all(mechanical_conditions(checks).values()))
         checks["strategic_disclosure_review"]["status"] = "pending"
+        self.assertTrue(all(mechanical_conditions(checks).values()))
+        checks['require_strategic_disclosures'] = True
         self.assertFalse(mechanical_conditions(checks)["strategic_disclosures"])
         checks["strategic_disclosure_review"]["status"] = "complete"
         checks["llm_http_errors"] = 1
         self.assertFalse(all(mechanical_conditions(checks).values()))
+
+    def test_user_classified_self_lynch_is_id_confusion_rather_than_disclosure(self):
+        roles = {'player-4': self.game.content.roles['werewolf']}
+        rows = [chat('player-4', 'player-4の沈黙は人狼が村側を騙っている証拠です。', 1),
+                chat('player-4', 'player-4を吊ることで、最後の人狼を排除しましょう。', 2),
+                chat('player-4', 'player-4を即刻処刑して、最後の人狼を排除しましょう。', 3)]
+        result = self.metrics(rows, roles)
+        self.assertEqual(result['metrics']['Q3'], 3)
+        self.assertEqual(result['metrics']['Q1'], 0)
+        self.assertEqual(result['role_team_disclosure_candidates'], [])
+
+    def test_guard_pressure_lynch_without_co_and_wolf_observation_use_server_roles(self):
+        roles = {'player-0': self.game.content.roles['guard'], 'player-1': self.game.content.roles['werewolf'],
+                 'player-2': self.game.content.roles['madman']}
+        rows = [{'kind': 'PHASE_STARTED', 't': 0, 'payload': {'phase': 'day', 'day': 1}},
+                chat('player-1', 'player-0さんを処刑すべきです。', 1), chat('player-2', 'player-1さんに賛成です。', 2),
+                {'kind': 'VOTE_RESOLVED', 't': 3, 'payload': {'tallies': {'player-0': 5, 'player-1': 3}}},
+                {'kind': 'PLAYER_DIED', 't': 4, 'payload': {'player_id': 'player-0', 'public_cause': 'lynched'}}]
+        result = self.metrics(rows, roles)['strategy_metrics']
+        self.assertEqual(result['pressure_no_co_lynches'], 1)
+        self.assertEqual(result['wolf_public_speech_share'], 0.5)
+        self.assertEqual(result['wolf_votes_days1_2']['1'], {'player-1': 3})
+        rows.insert(3, {'kind': 'CO_DECLARED', 't': 2.5, 'payload': {'player_id': 'player-0', 'claimed_role_id': 'guard', 'comment': '狩人です。'}})
+        self.assertEqual(self.metrics(rows, roles)['strategy_metrics']['pressure_no_co_lynches'], 0)
+        rows[3] = chat('player-0', '私、狩人として昨夜の護衛先を説明します。', 2.5)
+        self.assertEqual(self.metrics(rows, roles)['strategy_metrics']['pressure_no_co_lynches'], 0)
+
+    def test_accusation_against_the_speaker_is_not_their_own_ability_result(self):
+        roles = {'player-1': self.game.content.roles['seer']}
+        private = [{'t': 1, 'player_id': 'player-1', 'event_payload': {'target_player_id': 'player-3', 'result': 'not_wolf'}}]
+        rows = [chat('player-1', '私は占い師ですが、結果はplayer-3自身に確認済みです。player-3が私を狼だと断定した点は不自然です。この矛盾からplayer-3は狼の疑いが高いと判断します。', 2)]
+        self.assertEqual(self.metrics(rows, roles, private)['metrics']['Q4'], 0)
+
+    def test_later_received_black_result_cannot_be_reported_as_random_white_initial_result(self):
+        roles = {'player-0': self.game.content.roles['seer']}
+        rows = [{'kind': 'PHASE_STARTED', 't': 45, 'payload': {'phase': 'day', 'day': 1}},
+                chat('player-0', '私は占い師です。初夜にplayer-3を占って人狼、player-2は人狼ではありませんでした。', 210)]
+        private = [{'t': 1, 'player_id': 'player-0', 'event_payload': {'target_player_id': 'player-2', 'result': 'not_wolf'}},
+                   {'t': 194, 'player_id': 'player-0', 'event_payload': {'target_player_id': 'player-3', 'result': 'wolf'}}]
+        result = self.metrics(rows, roles, private)
+        self.assertEqual(result['metrics']['Q4'], 1)
+        self.assertIn('initial_result_not_allowed_by_preset', [i['reason'] for i in result['metric_candidates']['Q4'][0]['issues']])
