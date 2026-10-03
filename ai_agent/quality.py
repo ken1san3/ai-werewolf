@@ -10,10 +10,6 @@ def addressed_dead_players(text, dead, role_names):
     for address in re.finditer(r'(?:^|[。！？.!?]\s*|@)\s*(player-\d+)\s*(?:さん|君)?\s*[、,:]', plain):
         player = address.group(1)
         scope = re.split(r'[。.!！]|player-\d+\s*(?:さん|君)?\s*[、,:]', plain[address.end():], maxsplit=1)[0]
-        for opinion in re.finditer(STRATEGIES['quality_patterns']['opinion_question'], scope):
-            if opinion.group(1) not in dead:
-                scope = scope[:opinion.start()]
-                break
         if player in dead and re.search(STRATEGIES['quality_patterns']['address_request'], scope):
             targets.add(player)
     return targets

@@ -47,7 +47,6 @@ class ConversationQualityTests(unittest.TestCase):
                      'player-2を昨日処刑しましたが、今日はplayer-1を処刑します。',
                      'player-2: 霊能結果は人狼ではありませんでした。',
                      'player-2: 霊能結果は人狼ではありませんでした。player-1さん、投票先は誰ですか？',
-                     'player-2: 霊能結果は人狼ではありませんでしたが、player-1はどう思いますか？',
                      'もしplayer-2が生きていたなら投票します。',
                      'player-2を処刑すべきではないと昨日述べました。',
                      'player-2の昨日の発言を根拠に、player-1を疑っています。',
@@ -102,15 +101,6 @@ class ConversationQualityTests(unittest.TestCase):
         measured = measure(rows, [], {'player-0': self.roles['villager']}, self.roles, self.game.rules, [])
         self.assertEqual(measured['metrics']['Q5'], 1)
         self.assertEqual(measured['metric_candidates']['Q5'][0]['row'], 2)
-
-    def test_current_living_opinion_question_is_separate_from_the_dead_result(self):
-        rows = [{'kind': 'PLAYER_DIED', 't': 1, 'payload': {'player_id': 'player-2'}},
-                {'kind': 'chat', 't': 2, 'message': {'player_id': 'player-0', 'message': 'player-2: 霊能結果は人狼ではありませんでしたが、player-1はどう思いますか？'}},
-                {'kind': 'chat', 't': 3, 'message': {'player_id': 'player-0', 'message': 'player-2さん、結果はどうでしたか？player-1はどう思いますか？'}}]
-        measured = measure(rows, [], {'player-0': self.roles['villager']}, self.roles, self.game.rules, [])
-        self.assertEqual(measured['metrics']['Q5'], 1)
-        self.assertEqual(measured['metric_candidates']['Q5'][0]['row'], 2)
-        self.assertEqual(quality_reason(self.state, rows[2]['message']['message'], self.roles), 'dead_player_address')
 
     def test_public_guard_uses_quality_while_private_role_consultation_stays_free(self):
         agent = Agent('player-0', 'token', 'unused', self.game.game_id, self.roles, {}, FakeLLM(),
