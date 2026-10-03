@@ -12,8 +12,8 @@ from referencing import Registry, Resource
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.2.schema.json"
-PROTOCOL_VERSION = "1.2"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json"
+PROTOCOL_VERSION = "1.1"
 
 _ACTIVE_SCHEMA = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 if _ACTIVE_SCHEMA.get("$defs", {}).get("protocol_version", {}).get("const") != PROTOCOL_VERSION:

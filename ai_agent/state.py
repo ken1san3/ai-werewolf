@@ -6,6 +6,10 @@ import json
 import time
 
 
+PRIVATE_RESULTS = {"INSPECT_RESULT", "MEDIUM_RESULT", "INSPECT_DEAD_ROLE_RESULT",
+                   "INSPECT_ROLE_RESULT", "GUARD_SUCCEEDED"}
+
+
 @dataclass
 class PlayerState:
     player_id: str
@@ -79,8 +83,8 @@ class PlayerState:
                     raise ValueError("role assignment belongs to another player")
                 self.role_id = data["role_id"]
                 self.teammates = list(data.get("teammate_player_ids", []))
-            elif payload.get("visibility") != "public":
-                self.private.append({"type": event, "received_day": self.day, "received_phase": self.phase, **data})
+            elif event in PRIVATE_RESULTS:
+                self.private.append({"type": event, **data})
             else:
                 self.facts.append({"type": event, **data})
                 if event == "PHASE_STARTED":

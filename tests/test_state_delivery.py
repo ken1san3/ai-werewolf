@@ -34,8 +34,6 @@ class PlayerViewTests(unittest.TestCase):
         private_results = [entry["payload"]["event_payload"]["result"] for entry in snapshot["history"]
                            if entry["payload"].get("event_type") == "SECRET"]
         self.assertEqual(private_results, ["own"])
-        secret_entry = next(e for e in snapshot['history'] if e['payload'].get('event_type') == 'SECRET')
-        self.assertEqual(secret_entry['payload']['visibility'], 'private')
         for entry in snapshot["history"]:
             self.assertNotIn("sequence", entry)
             self.assertNotIn("visibility", entry)
@@ -194,8 +192,8 @@ class StateSchemaTests(unittest.TestCase):
         manager = SessionManager(GameRegistry({GAME_ID: game}), clock=lambda: 0)
         first = manager.handle_message(join_message(manager.registry, "player-0"))
         second = manager.handle_message(join_message(manager.registry, "player-1"))
-        own = manager.server_event(first.context, "game.event", {"event_type": "OWN", "event_payload": {}, "visibility": "private"})
-        manager.server_event(second.context, "game.event", {"event_type": "OTHER", "event_payload": {}, "visibility": "private"})
+        own = manager.server_event(first.context, "game.event", {"event_type": "OWN", "event_payload": {}})
+        manager.server_event(second.context, "game.event", {"event_type": "OTHER", "event_payload": {}})
         request = client_message("session.resume", {"connection_token": first.context.connection_token, "last_seq": 999})
         with self.assertRaises(UnaddressableRequest):
             manager.handle_message(request)

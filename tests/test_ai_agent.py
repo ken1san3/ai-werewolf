@@ -6,8 +6,6 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
-from dataclasses import replace
-from server.aiwolf_core import EventVisibility, GameEvent
 
 from ai_agent.agent import Agent
 from ai_agent.play import run_game
@@ -37,38 +35,6 @@ class FakeLLM:
 
 
 class AgentStateTests(unittest.TestCase):
-    def test_unknown_private_notice_stays_private_in_live_delivery_and_state_sync(self):
-        game = make_game()
-        game.event_bus.publish(GameEvent('CUSTOM_PRIVATE_NOTICE', EventVisibility.PRIVATE, {'text': 'ONLY-SELF'}, 'player-0'))
-        game.event_bus.publish(GameEvent('CUSTOM_PUBLIC_NOTICE', EventVisibility.PUBLIC, {'text': 'PUBLIC'}))
-        state = PlayerState('player-0')
-        state.receive({'type': 'game.state_sync', 'payload': game.get_state_sync('player-0')})
-        self.assertIn('ONLY-SELF', json.dumps(state.private))
-        self.assertNotIn('ONLY-SELF', json.dumps(state.facts))
-        self.assertIn('PUBLIC', json.dumps(state.facts))
-        peer = PlayerState('player-1')
-        peer.receive({'type': 'game.state_sync', 'payload': game.get_state_sync('player-1')})
-        self.assertNotIn('ONLY-SELF', json.dumps(peer.private))
-        state.receive({'type': 'game.event', 'payload': {'visibility': 'private', 'event_type': 'ANOTHER_UNKNOWN_NOTICE', 'event_payload': {'text': 'LIVE-ONLY-SELF'}}})
-        state.receive({'type': 'game.event', 'payload': {'event_type': 'MISSING_VISIBILITY', 'event_payload': {'text': 'FAIL-CLOSED'}}})
-        self.assertNotIn('LIVE-ONLY-SELF', json.dumps(state.facts))
-        self.assertNotIn('FAIL-CLOSED', json.dumps(state.facts))
-        prompt = messages(state, game.content.roles, {}, '発言してください。')
-        self.assertIn('LIVE-ONLY-SELF', prompt[0]['content'])
-        self.assertNotIn('LIVE-ONLY-SELF', prompt[1]['content'])
-
-    def test_initial_rule_text_comes_from_preset_and_results_include_received_phase(self):
-        game = make_game()
-        state = PlayerState('player-0', role_id='seer', players=['player-0', 'player-1'], alive={'player-0', 'player-1'},
-                            private=[{'type': 'INSPECT_RESULT', 'target_player_id': 'player-1', 'result': 'not_wolf', 'received_day': 0, 'received_phase': 'night0'}])
-        for setting, expected in [('none', '占い結果を受け取りません'), ('free', '一人を選んで占います'), ('random_white', '初夜に人狼という結果は出ません')]:
-            rules = replace(game.rules, first_night_seer=setting)
-            text = messages(state, game.content.roles, {'seer': 1}, '発言してください。', rules=rules)[0]['content']
-            self.assertIn(expected, text)
-            self.assertIn('受信日', text)
-            self.assertIn('night0', text)
-            self.assertIn('狂人の可能性は残る', text)
-
     def test_snapshot_restores_only_received_teammates_and_private_results(self):
         game = make_game()
         wolves = [p.player_id for p in game.players.values() if p.role.id == "werewolf"]
@@ -330,7 +296,7 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         agent.state.actions = [{"type": "vote", "valid_targets": ["player-1"], "target_count": 1}]
         agent.ws = AsyncMock()
         agent.state.receive({"type": "game.event", "payload": {
-            "event_type": "PHASE_STARTED", "visibility": "public", "event_payload": {
+            "event_type": "PHASE_STARTED", "event_payload": {
                 "phase": "night", "day": 1, "phase_ends_at": deadline + 20,
             },
         }})

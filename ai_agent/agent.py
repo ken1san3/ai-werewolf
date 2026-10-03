@@ -9,7 +9,6 @@ import time
 from uuid import uuid4
 
 from websockets.asyncio.client import connect
-from server.network.protocol import PROTOCOL_VERSION
 
 from .disclosure import disclosure_reason
 from .prompts import japanese_message, messages, self_reference, strip_introduction
@@ -19,16 +18,16 @@ from .timing import fresh, speech_pause
 
 
 def request(kind, game_id, payload):
-    return json.dumps({"type": kind, "protocol_version": PROTOCOL_VERSION, "game_id": game_id,
+    return json.dumps({"type": kind, "protocol_version": "1.1", "game_id": game_id,
                        "event_id": str(uuid4()), "timestamp": 0, "payload": payload})
 
 
 class Agent:
     def __init__(self, player_id, token, uri, game_id, roles, role_counts, llm, repetition,
-                 observe, *, seed, timing_scale=1, rules=None):
+                 observe, *, seed, timing_scale=1):
         self.state = PlayerState(player_id)
         self.token, self.uri, self.game_id = token, uri, game_id
-        self.roles, self.role_counts, self.rules = roles, role_counts, rules
+        self.roles, self.role_counts = roles, role_counts
         self.llm, self.repetition, self.observe = llm, repetition, observe
         self.rng, self.timing_scale = Random(seed), timing_scale
         self.mentioned, self.changed = asyncio.Event(), asyncio.Event()
@@ -81,7 +80,7 @@ class Agent:
         if timeout <= 0:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(self.llm.complete(
-            lambda: messages(self.state, self.roles, self.role_counts, question, rules=self.rules),
+            lambda: messages(self.state, self.roles, self.role_counts, question),
             player_id=self.state.player_id, purpose=purpose,
             seed=self.rng.randrange(1, 10**9), schema=schema, max_tokens=max_tokens,
         ), timeout)
