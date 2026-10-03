@@ -44,10 +44,6 @@ def self_claims(player, text, role_names):
         pattern = rf'(?:{subject})(?:真の|本当の|唯一の)?{role_word}{tail}|{bare}|{named_intro}|{own_predicate}|{inverse}|{named_members}|{changed_role}|{possessed}'
         definite = False
         for match in re.finditer(pattern, text):
-            if re.fullmatch(possessed, match.group()):
-                predicate = re.split(r'[。！？.!?、,]', text[match.start():], maxsplit=1)[0]
-                if re.search(r'役職(?:が|を).{0,24}(?:わけ|訳|ということ|という意味)では(?:ない|ありません)|役職(?:が|を).{0,24}とは言って(?:いない|いません)', predicate):
-                    continue
             context = re.split(r'[。！？.!?]', text[:match.start()])[-1] + match.group()
             conditional = re.search(r'なら|だったら|とすれば|仮に|もし', context)
             role_as = re.search(rf'{role_word}(?:役職)?として', match.group())

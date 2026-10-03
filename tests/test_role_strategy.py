@@ -46,15 +46,6 @@ class RoleStrategyTests(unittest.TestCase):
                              'message': 'player-0さんを処刑すべきではないでしょうか？'}]
         self.assertIsNone(disclosure_reason(self.state, '狩人です。今日はまだ護衛していません。', self.game.content.roles))
 
-    def test_possessed_role_with_explanatory_denial_is_not_disclosure(self):
-        for text in ['私には人狼の役職があるわけではありません。',
-                     '私には人狼の役職があるという意味ではない。',
-                     '私には人狼の役職があるとは言っていません。',
-                     '私には人狼の役職を与えられたわけではありません。']:
-            with self.subTest(text=text):
-                self.assertIsNone(disclosure_reason(self.state, text, self.game.content.roles))
-        self.assertIsNotNone(disclosure_reason(self.state, '私には人狼の役職があります。', self.game.content.roles))
-
     def test_possible_late_pp_is_not_blocked_using_unreceived_role_truth(self):
         self.assertIsNone(disclosure_reason(self.state, '人狼です。狂人の方、player-2へ合わせてください。', self.game.content.roles,
                                            role_counts={'werewolf': 2, 'madman': 1, 'villager': 6}))
