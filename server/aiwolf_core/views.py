@@ -89,7 +89,7 @@ class PlayerViews:
             return
         for player_id in recipients:
             self._append(player_id, "game.event", {
-                "event_type": event.type, "event_payload": dict(event.payload),
+                "event_type": event.type, "event_payload": dict(event.payload), "visibility": event.visibility.value,
             })
             if event.visibility is EventVisibility.PUBLIC:
                 if event.type == "PLAYER_DIED":

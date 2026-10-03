@@ -4,7 +4,7 @@ import re
 from .checks import speech, timing_summary
 from .prompts import self_reference, strip_introduction
 from .repetition import normalize, similarity
-from .strategy import vote_pressure
+from .strategy import STRATEGIES, vote_pressure
 
 
 def unquoted(text, role_names):
@@ -31,7 +31,9 @@ def self_claims(player, text, role_names):
         # only an unqualified role phrase excludes a following other actor.
         bare = rf"(?:^|(?<=[。！？]))\s*(?:真の|本当の|唯一の)?{role_word}{tail}(?!\s*player-\d+)"
         inverse = rf"{role_word}(?:である|としての|の)(?:私たち|私|僕|俺|自分|{re.escape(player)})"
-        pattern = rf"(?:{subject})(?:真の|本当の|唯一の)?{role_word}{tail}|{bare}|{named_intro}|{own_predicate}|{inverse}"
+        alternatives = '|'.join(re.escape(n) for n in role_names)
+        changed_role = rf"(?:{subject})(?:{alternatives})ではなく\s*{role_word}{tail}"
+        pattern = rf"(?:{subject})(?:真の|本当の|唯一の)?{role_word}{tail}|{bare}|{named_intro}|{own_predicate}|{inverse}|{changed_role}"
         matches = list(re.finditer(pattern, text))
         definite = []
         for match in matches:
@@ -133,12 +135,13 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
             for clause in re.split(r"[。！？.!?\n]", unquoted(result_text, names)):
                 can_initial = any(a.available_from_night == 0 for a in role.abilities)
                 actor_body = r"(?:(?!(?:私|僕|俺|自分)(?:は|が)|player-\d+\s*(?:さん)?\s*(?:は|が))[^。！？])*?"
-                other_actor = re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:が|は){actor_body}(?:占った|調べた|護衛した|守った|襲撃した)", clause)
+                other_actor = re.search(rf"(?:(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?|あなた)\s*(?:が|は){actor_body}(?:占った|調べた|護衛した|守った|襲撃した|判定した)", clause)
                 attributed = re.search(r"(?:調べた|占った|護衛した|守った)(?:そう|らしい)|(?:と|という)(?:発言|説明|主張|報告)", clause)
                 attributed = attributed or re.search(r"player-\d+\s*(?:さん|君)?\s*(?:は|が)\s*(?:私|僕|俺|自分)を[^。！？]*(?:断定|判定|疑)", clause)
                 hypothetical = re.search(r"もし|なら|場合|仮に|だったら|かもしれ", clause)
                 initial_action = re.search(r"(?:初夜|第0夜).*(?:占った|調べた|調べました|護衛した|守った|襲撃した|判定した|判定しました|判定.*(?:出た|出ました)|(?:調査|占い)(?:で|の結果).*(?:確認した|確認しました|判定した|確定した|判明した))", clause)
-                if not can_initial and not other_actor and not attributed and not hypothetical and initial_action:
+                actual_ability = any(re.search(STRATEGIES['ability_report_words'].get(effect, r'(?!)'), clause) for effect in effects)
+                if actual_ability and not can_initial and not other_actor and not attributed and not hypothetical and initial_action:
                     issues.append({"reason": "unavailable_initial_action"})
                 if other_actor or attributed or hypothetical:
                     continue

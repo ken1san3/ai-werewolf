@@ -48,3 +48,35 @@ roles:
   fox:
     disclosure: hidden
     text: 本当の正体を隠して生き残る。村側として推理し、必要なら村側の役職を騙る。占いと処刑を避ける。
+
+rule_text:
+  first_night_seer:
+    none: 初夜には占い師も占いをせず、占い結果を受け取りません。
+    free: 初夜には占い師がサーバの候補から一人を選んで占います。
+    random_white: 初夜には占い師だけがサーバの選んだ一人の「人狼ではない」という結果を受け取ります。相手を選ばず、初夜に人狼という結果は出ません。
+  phase_names:
+    night: 夜
+    dawn: 夜明け
+  vote_reveal:
+    hidden: 個人の投票先は非公開で、公開されるのは集計だけです。誰が誰に投票したかを断定しないでください。
+    live: 個人の投票先は公開されます。サーバの通知を確認してください。
+    after: 個人の投票先は投票終了後に公開されます。サーバの通知を確認してください。
+result_words:
+  wolf: 人狼
+  not_wolf: 人狼ではない（狂人の可能性は残る）
+result_events:
+  INSPECT_RESULT: 占い結果
+  MEDIUM_RESULT: 霊能結果
+  INSPECT_ROLE_RESULT: 役職を調べた結果
+  INSPECT_DEAD_ROLE_RESULT: 死者の役職を調べた結果
+  GUARD_SUCCEEDED: 護衛成功
+ability_names:
+  inspect: 占い
+  medium_inspect: 処刑死者・突然死者の霊能判定
+  protect: 護衛
+  attack: 襲撃
+ability_report_words:
+  inspect: '占|調査|調べ|判定'
+  medium_inspect: '霊能|霊媒|調査|調べ|判定'
+  protect: '護衛|守'
+  attack: '襲撃|襲った|襲う'

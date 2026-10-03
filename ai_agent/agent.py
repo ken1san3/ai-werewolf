@@ -9,25 +9,27 @@ import time
 from uuid import uuid4
 
 from websockets.asyncio.client import connect
+from server.network.protocol import PROTOCOL_VERSION
 
 from .disclosure import disclosure_reason
-from .prompts import japanese_message, messages, self_reference, strip_introduction
+from .grounding import own_result_conflict
+from .prompts import japanese_message, messages, own_result_summary, self_reference, strip_introduction
 from .state import PlayerState
 from .strategy import strategy_for, under_pressure
 from .timing import fresh, speech_pause
 
 
 def request(kind, game_id, payload):
-    return json.dumps({"type": kind, "protocol_version": "1.1", "game_id": game_id,
+    return json.dumps({"type": kind, "protocol_version": PROTOCOL_VERSION, "game_id": game_id,
                        "event_id": str(uuid4()), "timestamp": 0, "payload": payload})
 
 
 class Agent:
     def __init__(self, player_id, token, uri, game_id, roles, role_counts, llm, repetition,
-                 observe, *, seed, timing_scale=1):
+                 observe, *, seed, timing_scale=1, rules=None):
         self.state = PlayerState(player_id)
         self.token, self.uri, self.game_id = token, uri, game_id
-        self.roles, self.role_counts = roles, role_counts
+        self.roles, self.role_counts, self.rules = roles, role_counts, rules
         self.llm, self.repetition, self.observe = llm, repetition, observe
         self.rng, self.timing_scale = Random(seed), timing_scale
         self.mentioned, self.changed = asyncio.Event(), asyncio.Event()
@@ -80,7 +82,7 @@ class Agent:
         if timeout <= 0:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(self.llm.complete(
-            lambda: messages(self.state, self.roles, self.role_counts, question),
+            lambda: messages(self.state, self.roles, self.role_counts, question, rules=self.rules),
             player_id=self.state.player_id, purpose=purpose,
             seed=self.rng.randrange(1, 10**9), schema=schema, max_tokens=max_tokens,
         ), timeout)
@@ -122,7 +124,10 @@ class Agent:
                 return None
             record["body_context"] = "own_private"
             instruction = f"発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。"
-            return await self.generate(question + "\n" + instruction + "本文だけを書き、JSONを会話に出さないでください。", purpose,
+            confirmed = (f"\n判断記録よりサーバの事実を優先してください。本人の本当の役職は{self.roles[self.state.role_id].name}で変わりません。"
+                         f"本人の受信済み結果は{own_result_summary(self.state)}。この一覧にない自分の判定を作らないでください。"
+                         "本当の役職と公開で名乗る役職は別です。偽COと偽結果は使ってよく、正体を明かすかは本人の戦略で決めてください。")
+            return await self.generate(question + "\n" + instruction + confirmed + "本文だけを書き、JSONを会話に出さないでください。", purpose,
                                        max_tokens=max_tokens)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             self.speech_discards["phase_expired"] += 1
@@ -140,6 +145,8 @@ class Agent:
         disclosure = disclosure_reason(self.state, text, self.roles, formal_claim=formal_claim)
         if disclosure:
             return disclosure
+        if own_result_conflict(self.state, text, self.roles, self.rules, formal_claim):
+            return 'own_result_conflict'
         recent = [c["message"] for c in self.state.chats if c["channel"] == "public"]
         return self.repetition.rejection_reason(self.state.player_id, text, recent)
 
@@ -166,6 +173,7 @@ class Agent:
                 explanation = {"japanese_check": "日本語以外または空の本文", "own_previous_sentence": "自分の直前の文の再使用",
                                "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似",
                                "self_id_confusion": "自分のIDを他人として書いていた。自分は『私』と書いて",
+                               "own_result_conflict": "本人の受信済み結果または行動時期と矛盾した。結果一覧を確認し、未受信の自分の判定を作らず書き直して",
                                "unjustified_self_disclosure": "正体が分かる発言だった。隠して書き直して"}.get(reason, reason)
                 question = original_question + f" 前の生成は送信しませんでした（理由: {explanation}）。その内容を避け、議論に使える別の発言を書いてください。"
                 continue
