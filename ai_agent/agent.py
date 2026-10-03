@@ -11,13 +11,11 @@ from uuid import uuid4
 from websockets.asyncio.client import connect
 from server.network.protocol import PROTOCOL_VERSION
 
-from .checks import contains_body
 from .disclosure import disclosure_reason
 from .grounding import own_result_conflict
 from .prompts import japanese_message, messages, own_result_summary, self_reference, strip_introduction
 from .state import PlayerState
-from .repetition import normalize
-from .strategy import STRATEGIES, strategy_for, under_pressure
+from .strategy import strategy_for, under_pressure
 from .timing import fresh, speech_pause
 
 
@@ -42,7 +40,6 @@ class Agent:
         self.decisions = []
         self.pending_actions = {}
         self.defensive_co_days = set()
-        self.private_spoke = {}
 
     async def run(self):
         async with connect(self.uri, max_size=2**22) as self.ws:
@@ -80,23 +77,17 @@ class Agent:
             if self.state.done:
                 return
 
-    async def generate(self, question, purpose, schema=None, max_tokens=160, *, channel="public"):
+    async def generate(self, question, purpose, schema=None, max_tokens=160):
         timeout = self.state.seconds_left() - 0.25
         if timeout <= 0:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(self.llm.complete(
-            lambda: messages(self.state, self.roles, self.role_counts, question + "\n" + self.disclosure_cue(channel), channel, rules=self.rules),
+            lambda: messages(self.state, self.roles, self.role_counts, question, rules=self.rules),
             player_id=self.state.player_id, purpose=purpose,
             seed=self.rng.randrange(1, 10**9), schema=schema, max_tokens=max_tokens,
         ), timeout)
 
-    def disclosure_cue(self, channel):
-        if channel != 'public':
-            return STRATEGIES['disclosure_cues']['private']
-        can_reveal = disclosure_reason(self.state, '', self.roles, formal_claim=self.state.role_id, role_counts=self.role_counts) is None
-        return STRATEGIES['disclosure_cues']['allowed' if can_reveal else 'hide']
-
-    async def generate_speech(self, question, purpose, max_tokens, *, channel='public'):
+    async def generate_speech(self, question, purpose, max_tokens):
         self.speech_generations += 1
         key = self.state.phase_key
         record = None
@@ -113,9 +104,9 @@ class Agent:
                 'facts/aim/reasonは日本語で10〜20字にしてください。suspicionは自分への疑いの強さ(low/medium/high)、'
                 'reveal_roleは今、本当の役職を明かすか(true/false)です。本人の戦略と公開の処刑圧力を考慮してください。'
                 '自分を他人と取り違えず、他人の発言は公称と区別しサーバの事実を優先してください。このJSONは公開しません。',
-                purpose + "_decision", schema, 256, channel=channel)
+                purpose + "_decision", schema, 256)
             record = {"player_id": self.state.player_id, "day": key[0], "phase": key[1],
-                      "at_monotonic": time.monotonic(), "purpose": purpose, "channel": channel, "status": "planned"}
+                      "at_monotonic": time.monotonic(), "purpose": purpose, "status": "planned"}
             self.decisions.append(record)
             try:
                 plan = json.loads(plan_text)
@@ -137,40 +128,34 @@ class Agent:
                          f"本人の受信済み結果は{own_result_summary(self.state)}。この一覧にない自分の判定を作らないでください。"
                          "本当の役職と公開で名乗る役職は別です。偽COと偽結果は使ってよく、正体を明かすかは本人の戦略で決めてください。")
             return await self.generate(question + "\n" + instruction + confirmed + "本文だけを書き、JSONを会話に出さないでください。", purpose,
-                                       max_tokens=max_tokens, channel=channel)
+                                       max_tokens=max_tokens)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             self.speech_discards["phase_expired"] += 1
             if record is not None:
                 record.update(status="discarded", discard_reason="phase_expired")
             raise
 
-    def speech_rejection(self, text, key, formal_claim=None, *, channel="public"):
+    def speech_rejection(self, text, key, formal_claim=None):
         if not fresh(self.state, key):
             return "phase_expired"
         if not japanese_message(text):
             return "japanese_check"
         if self_reference(text, self.state.player_id):
             return "self_id_confusion"
-        if channel == 'public':
-            if any(c['channel'] != 'public' and contains_body(normalize(text), normalize(c['message'])) for c in self.state.chats):
-                return 'private_body_copy'
-            disclosure = disclosure_reason(self.state, text, self.roles, formal_claim=formal_claim, role_counts=self.role_counts)
-            if disclosure:
-                return disclosure
-            if own_result_conflict(self.state, text, self.roles, self.rules, formal_claim):
-                return 'own_result_conflict'
-        else:
-            return None
-        recent = [c["message"] for c in self.state.chats if c["channel"] == 'public']
+        disclosure = disclosure_reason(self.state, text, self.roles, formal_claim=formal_claim)
+        if disclosure:
+            return disclosure
+        if own_result_conflict(self.state, text, self.roles, self.rules, formal_claim):
+            return 'own_result_conflict'
+        recent = [c["message"] for c in self.state.chats if c["channel"] == "public"]
         return self.repetition.rejection_reason(self.state.player_id, text, recent)
 
     async def speak(self, question, purpose, key, kind, payload, field, max_tokens):
         original_question = question
-        channel = payload.get("channel_id", "public")
         for _ in range(3):
             if not fresh(self.state, key):
                 return False
-            generated = await self.generate_speech(question, purpose, max_tokens, channel=channel)
+            generated = await self.generate_speech(question, purpose, max_tokens)
             if generated is None:
                 if not fresh(self.state, key):
                     return False
@@ -178,7 +163,7 @@ class Agent:
             text = strip_introduction(generated, self.state.player_id)[:200 if field == "comment" else 400]
             record = self.decisions[-1]
             record["speech"] = text
-            reason = self.speech_rejection(text, key, payload.get("claimed_role_id"), channel=channel)
+            reason = self.speech_rejection(text, key, payload.get("claimed_role_id"))
             if reason:
                 self.speech_discards[reason] += 1
                 record.update(status="discarded", discard_reason=reason)
@@ -189,12 +174,10 @@ class Agent:
                                "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似",
                                "self_id_confusion": "自分のIDを他人として書いていた。自分は『私』と書いて",
                                "own_result_conflict": "本人の受信済み結果または行動時期と矛盾した。結果一覧を確認し、未受信の自分の判定を作らず書き直して",
-                               "private_body_copy": "秘密の本文をそのまま使っていた。公開の議論から別の文を書いて",
                                "unjustified_self_disclosure": "正体が分かる発言だった。隠して書き直して"}.get(reason, reason)
                 question = original_question + f" 前の生成は送信しませんでした（理由: {explanation}）。その内容を避け、議論に使える別の発言を書いてください。"
                 continue
-            if channel == "public":
-                self.repetition.reserve(self.state.player_id, text)
+            self.repetition.reserve(self.state.player_id, text)
             if await self.send(kind, {**payload, field: text}, key):
                 record["status"] = "sent"
                 return True
@@ -203,10 +186,10 @@ class Agent:
             return False
         return False
 
-    async def choose(self, question, candidates, purpose, *, channel="public"):
+    async def choose(self, question, candidates, purpose):
         schema = {"type": "object", "additionalProperties": False, "required": ["target"],
                   "properties": {"target": {"type": "string", "enum": candidates}}}
-        text = await self.generate(question + ' 候補のIDを選び、{"target":"選んだID"}のJSONだけを返してください。', purpose, schema, 40, channel=channel)
+        text = await self.generate(question + ' 候補のIDを選び、{"target":"選んだID"}のJSONだけを返してください。', purpose, schema, 40)
         try:
             choice = json.loads(text)["target"]
         except (ValueError, KeyError, TypeError):
@@ -238,18 +221,6 @@ class Agent:
         key = state.phase_key
         if state.role_id is None or not fresh(state, key):
             return
-        private_chat = next((a for a in state.actions if a['type'] == 'chat' and a['channel'] != 'public'), None)
-        buddies = set(state.teammates) & state.alive
-        if private_chat and buddies:
-            channel = private_chat['channel']
-            if key not in self.private_spoke:
-                if await self.speak('仲間へ、公開の発言を踏まえた襲撃・投票の方針と対象の案を日本語で短く伝えてください。初夜に襲撃できない場合は翌日以降の相談にしてください。',
-                                    'private_chat', key, 'chat.send', {'channel_id': channel}, 'message', 160):
-                    self.private_spoke[key] = time.monotonic()
-                return
-            heard = any(c['channel'] == channel and c['day'] == state.day and c['player_id'] in buddies for c in state.chats)
-            if not heard and time.monotonic() - self.private_spoke[key] < 4 and state.seconds_left() > 5:
-                return
         vote = state.action("vote")
         ability = state.action("ability")
         action = vote or ability
@@ -267,7 +238,7 @@ class Agent:
                 question = "今日の投票で誰を処刑しますか？" if vote else (
                     f"使用可能な能力（ID: {action['ability_id']}）の対象を選んでください。{action.get('description', '')}"
                 )
-                target = await self.choose(question, candidates, "vote" if vote else "ability", channel=private_chat["channel"] if private_chat and not vote else "public")
+                target = await self.choose(question, candidates, "vote" if vote else "ability")
                 chosen.append(target)
                 candidates.remove(target)
             payload = {"target_player_id": chosen[0]} if vote else {
@@ -295,7 +266,7 @@ class Agent:
             return
         if co and state.day not in self.co_decided and spoken:
             self.co_decided.add(state.day)
-            candidates = ["none", *(r for r in co["claimed_role_ids"] if disclosure_reason(state, "", self.roles, formal_claim=r, role_counts=self.role_counts) is None)]
+            candidates = ["none", *co["claimed_role_ids"]]
             choice = await self.choose("役職を正式にCOするなら役職IDを、今はCOしないならnoneを選んでください。", candidates, "co")
             if choice != "none" and fresh(state, key):
                 if await self.speak(f"{self.roles[choice].name}を正式にCOする短いコメントを日本語で書いてください。", "co_comment", key,
@@ -306,5 +277,5 @@ class Agent:
         if not fresh(state, key):
             return
         if await self.speak("次の公開チャットの発言を日本語で書いてください。", "chat", key,
-                            "chat.send", {"channel_id": "public"}, "message", 160):
+                            "chat.send", {"channel_id": "public"}, "message", 320):
             self.spoke[spoke_key] = spoken + 1

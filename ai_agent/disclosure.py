@@ -1,22 +1,22 @@
 """Conservative disclosure guard using only this player's received information."""
 import re
 
-from .claims import self_claims, team_claim, unquoted
-from .strategy import STRATEGIES, strategy_for, under_pressure
+from .metrics import self_claims, unquoted
+from .repetition import normalize
+from .strategy import strategy_for, under_pressure
 
 
-def disclosure_reason(state, text, roles, *, formal_claim=None, role_counts=None):
+def disclosure_reason(state, text, roles, *, formal_claim=None):
     role = roles[state.role_id]
     names = [r.name for r in roles.values()]
     plain = unquoted(text, names)
     true_role = role.name in self_claims(state.player_id, text, [role.name]) or formal_claim == role.id
     claimed = roles.get(formal_claim)
     wolf_names = [r.name for r in roles.values() if r.attributes.team == "wolf"]
-    claimed_team = role.attributes.team == "wolf" and (
-        self_claims(state.player_id, text, wolf_names) or (claimed and claimed.attributes.team == "wolf") or team_claim(text, names))
-    known_buddy = any(re.search(pattern.format(teammate=re.escape(buddy)), plain)
-                      for buddy in state.teammates for pattern in STRATEGIES['teammate_claim_patterns'])
-    if not true_role and not claimed_team and not known_buddy:
+    team_claim = role.attributes.team == "wolf" and (
+        self_claims(state.player_id, text, wolf_names) or (claimed and claimed.attributes.team == "wolf") or re.search(
+        r"(?:私は|僕は|俺は|^|[。！？]\s*)(?:人狼|狼)陣営(?:です|に属|の一員)", plain))
+    if not true_role and not team_claim:
         return None  # Claims that disclose neither the true role nor army remain free.
     policy = strategy_for(role)["disclosure"]
     if policy == "hidden":
@@ -34,10 +34,7 @@ def disclosure_reason(state, text, roles, *, formal_claim=None, role_counts=None
         # In the current nine-player preset a living human wolf-side member
         # can initiate a final-three PP: an ongoing game still has a wolf.
         late_helper = role.attributes.count_as == "village" and len(state.alive) <= 3
-        possible_helpers = sum(count for role_id, count in (role_counts or {}).items()
-                               if roles[role_id].attributes.team == 'wolf' and roles[role_id].attributes.count_as == 'village')
-        possible_pp = role.attributes.count_as == 'wolf' and len(supporters) + possible_helpers > len(state.alive) / 2
-        if late_helper or possible_pp or len(supporters) > len(state.alive) / 2:
+        if late_helper or len(supporters) > len(state.alive) / 2:
             return None
         return "unjustified_self_disclosure"
     if policy == "pressure":
