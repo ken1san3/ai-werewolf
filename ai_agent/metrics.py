@@ -96,12 +96,6 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
                 actual_ability = any(re.search(STRATEGIES['ability_report_words'].get(effect, r'(?!)'), clause) for effect in effects)
                 if actual_ability and not can_initial and not other_actor and not attributed and not hypothetical and initial_action:
                     issues.append({"reason": "unavailable_initial_action"})
-                past_initial = day == 1 and any(
-                    ability.available_from_night > 0 and any(
-                        re.search(STRATEGIES['past_self_action_patterns'].get(effect.id, r'(?!)'), clause)
-                        for effect in ability.effects) for ability in role.abilities)
-                if past_initial and not other_actor and not attributed and not hypothetical:
-                    issues.append({'reason': 'past_action_before_first_available_night'})
                 if other_actor or attributed or hypothetical:
                     continue
                 own_report = role.name in claims and re.search(r"結果|確定|判定", text)

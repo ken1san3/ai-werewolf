@@ -16,7 +16,6 @@ from .disclosure import disclosure_reason
 from .grounding import own_result_conflict
 from .prompts import japanese_message, messages, own_result_summary, self_reference, strip_introduction
 from .state import PlayerState
-from .quality import quality_reason
 from .repetition import normalize
 from .strategy import STRATEGIES, strategy_for, under_pressure
 from .timing import fresh, speech_pause
@@ -137,7 +136,6 @@ class Agent:
             record["body_context"] = "own_private"
             instruction = f"発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。"
             confirmed = (f"\n判断記録よりサーバの事実を優先してください。本人の本当の役職は{self.roles[self.state.role_id].name}で変わりません。"
-                         f"今の生存者は{', '.join(sorted(self.state.alive))}、死者は{', '.join(sorted(set(self.state.players) - self.state.alive)) or 'なし'}です。本文の私は本人で、死者の発言の私ではありません。"
                          f"本人の受信済み結果は{own_result_summary(self.state)}。この一覧にない自分の判定を作らないでください。"
                          "本当の役職と公開で名乗る役職は別です。偽COと偽結果は使ってよく、正体を明かすかは本人の戦略で決めてください。")
             return await self.generate(question + "\n" + instruction + confirmed + "本文だけを書き、JSONを会話に出さないでください。", purpose,
@@ -159,9 +157,6 @@ class Agent:
         if channel == 'public':
             if any(c['channel'] != 'public' and contains_body(normalize(text), normalize(c['message'])) for c in self.state.chats):
                 return 'private_body_copy'
-            quality = quality_reason(self.state, text, self.roles)
-            if quality:
-                return quality
             disclosure = disclosure_reason(self.state, text, self.roles, formal_claim=formal_claim, role_counts=self.role_counts)
             if disclosure:
                 return disclosure
@@ -197,10 +192,6 @@ class Agent:
                                "third_sentence": "同じ文の3回目", "similarity": "直近の発言との過度な類似",
                                "self_id_confusion": "自分のIDを他人として書いていた。自分は『私』と書いて",
                                "own_result_conflict": "本人の受信済み結果または行動時期と矛盾した。結果一覧を確認し、未受信の自分の判定を作らず書き直して",
-                               "meta_refusal": "人狼ゲームの参加者として、拒否やAIの説明ではなく議論に返答して",
-                               "self_fact_confusion": "本人の役職と生存状態は受信済みで確定しています。公表するかとは別です。他人の発言の私を自分と取り違えず書き直して",
-                               "dead_player_address": "死者は答えたり投票されたりできません。現在の生存者への発言を書いて",
-                               "empty_agreement": "同意だけでした。自分の根拠か相手への具体的な答えを加えて",
                                "private_body_copy": "秘密の本文をそのまま使っていた。公開の議論から別の文を書いて",
                                "unjustified_self_disclosure": "正体が分かる発言だった。隠して書き直して"}.get(reason, reason)
                 question = original_question + f" 前の生成は送信しませんでした（理由: {explanation}）。その内容を避け、議論に使える別の発言を書いてください。"
