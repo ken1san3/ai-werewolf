@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 
 from .checks import redact, text_checks, timing_summary
-from .metrics import measure, mechanical_conditions, night_private_activity
+from .metrics import measure, mechanical_conditions
 
 
 class Recorder:
@@ -74,13 +74,12 @@ class Recorder:
         discards = Counter()
         for agent in agents:
             discards.update(agent.speech_discards)
-        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "unjustified_self_disclosure", "invalid_decision_json", "self_id_confusion", "own_result_conflict", "private_body_copy", "private_chat_budget"):
+        for reason in ("japanese_check", "own_previous_sentence", "third_sentence", "similarity", "phase_expired", "unjustified_self_disclosure", "invalid_decision_json", "self_id_confusion", "own_result_conflict"):
             discards.setdefault(reason, 0)
         measurements = measure(self.rows, self.private_results, roles, game.content.roles, game.rules, safe_calls,
                                generated=sum(a.speech_generations for a in agents), discards=dict(discards))
         self.server_record = redact({"rows": self.rows, "roles": {p: r.id for p, r in roles.items()},
-                                     "private_results": self.private_results, "private_messages": self.private_messages,
-                                     "accepted_abilities": [{"player_id": a.state.player_id, **action} for a in agents for action in a.state.own_actions]}, self.tokens)
+                                     "private_results": self.private_results, "private_messages": self.private_messages}, self.tokens)
         self.decisions = redact([{**{k: v for k, v in d.items() if k != "at_monotonic"},
                                    "t": round(d["at_monotonic"] - self.started, 2)} for a in agents for d in a.decisions], self.tokens)
         checks = {
@@ -98,7 +97,6 @@ class Recorder:
             "public_messages": sum(row["kind"] == "chat" for row in self.rows),
             "private_messages_compared": len(self.private_messages),
             "private_results_compared": len(self.private_results),
-            "night_private_activity": night_private_activity(self.rows, self.private_messages, roles),
             "authentication_tokens_compared": len(self.tokens),
             "stale_generations_suppressed": sum(a.stale_suppressed for a in agents),
             "llm_calls": safe_calls,
