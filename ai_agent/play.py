@@ -62,7 +62,7 @@ async def run_game(*, seed=1, day=180, vote=60, night=60, llm=None,
     repetition = RepetitionFilter()
     agents = [Agent(p.player_id, tokens[p.player_id], uri, game_id,
                     content.roles, dict(preset.role_counts), llm, repetition, recorder.observe,
-                    seed=seed * 100 + i, timing_scale=timing_scale, rules=preset.rules) for i, p in enumerate(players)]
+                    seed=seed * 100 + i, timing_scale=timing_scale) for i, p in enumerate(players)]
     errors = []
     tasks = [asyncio.create_task(a.run()) for a in agents]
     try:

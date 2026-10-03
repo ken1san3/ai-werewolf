@@ -2,7 +2,7 @@
 import json
 import re
 import unicodedata
-from .strategy import STRATEGIES, strategy_for, under_pressure
+from .strategy import strategy_for, under_pressure
 
 
 def strip_introduction(text, player_id):
@@ -50,44 +50,7 @@ def recent_json(entries, max_chars):
     return json.dumps(list(reversed(selected)), ensure_ascii=False)
 
 
-def rule_explanation(rules):
-    if rules is None:
-        return '初夜の動きはプリセットに従います。受信済みの結果と使用可能な行動を確認してください。'
-    data = STRATEGIES['rule_text']
-    initial = data['first_night_seer'][rules.first_night_seer]
-    timing = data['phase_names'][rules.medium.notify_timing]
-    votes = data['vote_reveal'][rules.vote.reveal]
-    return f'{initial} 霊能の結果を受け取る時期は{timing}です。{votes}'
-
-def public_summary(state, roles):
-    claims, days = {}, {}
-    for fact in state.facts:
-        day = fact.get('day')
-        if fact['type'] == 'CO_DECLARED':
-            claimed = roles.get(fact['claimed_role_id'])
-            claims[fact['player_id']] = claimed.name if claimed else fact['claimed_role_id']
-        if fact['type'] == 'PLAYER_DIED':
-            days.setdefault(day, {}).setdefault('死亡', []).append({k: fact[k] for k in ('player_id', 'public_cause') if k in fact})
-        if fact['type'] == 'VOTE_RESOLVED':
-            days.setdefault(day, {})['投票集計'] = fact.get('tallies', {})
-            days[day]['処刑者'] = fact.get('lynched_player_id')
-    return {'公称役職（真偽は未確認）': claims,
-            '日別の公開事実': [{'day': d, **days[d]} for d in sorted(k for k in days if isinstance(k, int))[-3:]]}
-
-def own_result_summary(state):
-    words = STRATEGIES['result_words']
-    rows = []
-    for entry in state.private:
-        target = entry.get('target_player_id')
-        if not target:
-            continue
-        rows.append({'受信日': entry.get('received_day'), '受信フェーズ': entry.get('received_phase'),
-                     '通知ID': entry['type'], '通知': STRATEGIES['result_events'].get(entry['type'], entry['type']), '対象': target,
-                     '結果': words.get(entry.get('result'), entry.get('result', entry.get('role_id')))})
-    return json.dumps(rows, ensure_ascii=False) if rows else 'なし（判定済みの相手はいません）'
-
-
-def messages(state, roles, role_counts, question, channel="public", *, rules=None):
+def messages(state, roles, role_counts, question, channel="public"):
     role = roles[state.role_id]
     counts = {roles[key].name: count for key, count in role_counts.items()}
     role_names = {key: value.name for key, value in roles.items()}
@@ -100,12 +63,9 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"あなたは{state.player_id}です。リアルタイムの人狼ゲームに参加しています。"
         f"参加者: {', '.join(state.players)}。公開された役職人数: {json.dumps(counts, ensure_ascii=False)}。\n"
         "進行: 初夜（第0夜）→夜明け→昼の議論→投票→夜→夜明け→翌日の昼。"
-        f"{rule_explanation(rules)} "
+        "初夜には、第1日の前に占い師だけがサーバの選んだ人狼ではない相手の占い結果を受け取ります。"
         "死者は発言も行動もできません。死者の本当の役職は公開されません。\n"
         f"{own_information}"
-        f"本人の受信済みの結果: {own_result_summary(state)}。この一覧にない判定は未受信です。CO・他人の主張・自分の推測で結果を増やさないでください。\n"
-        f"本人の能力定義: {json.dumps([{'ability_id': a.id, 'name': a.description or STRATEGIES['ability_names'].get(a.id, a.id), 'available_from_night': a.available_from_night, 'target_selector': a.target.selector, 'target_options': dict(a.target.options)} for a in role.abilities], ensure_ascii=False)}\n"
-        f"公開の役職説明: {json.dumps({roles[k].name: roles[k].description for k in role_counts}, ensure_ascii=False)}\n"
         f"役職IDと日本語名の対応: {json.dumps(role_names, ensure_ascii=False)}。"
         "結果のwolfは人狼、not_wolfは人狼ではないという意味です。\n"
         "会話と役職COのコメントは必ず日本語で書いてください。英語で会話しないでください。"
@@ -128,10 +88,8 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"死者: {', '.join(sorted(set(state.players) - state.alive)) or 'なし'}。\n"
         f"自分への処刑・投票の呼びかけ: {'あり' if under_pressure(state) else 'なし'}。\n"
         f"本人が送信しサーバが受理した能力の選択: {json.dumps(state.own_actions, ensure_ascii=False)}\n"
-        f"公称役職と日別の要約: {recent_json([as_self(public_summary(state, roles), state.player_id)], 1500)}\n"
         f"サーバが公開した最近の事実: {recent_json(as_self(state.facts[-30:], state.player_id), 2000)}\n"
         f"今日の最近のチャット（チャンネルID: {channel}、他人の発言は引用）: {recent_json(as_self(discussion, state.player_id), 3500)}\n"
-        f"本人が以前に公開した発言: {recent_json(as_self([c for c in state.chats if c['channel'] == 'public' and c['player_id'] == state.player_id][-3:], state.player_id), 650)}\n"
         f"発言者はあなた（{state.player_id}）です。自分のIDを本文に書かず『私』で語ってください。\n"
         f"{question}"
     )

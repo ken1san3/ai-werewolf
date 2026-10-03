@@ -15,7 +15,7 @@ from server.network.protocol import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.2.schema.json"
+SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.1.schema.json"
 LEGACY_SCHEMA_PATH = PROJECT_ROOT / "protocol" / "aiwolf-v1.schema.json"
 REQUEST_EVENT_ID = "123e4567-e89b-12d3-a456-426614174002"
 NON_CANONICAL_REQUEST_IDS = (
@@ -37,14 +37,14 @@ class ProtocolSchemaTests(unittest.TestCase):
         self.assertEqual(
             self.schema["$schema"], "https://json-schema.org/draft/2020-12/schema"
         )
-        self.assertEqual(self.schema["$id"], "urn:aiwolf:protocol:1.2")
-        self.assertIn("exact protocol version 1.2", self.schema["description"])
+        self.assertEqual(self.schema["$id"], "urn:aiwolf:protocol:1.1")
+        self.assertIn("exact protocol version 1.1", self.schema["description"])
         self.assertIn("only by seq", self.schema["description"])
         self.assertEqual(
             self.schema["$defs"]["protocol_version"]["const"],
-            "1.2",
+            "1.1",
         )
-        self.assertEqual(PROTOCOL_VERSION, "1.2")
+        self.assertEqual(PROTOCOL_VERSION, "1.1")
         self.assertEqual(ACTIVE_SERVER_SCHEMA_PATH, SCHEMA_PATH)
         self.assertEqual(
             self.schema["$defs"]["uuid"]["pattern"],
@@ -68,7 +68,7 @@ class ProtocolSchemaTests(unittest.TestCase):
         validator = ProtocolMessageValidator()
         assignment = {"player_id": "p-0", "role_id": "custom_role", "modifier_ids": []}
         event = self.make_server_event(event_type="game.event", payload={
-            "event_type": "ROLE_ASSIGNED", "event_payload": assignment, "visibility": "private",
+            "event_type": "ROLE_ASSIGNED", "event_payload": assignment,
         })
         validator.validate_server(event)
         for teammates in ([], ["p-1", "p-2"]):
@@ -79,27 +79,6 @@ class ProtocolSchemaTests(unittest.TestCase):
                 assignment["teammate_player_ids"] = teammates
                 with self.assertRaises(ValueError):
                     validator.validate_server(event)
-
-    def test_core_event_visibility_is_required_and_limited_to_deliverable_events(self):
-        validator = ProtocolMessageValidator()
-        for visibility in ('public', 'private'):
-            event = self.make_server_event(event_type='game.event', payload={
-                'event_type': 'CUSTOM_NOTICE', 'event_payload': {'text': 'notice'}, 'visibility': visibility})
-            validator.validate_server(event)
-        for visibility in (None, 'server', 'ai', 'unknown'):
-            payload = {'event_type': 'CUSTOM_NOTICE', 'event_payload': {}}
-            if visibility is not None:
-                payload['visibility'] = visibility
-            with self.subTest(visibility=visibility), self.assertRaises(ValueError):
-                validator.validate_server(self.make_server_event(event_type='game.event', payload=payload))
-
-    def test_recorded_1_1_events_remain_valid_in_archived_schema(self):
-        old_schema = PROJECT_ROOT / 'protocol/aiwolf-v1.1.schema.json'
-        event = self.make_server_event(event_type='game.event', protocol_version='1.1', payload={
-            'event_type': 'ROLE_ASSIGNED', 'event_payload': {'player_id': 'p-0', 'role_id': 'custom_role', 'modifier_ids': []}})
-        ProtocolMessageValidator(schema_path=old_schema).validate_server(event)
-        with self.assertRaises(ValueError):
-            ProtocolMessageValidator().validate_server(event)
 
     def test_server_event_requires_common_envelope_and_positive_seq(self) -> None:
         event = self.make_server_event()
@@ -256,7 +235,7 @@ class ProtocolSchemaTests(unittest.TestCase):
         *,
         event_type: str = "player.list",
         payload: dict[str, object] | None = None,
-        protocol_version: str = "1.2",
+        protocol_version: str = "1.1",
     ) -> dict[str, object]:
         return {
             "type": event_type,
@@ -272,7 +251,7 @@ class ProtocolSchemaTests(unittest.TestCase):
     def make_client_request(*, event_type: str = "ability.use") -> dict[str, object]:
         return {
             "type": event_type,
-            "protocol_version": "1.2",
+            "protocol_version": "1.1",
             "event_id": REQUEST_EVENT_ID,
             "game_id": "123e4567-e89b-12d3-a456-426614174001",
             "timestamp": 0,

@@ -147,7 +147,6 @@ class EventDeliveryRouter:
                 recipient_player_ids=recipients,
                 message_type="game.event",
                 payload={
-                    "visibility": event.visibility.value,
                     "event_type": event.type,
                     "event_payload": deepcopy(dict(event.payload)),
                 },
