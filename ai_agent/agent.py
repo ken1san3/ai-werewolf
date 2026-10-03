@@ -103,20 +103,27 @@ class Agent:
         self.speech_generations += 1
         key = self.state.phase_key
         record = None
+        role = self.roles[self.state.role_id]
+        own_anchor = f"本人は{role.name}、通知された仲間は{', '.join(self.state.teammates) or 'なし'}。"
+        goal = strategy_for(role).get('aim', STRATEGIES['default']['aim'])
         try:
             schema = {"type": "object", "additionalProperties": False, "required": ["facts", "aim", "reason", "suspicion", "reveal_role"],
                       "properties": {"facts": {"type": "array", "maxItems": 2,
-                                               "items": {"type": "string", "maxLength": 24}},
+                                               "items": {"type": "string", "maxLength": 32}},
                                      "aim": {"type": "string", "maxLength": 24},
                                      "reason": {"type": "string", "maxLength": 32},
                                      "suspicion": {"type": "string", "enum": ["low", "medium", "high"]},
                                      "reveal_role": {"type": "boolean"}}}
             plan_text = await self.generate(
                 question + ' 発言前の判断だけをJSONで返してください。factsは確認した事実を最大2件、aimは狙い、reasonは行動を選ぶ短い理由です。'
-                'facts/aim/reasonは日本語で10〜20字にしてください。suspicionは自分への疑いの強さ(low/medium/high)、'
+                f'確認する本人の事実: {own_anchor}本人の勝利方針: {goal} '
+                'factsの1件目は本人の本当の役職と通知された仲間、2件目は受信済みの結果か公開の事実です。'
+                '他人のCO・結果主張を使う時は公称と書き、サーバの確定事実や自分の結果と区別してください。aimは本人の陣営が勝つための具体的な対象と行動、'
+                'reasonはそれが本人の勝利につながる短い理由です。公開で演じる立場と本人の本当の目的を分けてください。'
+                'facts/aim/reasonは日本語で短く書いてください。suspicionは自分への疑いの強さ(low/medium/high)、'
                 'reveal_roleは今、本当の役職を明かすか(true/false)です。本人の戦略と公開の処刑圧力を考慮してください。'
                 '自分を他人と取り違えず、他人の発言は公称と区別しサーバの事実を優先してください。このJSONは公開しません。',
-                purpose + "_decision", schema, 192, channel=channel)
+                purpose + "_decision", schema, 208, channel=channel)
             record = {"player_id": self.state.player_id, "day": key[0], "phase": key[1],
                       "at_monotonic": time.monotonic(), "purpose": purpose, "channel": channel, "status": "planned"}
             self.decisions.append(record)
@@ -136,6 +143,13 @@ class Agent:
                 return None
             record["body_context"] = "own_private"
             instruction = f"発言前の判断記録: {json.dumps(plan, ensure_ascii=False)}。"
+            if channel == 'public':
+                instruction += ("これは本人の非公開の作戦です。裏の狙いは公開せず、選んだ対象へ表向きの根拠か答えを話してください。"
+                                "狙いに選んだ相手のIDを本文でも維持し、他人から自分への票と自分の投票先を区別してください。")
+            else:
+                instruction += (f"ここは秘密チャンネルです。通知された仲間{', '.join(self.state.teammates) or 'なし'}へ、"
+                                "本人の作戦の対象IDと理由を率直に相談してください。公開の演技と秘密の相談を区別してください。")
+            instruction += f"本人は{role.name}、本人の勝利方針は{goal}。他人のCOで本人の能力や勝利条件を変えません。"
             confirmed = (f"\n判断記録よりサーバの事実を優先してください。本人の本当の役職は{self.roles[self.state.role_id].name}で変わりません。"
                          f"今の生存者は{', '.join(sorted(self.state.alive))}、死者は{', '.join(sorted(set(self.state.players) - self.state.alive)) or 'なし'}です。本文の私は本人で、死者の発言の私ではありません。"
                          f"本人の受信済み結果は{own_result_summary(self.state)}。この一覧にない自分の判定を作らないでください。"

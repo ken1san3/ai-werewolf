@@ -70,6 +70,17 @@ class ConversationQualityTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(quality_reason(self.state, text, self.roles), 'self_fact_confusion')
 
+    def test_an_unpublished_role_is_different_from_an_unknown_own_role(self):
+        for text in ['私の役職は未確定ですが、根拠を話します。',
+                     '私の本当の役職は不明です。']:
+            with self.subTest(text=text):
+                self.assertEqual(quality_reason(self.state, text, self.roles), 'self_fact_confusion')
+        for text in ['私の役職は未公開です。', '私の投票先は未確定です。',
+                     '私の役職は未確定ですとは言っていません。',
+                     'player-1は私の役職は未確定ですと発言しました。']:
+            with self.subTest(text=text):
+                self.assertIsNone(quality_reason(self.state, text, self.roles))
+
     def test_empty_agreement_needs_content_but_refutation_and_answers_are_free(self):
         self.assertEqual(quality_reason(self.state, '私も同意します。', self.roles), 'empty_agreement')
         self.assertIsNone(quality_reason(self.state, '同意します。player-1の投票理由も一致します。', self.roles))

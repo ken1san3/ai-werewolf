@@ -63,7 +63,8 @@ def rule_explanation(rules):
     initial = data['first_night_seer'][rules.first_night_seer]
     timing = data['phase_names'][rules.medium.notify_timing]
     votes = data['vote_reveal'][rules.vote.reveal]
-    return ' '.join([initial, data['medium_notification'].format(timing=timing), data['public_co_rule'], votes])
+    self_vote = data['self_vote'][rules.vote.self_vote]
+    return ' '.join([initial, data['medium_notification'].format(timing=timing), data['public_co_rule'], votes, self_vote])
 
 def public_summary(state, roles):
     claims, spoken_claims, days = {}, {}, {}
@@ -103,6 +104,8 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
     role = roles[state.role_id]
     counts = {roles[key].name: count for key, count in role_counts.items()}
     role_names = {key: value.name for key, value in roles.items()}
+    public_abilities = {roles[key].name: [STRATEGIES['ability_names'].get(a.id, a.id)
+                                          for a in roles[key].abilities] for key in role_counts}
     own_information = (
         f"あなたの非公開の役職: {role.name}。{role.description}\n"
         f"あなたが知っている仲間: {', '.join(state.teammates) or 'なし'}。\n"
@@ -115,6 +118,7 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"{rule_explanation(rules)} "
         "死者は発言も行動もできません。死者の本当の役職は公開されません。\n"
         f"役職IDと日本語名の対応: {json.dumps(role_names, ensure_ascii=False)}。"
+        f"公開ルール上の各役職の能力（本人の役職は下の非公開情報で確定）: {json.dumps(public_abilities, ensure_ascii=False)}。\n"
         "結果のwolfは人狼、not_wolfは人狼ではないという意味です。\n"
         "会話と役職COのコメントは必ず日本語で書いてください。英語で会話しないでください。"
         "役職名も上記の日本語名を使い、player-0などの参加者IDはそのまま使ってください。"

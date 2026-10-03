@@ -235,6 +235,33 @@ class AgentCompletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.decisions[-1]["decision"], plan)
         self.assertEqual(agent.decisions[-1]["body_context"], "own_private")
 
+    async def test_private_plan_body_can_discuss_the_real_aim_with_known_teammates(self):
+        game = make_game()
+        for channel in ['public', 'wolf']:
+            with self.subTest(channel=channel):
+                llm = FakeLLM()
+                agent = Agent('player-0', 'token', 'unused', game.game_id, game.content.roles, {},
+                              llm, RepetitionFilter(), lambda *_: None, seed=1)
+                agent.state.role_id, agent.state.phase, agent.state.day = 'werewolf', 'day', 1
+                agent.state.players = ['player-0', 'player-1', 'player-2']
+                agent.state.alive = set(agent.state.players)
+                agent.state.teammates = ['player-1']
+                agent.state.private = [{'type': 'NOTE', 'text': 'OWN-PRIVATE-SENTINEL'}]
+                agent.state.phase_ends_at = int(time.monotonic()) + 20
+                await agent.generate_speech('対象と理由を話す', 'chat', 160, channel=channel)
+                for call in llm.calls:
+                    prompt = json.dumps(call['messages'], ensure_ascii=False)
+                    self.assertIn('非公開の役職: 人狼', prompt)
+                    self.assertIn('あなたが知っている仲間: player-1', prompt)
+                    self.assertIn('OWN-PRIVATE-SENTINEL', prompt)
+                body = llm.calls[1]['messages'][1]['content']
+                if channel == 'wolf':
+                    self.assertIn('通知された仲間player-1へ', body)
+                    self.assertIn('作戦の対象IDと理由を率直に相談', body)
+                    self.assertNotIn('裏の狙いは公開せず', body)
+                else:
+                    self.assertIn('裏の狙いは公開せず', body)
+
     async def test_intro_is_removed_without_retry_and_expired_chat_never_regenerates(self):
         game = make_game()
         agent = Agent("player-0", "token", "unused", game.game_id, game.content.roles, {},
