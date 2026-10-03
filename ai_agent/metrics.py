@@ -2,70 +2,10 @@
 import re
 
 from .checks import speech, timing_summary
+from .claims import self_claims, team_claim, unquoted
 from .prompts import self_reference, strip_introduction
 from .repetition import normalize, similarity
 from .strategy import STRATEGIES, vote_pressure
-
-
-def unquoted(text, role_names):
-    text = normalize(text)
-    # A quoted role in one's own CO is not an attributed quotation.
-    for name in role_names:
-        text = text.replace(f"「{name}」", name).replace(f"『{name}』", name)
-    return re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"', "", text)
-
-
-def self_claims(player, text, role_names):
-    text = unquoted(text, role_names)
-    text = re.sub(r"(私たち|私|僕|俺)\s*\(\s*player-\d+\s*\)\s*", r"\1", text)
-    text = re.sub(r"[^。！？]*(?:調べた|占った|護衛した|守った)(?:そう|らしい)[^。！？]*", "", text)
-    claims = []
-    for name in role_names:
-        role_word = r"(?:人狼|狼)" if name == "人狼" else re.escape(name)
-        subject = rf"(?:私たち|私|僕|俺|自分)(?:の役職)?(?:は|が|も)\s*|{re.escape(player)}\s*(?:さん)?\s*(?:は|が|も)\s*"
-        tail = r"\s*(?:(?:の\s*)?co\s*)?(?:役職)?(?:です|でした|だった|します|しました|しています|している|だ(?:[。！、\s]|$)|であり|である|なので|なんです|だが|だけど|の一人|として|という役職|(?=[。！]|$))(?!\s*(?:可能性|かもしれ|なら|だったら|とすれば))"
-        named_intro = rf"(?:^|(?<=[。！？]))\s*{role_word}の\s*{re.escape(player)}\s*です"
-        body = r"(?:(?!player-\d+\s*(?:さん)?\s*(?:は|が))[^。！？.!?])*?"
-        own_predicate = rf"{re.escape(player)}\s*(?:さん)?\s*(?:は|が){body}{role_word}{tail}"
-        # An explicit self subject may be followed by an action target ID;
-        # only an unqualified role phrase excludes a following other actor.
-        bare = rf"(?:^|(?<=[。！？]))\s*(?:真の|本当の|唯一の)?{role_word}{tail}(?!\s*player-\d+)"
-        inverse = rf"{role_word}(?:である|としての|の)(?:私たち|私|僕|俺|自分|{re.escape(player)})"
-        alternatives = '|'.join(re.escape(n) for n in role_names)
-        changed_role = rf"(?:{subject})(?:{alternatives})ではなく\s*{role_word}{tail}"
-        pattern = rf"(?:{subject})(?:真の|本当の|唯一の)?{role_word}{tail}|{bare}|{named_intro}|{own_predicate}|{inverse}|{changed_role}"
-        matches = list(re.finditer(pattern, text))
-        definite = []
-        for match in matches:
-            context = re.split(r"[。！？.!?]", text[:match.start()])[-1] + match.group()
-            conditional = re.search(r"なら|だったら|とすれば|仮に|もし", context)
-            role_as = re.search(rf"{role_word}(?:役職)?として", match.group())
-            self_hypothesis = re.search(rf"(?:もし|仮に)\s*(?:私|僕|俺|{re.escape(player)})", context)
-            if not conditional or re.fullmatch(inverse, match.group()) or (role_as and not self_hypothesis):
-                definite.append(match)
-        if definite:
-            claims.append(name)
-        elif name == "人狼":
-            for clause in re.split(r"[。！？.!?]", text):
-                if re.search(r"なら|だったら|とすれば|仮に|もし", clause):
-                    continue
-                attack = re.search(r"(?:私(?:たち)?|自分)(?:は|が|で)[^。！？]*(?:襲撃(?:した|しました)(?!\s*(?:狼|人狼|者|相手))|襲撃します|襲撃する|襲った(?!\s*(?:狼|人狼|者|相手))|襲う|共同襲撃|player-\d+\s*(?:さん)?\s*(?:への|を)\s*襲撃で)", clause)
-                other_subject = attack and re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:は|が)", attack.group())
-                if attack and not other_subject and not re.search(r"(?:襲撃した|襲撃する|襲った)(?:の)?(?:では(?:ない|ありません)|とは言っていない)", clause[attack.start():]):
-                    claims.append(name)
-                    break
-        elif name == "狩人":
-            for clause in re.split(r"[。！？.!?]", text):
-                if re.search(r"なら|だったら|とすれば|仮に|もし", clause):
-                    continue
-                explicit = re.search(r"(?:私|僕|俺|自分)(?:は|が)[^。！？]*護衛(?:した|しました|します|する)", clause)
-                night = re.search(r"(?:^|(?:私|僕|俺|自分)(?:は|が))[^。！？]*(?:初夜|昨夜|今夜|本夜)[^。！？]*player-\d+[^。！？]*(?:護衛(?:した|しました|します)|守(?:った|りました|ります))", clause)
-                action = explicit or night
-                other_subject = action and re.search(rf"(?!{re.escape(player)}\b)player-\d+\s*(?:さん)?\s*(?:は|が)", action.group())
-                if action and not other_subject:
-                    claims.append(name)
-                    break
-    return claims
 
 
 def result_value(text):
@@ -114,9 +54,9 @@ def measure(rows, private_results, roles, content_roles, rules, calls, *, genera
         if claims:
             public_claims[player] = claims
         if role:
-            team_claim = bool(re.search(r"(?:私は|僕は|俺は|^|[。！？]\s*)(?:人狼|狼)陣営(?:です|に属|の一員)", unquoted(text, names)))
+            claimed_team = team_claim(text, names)
             true_role = role.name in claims
-            wolf_claim = role.attributes.team == "wolf" and (team_claim or any(r.name in claims for r in content_roles.values() if r.attributes.team == "wolf"))
+            wolf_claim = role.attributes.team == "wolf" and (claimed_team or any(r.name in claims for r in content_roles.values() if r.attributes.team == "wolf"))
             if (true_role or wolf_claim) and not confused_id:
                 disclosures.append({**location, "role_id": role.id, "team": role.attributes.team, "day": day})
             if wolf_claim and not confused_id:
@@ -271,3 +211,26 @@ def mechanical_conditions(checks):
     if checks.get('require_strategic_disclosures'):
         result['strategic_disclosures'] = review.get('status') == 'complete' and review.get('leaks') == 0
     return result
+
+
+def night_private_activity(rows, private_messages, roles):
+    """Require actual wolf speakers in every night with two living wolves."""
+    wolves = {p for p, role in roles.items() if role.attributes.count_as == 'wolf'}
+    alive, nights = set(roles), []
+    current = None
+    for row in rows:
+        if row['kind'] == 'PLAYER_DIED':
+            alive.discard(row['payload']['player_id'])
+        if row['kind'] in {'PHASE_STARTED', 'GAME_ENDED'}:
+            if current:
+                speaking = [m for m in private_messages if current['start'] <= m['t'] < row['t']
+                            and m['message']['player_id'] in current['alive_wolves']]
+                current.update(messages=len(speaking), speakers=sorted({m['message']['player_id'] for m in speaking}))
+                nights.append(current)
+                current = None
+            if row['kind'] == 'PHASE_STARTED' and row['payload']['phase'] in {'night0', 'night'}:
+                living = wolves & alive
+                current = {'day': row['payload']['day'], 'phase': row['payload']['phase'], 'start': row['t'],
+                           'alive_wolves': sorted(living), 'required': len(living) >= 2}
+    return {'nights': nights, 'required_nights': sum(n['required'] for n in nights),
+            'missing_required_nights': sum(n['required'] and not n['messages'] for n in nights)}
