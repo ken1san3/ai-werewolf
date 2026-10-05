@@ -1,0 +1,38 @@
+cases:
+  - id: 1
+    role: villager
+    adopt: false
+    text: 霊能者が死者を調査COした時→即座に論理破綻を指摘し狂人確定とする→死者調査は不可能な嘘で工作確定
+  - id: 2
+    role: general
+    adopt: false
+    text: 初夜護衛COがでた時→ルール違反を指摘して追放→狂人確定で村に害がある
+  - id: 3
+    role: medium
+    adopt: false
+    text: 初夜霊能で非狼判定→正直に霊能者CO→騙りは信頼を損なうため
+  - id: 4
+    role: seer
+    adopt: false
+    text: 初夜で被占者を占った時→被占者COと一致する旨を報告→初夜COは結果既知のため検証不要
+  - id: 5
+    role: madman
+    adopt: false
+    text: 狂人が狩人を騙った時→ルール違反として処刑を求める→騙りは禁止されているため
+  - id: 6
+    role: general
+    adopt: true
+    text: 残存者が少なく投票が分散する時→確実な嘘つきへ集中投票する→分散投票は市民側にとって致命傷
+  - id: 7
+    role: guard
+    adopt: true
+    text: 初夜、守護対象未定→占いCO者を守る→早期処刑を防ぎ議論を安定させるため
+    interpretation: 初夜に第1夜以降の護衛先を計画する方針であり、初夜に護衛を実行・成功したという報告ではない。
+  - id: 8
+    role: werewolf
+    adopt: true
+    text: 仲間が疑われる場面→他プレイヤーへの疑いを転嫁する→仲間保護と視線そらしのため
+  - id: 9
+    role: general
+    adopt: true
+    text: 初夜に護衛成功を名乗った人がいる時→偽の名乗りを疑う→初夜は護衛がないため

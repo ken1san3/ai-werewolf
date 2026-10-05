@@ -1,0 +1,39 @@
+global:
+  - 初夜は第0夜で、初日の昼と投票の後が第1夜である。
+  - 公開チャットでの名乗りは本人の真の役職や能力を証明せず、他の役職の騙りや偽結果の発言もルール違反ではない。
+  - 名乗ることと能力を実行して結果を受け取ることは別であり、能力が使えない時期にも名乗りの発言自体はできる。
+  - 能力結果は通知された対象と判定項目についてだけ分かり、別の人の役職・名乗り・主張の真偽を自動では証明しない。
+  - 能力を使えない時期でも、次に使える夜の対象や行動を計画・相談することはできる。
+templates:
+  ability: '{roles}の{effect}は{start}、対象は{target}{count}人である{restrictions}。'
+  no_ability: '{roles}は能動的な夜の能力を持たない。'
+  first_night:
+    random_white: '{roles}は初夜にサーバが無作為に選んだ人狼ではない1人の判定を自動で受け取り、本人は対象を選ばない。'
+    free: '{roles}は初夜も通常の対象条件で占い対象を選ぶ。'
+    none: '{roles}は初夜には占いを実行せず結果も受け取らない。'
+  result: '{roles}の{effect}で分かるのは人狼か否かだけであり、本当の役職は分からない。'
+  result_group: '{roles}は{effect}では「{result}」と出る。'
+  regular_inspect: '{roles}は第1夜以降、通常の対象条件に従って本人が占い対象を選ぶ。'
+  dead_target: '{roles}が未判定の対象死者を調べるのは正規の能力であり、生存者と対象外の死因による死者は調べられない。'
+  forbidden_death: '{roles}の対象に{causes}で死んだ人は含まれない。'
+  vote:
+    hidden: 投票先ごとの票数だけは公開されるので集中や分散が分かるが、誰が誰に入れたかは公開されない。
+    live: 投票先は投票した時点で公開される。
+    after: 投票先は投票の集計時に公開される。
+  graveyard:
+    hidden: 死者の本当の役職はゲーム終了まで公開されない。
+    revealed: 墓場では死者の本当の役職を知ることができる。
+  formal_co: '正式なCO操作は公開の会話が許されたフェーズで、プリセットの公称役職候補から選び、{limit}である。'
+  formal_targets: '正式なCO操作で選べる公称役職は{roles}であり、真の役職との一致は求められない。'
+selectors:
+  alive_all: 生存者
+  alive_other: 自分以外の生存者
+  alive_by_tag: '{tag}のタグを持つ生存者'
+  alive_without_tag: '{tag}のタグを持たない生存者'
+  unexamined_dead_by_cause: 'まだ判定していない{causes}による死者だけから'
+restrictions:
+  no_self_target: 自分は対象にできない
+  no_same_target_consecutive: 連続する夜に同じ相手を対象にできない
+results:
+  wolf: 人狼
+  not_wolf: 人狼ではない

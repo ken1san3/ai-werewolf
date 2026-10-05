@@ -7,6 +7,7 @@ from datetime import datetime
 import csv
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -34,6 +35,36 @@ def failure_count(units, key):
 
 def affordable(remaining, estimate):
     return remaining > estimate * 1.2 + 60
+
+
+def note_snapshot(history, number):
+    """Prefer a checked revision within the same completed game's history."""
+    directory = Path(history) / f'game_{number:04d}'
+    versions = []
+    for path in directory.glob('notes.v*.json'):
+        version = path.name[len('notes.v'):-len('.json')]
+        if version.isdigit():
+            versions.append((int(version), path))
+    return max(versions)[1] if versions else directory / 'notes.json'
+
+
+def extend_deadline(directory, hours, *, now=None):
+    """Back up state, then extend its deadline without launching any process."""
+    if not math.isfinite(hours) or hours <= 0:
+        raise ValueError('延長する時間は正の有限値を指定してください')
+    path = Path(directory) / 'state.json'
+    state = read_json(path)
+    if state['phase'] != 'B' or state.get('finished'):
+        raise ValueError('中断中の後半（段階B）の締切だけを延長できます')
+    stamp = time.time_ns()
+    backup = path.with_name(f'state.before_extend_{stamp}.json')
+    # Exclusive creation preserves every previous backup as well as the bytes.
+    with backup.open('xb') as file:
+        file.write(path.read_bytes())
+    current = time.time() if now is None else now
+    state['deadline'] = max(state['deadline'], current) + hours * 3600
+    save_json(path, state)
+    return {'backup': str(backup.resolve()), 'deadline': state['deadline']}
 
 
 class LocalBackend:
@@ -133,12 +164,21 @@ class LocalBackend:
     def reflect(self, setting, game_dir, notes, history, number):
         async def work():
             llm = make_llm(setting, self.port)
+            destination = Path(history) / f'game_{number:04d}'
             try:
-                updated = await asyncio.wait_for(reflect_game(llm, game_dir, notes, history, number),
-                                                 min(self.deadline - time.time(), max(600, 600 / setting['rate'])))
-                save_json(Path(history) / f'game_{number:04d}' / 'calls.json', llm.calls)
-                return updated
+                # A failed or unexpectedly slow reflection must not stop the run.
+                return await asyncio.wait_for(reflect_game(llm, game_dir, notes, history, number), 1800)
+            except Exception as exception:
+                LOG.exception('感想戦を飛ばして、直前の照合済みノートを維持します')
+                save_json(destination / 'pipeline_failure.json', {
+                    'stage': 'reflection_pipeline', 'error': f'{type(exception).__name__}: {exception}',
+                    'at': time.time(), 'fallback': 'previous_checked_notes',
+                })
+                if not (destination / 'notes.json').exists():
+                    save_json(destination / 'notes.json', notes)
+                return notes
             finally:
+                save_json(destination / 'calls.json', llm.calls)
                 await llm.close()
         return asyncio.run(work())
 
@@ -224,7 +264,10 @@ class Marathon:
             return recovered
         attempt = sum(u['key'] == key and u['status'] == 'failed' for u in self.state['units'])
         destination = self.directory / 'games' / (key if attempt == 0 else f'{key}_retry{attempt}')
-        if destination.exists():
+        interrupted = (destination.exists()
+                       or destination.with_name(destination.name + '_request.json').exists()
+                       or destination.with_name(destination.name + '.log').exists())
+        if interrupted:
             recovered = self.existing_game(destination)
             if recovered:
                 return recovered
@@ -293,6 +336,24 @@ class Marathon:
         self.save()
 
     def run_b(self, *, max_rounds=None):
+        # A paused run can receive a checked revision without rewriting state.json.
+        # Select the newest completed game first so old revisions never undo learning.
+        changed = False
+        for series in self.state['series']:
+            if not series['learning']:
+                continue
+            completed = list((self.directory / 'results').glob(f'B_{series["id"]}_*.json'))
+            numbers = [int(path.stem.rsplit('_', 1)[-1]) for path in completed
+                       if path.stem.rsplit('_', 1)[-1].isdigit()]
+            if numbers:
+                path = note_snapshot(self.directory / 'notes' / series['id'], max(numbers))
+                if path.exists():
+                    current = read_json(path)
+                    if current != series['notes']:
+                        series['notes'] = current
+                        changed = True
+        if changed:
+            self.save()
         while self.remaining() > 60 and (max_rounds is None or self.state['round'] <= max_rounds):
             number, progressed = self.state['round'], False
             for series in self.state['series']:
@@ -301,7 +362,7 @@ class Marathon:
                 key = f'B_{series["id"]}_{number:04d}'
                 final = self.directory / 'results' / f'{key}.json'
                 if final.exists():
-                    notes_path = self.directory / 'notes' / series['id'] / f'game_{number:04d}' / 'notes.json'
+                    notes_path = note_snapshot(self.directory / 'notes' / series['id'], number)
                     if series['learning'] and notes_path.exists():
                         series['notes'] = read_json(notes_path)
                         self.save()
@@ -436,6 +497,7 @@ def main():
     parser.add_argument('--phase-a-only', action='store_true', help='前半のみ実行し、後半の開始を待つ')
     parser.add_argument('--shortest-first', action='store_true', help='前半をゲームの見込み時間が短い順に実行')
     parser.add_argument('--begin-b', action='store_true', help='前半のみの完了後、後半の締切を --hours で新しく設定')
+    parser.add_argument('--extend-hours', type=float, help='状態をバックアップして締切を延長するだけ。起動はしない')
     args = parser.parse_args()
     candidates = sorted((ROOT / 'runs').glob('*/state.json'), key=lambda p: p.stat().st_mtime, reverse=True)
     unfinished = next((p.parent for p in candidates if not read_json(p).get('finished')), None)
@@ -453,6 +515,8 @@ def main():
         parser.error('--hours は正の時間を指定してください')
     if args.phase_a_only and args.begin_b:
         parser.error('--phase-a-only と --begin-b は同時に指定できません')
+    if args.extend_hours is not None and (args.status or args.begin_b or args.phase_a_only):
+        parser.error('--extend-hours は起動・状況表示の指定と組み合わせないでください')
     directory.mkdir(parents=True, exist_ok=True)
     import msvcrt
     with (directory / 'runner.lock').open('a+b') as lock:
@@ -465,6 +529,12 @@ def main():
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
             raise SystemExit('同じ実験ランナーが既に動いています')
+        if args.extend_hours is not None:
+            result = extend_deadline(directory, args.extend_hours)
+            print(json.dumps({'バックアップ': result['backup'],
+                              '締切': datetime.fromtimestamp(result['deadline']).isoformat(),
+                              '実験は起動していない': True}, ensure_ascii=False, indent=2))
+            return
         logging.basicConfig(level=logging.INFO, handlers=[logging.FileHandler(directory / 'run.log', encoding='utf-8'), logging.StreamHandler()],
                             format='%(asctime)s %(levelname)s %(message)s')
         backend = LocalBackend(directory, args.port)

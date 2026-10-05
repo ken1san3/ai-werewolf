@@ -139,7 +139,7 @@ def messages(state, roles, role_counts, question, channel="public", *, rules=Non
         f"本人の受信済みの結果: {own_result_summary(state)}。この一覧にない判定は未受信です。CO・他人の主張・自分の推測で結果を増やさないでください。\n"
         f"本人の能力定義: {json.dumps([{'ability_id': a.id, 'name': a.description or STRATEGIES['ability_names'].get(a.id, a.id), 'available_from_night': a.available_from_night, 'target_selector': a.target.selector, 'target_options': dict(a.target.options)} for a in role.abilities], ensure_ascii=False)}\n"
         f"本人の戦略: {strategy['text']}\n"
-        f"{('本人向けの教訓（結果の通知ではありません）: ' + lessons[:800]) if lessons else ''}\n"
+        f"{('本人向けの教訓（結果の通知ではありません）: ' + json.dumps(lessons, ensure_ascii=False)) if lessons else ''}\n"
     )
     discussion = [c for c in state.chats if c["channel"] in {"public", channel} and c["day"] == state.day][-40:]
     # Hidden channels must never enter the public discussion context.

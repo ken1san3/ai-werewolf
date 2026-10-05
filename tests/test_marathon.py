@@ -78,7 +78,7 @@ def test_checkpoint_validation_and_ranked_fallback(tmp_path):
 
 
 def test_lessons_limits_ids_evidence_and_duplicate_games():
-    assert clean_lessons(['player-3へ投票', 'player 4へ投票', 'プレイヤー5の護衛', '長'*81, '場面→行動→理由'] * 4, 3) == ['場面→行動→理由']
+    assert clean_lessons(['player-3へ投票', 'player 4へ投票', 'プレイヤー5の護衛', '長'*81, '場面→行動→理由'] * 4, 3) == ['長'*81, '場面→行動→理由']
     notes = {'guard': [{'text': '圧力→CO→回避', 'games': [1], 'last_game': 1}]}
     reflections = {'player-0': {'role': ['圧力→CO→回避'], 'general': ['議論→確認→誤解防止']},
                    'player-1': {'role': [], 'general': ['議論→確認→誤解防止']}}
@@ -89,14 +89,14 @@ def test_lessons_limits_ids_evidence_and_duplicate_games():
     many = {'guard': [{'text': f'場面{i}→行動→理由', 'games': [i+1], 'last_game': i+1} for i in range(20)]}
     assert len(consolidate_notes(many, {}, 20)['guard']) == 8
     texts = lesson_texts(updated)
-    assert '圧力' in texts['guard'] and '圧力' not in texts['seer']
-    assert '議論' in texts['seer']
-    assert all(len(x) <= 800 for x in texts.values())
+    assert any('圧力' in item['text'] for item in texts['guard'])
+    assert all('圧力' not in item['text'] for item in texts['seer'])
+    assert any('議論' in item['text'] for item in texts['seer'])
     conflict = {'guard': [{'text': '圧力→CO→回避', 'games': [1, 2, 3], 'last_game': 3},
                           {'text': '圧力→沈黙→回避', 'games': [4], 'last_game': 4}]}
     resolved = consolidate_notes(conflict, {'guard': [{'text': '圧力→沈黙→回避', 'indices': [0, 1], 'relation': 'conflict'}]}, 4)
-    assert resolved['guard'][0]['text'] == '圧力→CO→回避'
-    assert resolved['guard'][0]['support_games'] == 3
+    assert resolved['guard'][0]['text'] == '圧力→沈黙→回避'
+    assert resolved['guard'][0]['support_games'] == 4
 
 
 def test_learning_profile_keeps_own_secrets_but_removes_advice():
@@ -278,8 +278,18 @@ def test_fake_llm_a_checkpoint_b_reflection_and_resume(tmp_path):
             self.url = 'http://fake/v1/chat/completions'
         async def complete(self, prompt, *, schema, **kwargs):
             if 'role' in schema['properties']:
-                return json.dumps({'role': ['疑い→根拠を聞く→推理を確かめる'], 'general': ['主張→結果を確認→誤解を減らす']}, ensure_ascii=False)
-            return json.dumps({role: [] for role in schema['properties']})
+                return json.dumps({'role': [{'scene': '疑い', 'action': '根拠を聞く', 'why': '推理を確かめる'}],
+                                   'general': [{'scene': '主張', 'action': '結果を確認', 'why': '誤解を減らす'}]}, ensure_ascii=False)
+            data = json.loads(prompt()[1]['content'])
+            candidates = data.get('候補', data.get('照合対象', []))
+            if 'opinions' in schema['properties']:
+                return json.dumps({'opinions': [{'id': item['id'], 'stance': '賛成', 'reason': 'ルールを確かめる',
+                                                'revision': None} for item in candidates]}, ensure_ascii=False)
+            if 'groups' in schema['properties']:
+                return json.dumps({'groups': {item['id']: {'group_id': item['id'], 'relation': 'same',
+                                              'lesson': dict(zip(('scene', 'action', 'why'), item['text'].split('→')))}
+                                             for item in candidates}}, ensure_ascii=False)
+            return json.dumps({'rule_claims': [], 'contradicting_facts': [], 'reason': 'ルールと一致'}, ensure_ascii=False)
     class Backend:
         def prepare(self, setting):
             return 0
