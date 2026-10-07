@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -12,7 +13,9 @@ import urllib.request
 
 from .llm import SharedLLM
 
-LLAMA = Path(r'C:\AIagent\llama-server.exe')
+# 実験PCごとの配置は環境変数で指定する。
+LLAMA = Path(os.environ.get('AIWOLF_LLAMA_SERVER', 'llama-server.exe'))
+MODELS_DIR = Path(os.environ.get('AIWOLF_MODELS_DIR', 'models'))
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -27,12 +30,12 @@ class Model:
 
 
 MODELS = [
-    Model('qwen35-9b', r'C:\models\Qwen3.5-9\Qwen3.5-9B-Q4_K_M.gguf', 1, 81, 2709, True),
-    Model('swallow-20b', r'C:\models\GPT-OSS-Swallow-20B\GPT-OSS-Swallow-20B-RL-v0.1-MXFP4_MOE.gguf', .4, 51, 985),
-    Model('gemma4-12b', r'C:\models\Gemma-4-12B\gemma-4-12b-it-qat-q4_0.gguf', .4, 27, 1272),
-    Model('gemma4-26b', r'C:\models\Gemma-4-26B-A4B\Gemma-4-26B_q4_0-it.gguf', .3, 34, 625),
-    Model('qwen36-35b', r'C:\models\Qwen3.6-35B-A3B\Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf', .2, 30, 378),
-    Model('qwen38-27b', r'C:\models\Qwen3.8-27B\Qwen3.8-27B-UD-Q4_K_M.gguf', .08, 4.5, 289),
+    Model('qwen35-9b', str(MODELS_DIR / 'Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf'), 1, 81, 2709, True),
+    Model('swallow-20b', str(MODELS_DIR / 'GPT-OSS-Swallow-20B/GPT-OSS-Swallow-20B-RL-v0.1-MXFP4_MOE.gguf'), .4, 51, 985),
+    Model('gemma4-12b', str(MODELS_DIR / 'Gemma-4-12B/gemma-4-12b-it-qat-q4_0.gguf'), .4, 27, 1272),
+    Model('gemma4-26b', str(MODELS_DIR / 'Gemma-4-26B-A4B/Gemma-4-26B_q4_0-it.gguf'), .3, 34, 625),
+    Model('qwen36-35b', str(MODELS_DIR / 'Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf'), .2, 30, 378),
+    Model('qwen38-27b', str(MODELS_DIR / 'Qwen3.8-27B/Qwen3.8-27B-UD-Q4_K_M.gguf'), .08, 4.5, 289),
 ]
 MODEL_MAP = {m.id: m for m in MODELS}
 

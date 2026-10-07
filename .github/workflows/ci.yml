@@ -1,0 +1,44 @@
+name: CI
+
+# LLMやGPUを使わずに確認できるテストだけを実行する。
+# AIエージェントのテストは偽のLLMを使い、実モデルによるゲーム評価はローカルで行う。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Unit and integration tests (no LLM)
+        run: python -m pytest -q -m "not completion"
+
+      - name: Separate-process completion test (no LLM)
+        run: python -m pytest -q -m "completion"
