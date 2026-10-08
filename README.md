@@ -104,13 +104,13 @@ pytestが収集するテストは **385件（809 subtests）** です。LLMは�
 | 別プロセス完走テスト（`-m completion`、1件） | サーバとクライアントを別プロセスで起動し、プロトコルの行動とtickだけで完走 |
 | 条件付きでskipされるテスト（1件） | 手元に長時間実験の記録（Gitに含まれない `runs/`）がある場合だけ、そのリプレイ生成を確かめる |
 
-最終の実測結果（公開準備の時点）:
+最終の実測結果（2026-10-07〜08、公開準備の時点）:
 
 | 環境 | 結果 |
 |---|---|
 | GitHub Actions（Ubuntu: Python 3.10〜3.13、Windows: Python 3.13） | 全ジョブ成功 |
-| Linux（Ubuntu、Python 3.14） | 384 passed / 1 skipped / 809 subtests passed |
-| Windows 11（Python 3.13） | 384 passed / 1 skipped / 809 subtests passed |
+| Linux（WSL Ubuntu、Python 3.14、ローカル） | 384 passed / 1 skipped / 809 subtests passed |
+| Windows 11（Python 3.13、ローカル） | 384 passed / 1 skipped / 809 subtests passed（PCの負荷が低いとき。下の注意を参照） |
 
 収集385件 = passed 384件 + skipped 1件です。
 
@@ -202,6 +202,7 @@ Phase 6では会話品質を上げるために、出力スキーマ・合成テ�
 - 会話の質: 事実の取り違え（自分の役職や他人の結果の混同）がまだ残ります（`Docs/process/WORKLOG.md` の各ゲームのQ3/Q4）。
 - 完了条件のうち人間判定の2項目は、引用候補を用意した段階で最終判定していません。
 - Stage 3の教訓照合が受入基準未達で、長時間実験は保留中です。
+- 実時間で進む完走テスト（9体の完走、別プロセスの完走、人狼の秘密会話）は、実行中のPCの負荷が高いと締切に間に合わず失敗することがあります（ローカルのWindowsで確認。GitHub Actionsでは成功）。
 - 長時間実験ランナーはWindows専用のAPI（プロセス監視・スリープ抑止）を使います。
 - 再接続・AIを別PCで動かす構成・Web UI・人間の参加は今回の対象外です。
 
