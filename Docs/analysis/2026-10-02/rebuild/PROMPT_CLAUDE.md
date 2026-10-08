@@ -1,6 +1,6 @@
 <!--
 Claude（監督役）への最初のプロンプト。
-使い方: C:\AIwolf を作業フォルダにした新しい Claude Code のチャットで、下の「---- ここから ----」以降を貼り付ける。
+使い方: <repo-root> を作業フォルダにした新しい Claude Code のチャットで、下の「---- ここから ----」以降を貼り付ける。
 前提: Codex プラグイン（/codex:rescue）が使えること。
 -->
 
@@ -22,11 +22,11 @@ Claude（監督役）への最初のプロンプト。
 
 # 最初に知っておくこと
 
-このチャットの開始時に読み込まれた C:\AIwolf の AGENTS.md は**旧運用のルール**です（6役割、Design Gate、独立レビューの連鎖、task packet、`ai_status.py`）。
+このチャットの開始時に読み込まれた <repo-root> の AGENTS.md は**旧運用のルール**です（6役割、Design Gate、独立レビューの連鎖、task packet、`ai_status.py`）。
 これには従いません。最初の作業（T0）で新しい AGENTS.md に置き換えます。置き換え後は新しい AGENTS.md とこのプロンプトに従ってください。
 
 背景を知るために、次のファイルだけを読んでください（`Docs/ai/` の旧文書、handoff、task は読まない）。
-資料の置き場所は `C:\AIwolf\logs\rebuild_materials_2026-10-02\` です（Gitの対象外。T0 の後は同じものが `C:\AIwolf\Docs\analysis\2026-10-02\` にもある）。
+資料の置き場所は `<repo-root>\logs\rebuild_materials_2026-10-02\` です（Gitの対象外。T0 の後は同じものが `<repo-root>\Docs\analysis\2026-10-02\` にもある）。
 
 - 停滞の分析: `FINDINGS.md`
 - 何を残し何を消すか: `rebuild\REBUILD_MANIFEST.md`
@@ -107,9 +107,9 @@ Codex の報告をそのまま信じず、毎回次を自分で確かめてく�
 
 # 最初の返答でやること
 
-0. まず `git -C C:\AIwolf branch --show-current` と `git -C C:\AIwolf tag -l "archive/2026-10-02-*"` で状態を確かめる。
+0. まず `git -C <repo-root> branch --show-current` と `git -C <repo-root> tag -l "archive/2026-10-02-*"` で状態を確かめる。
    すでに `rebuild/simple-agent` にいて、タグ4つと T0 の commit があれば、T0 は済んでいる。
-   その場合は下の3を飛ばし、`WORKLOG.md` の末尾を読んで Stage 1 の続きから始める（資料は `C:\AIwolf\Docs\analysis\2026-10-02\` にもある）。
+   その場合は下の3を飛ばし、`WORKLOG.md` の末尾を読んで Stage 1 の続きから始める（資料は `<repo-root>\Docs\analysis\2026-10-02\` にもある）。
 1. 上のファイルを読み、理解したことを5行以内でまとめる。
 2. 次のことをユーザーに確認する（T0 とは関係ないので、T0 はこれを待たずに進めてよい）。
    決定済み: 作業ブランチとタグの push は許可、初期構想書は外す、ai_client/network・world は外す。
@@ -121,6 +121,6 @@ Codex の報告をそのまま信じず、毎回次を自分で確かめてく�
 
 # T0 の後
 
-- C:\AIwolf は `rebuild/simple-agent` ブランチになり、AGENTS.md は新しいものに置き換わる。分析資料は `Docs/analysis/2026-10-02/` にもコピーされる。
+- <repo-root> は `rebuild/simple-agent` ブランチになり、AGENTS.md は新しいものに置き換わる。分析資料は `Docs/analysis/2026-10-02/` にもコピーされる。
 - このチャットは旧 AGENTS.md を読み込んだまま始まっているので、T0 の確認が済んだら、新しいチャットを開き直して
   このプロンプトの「# あなたの役割」以降を貼り直すと確実です（ユーザーにそう提案してよい）。

@@ -11,12 +11,12 @@ private ゲームログを含まない結果だけを置いています。
 
 ## 前提
 
-- `C:/AIagent/llama-server.exe`（build 10697）と `C:/models/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf`
+- `llama-server`（build 10697）と `<models-dir>/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf`
   （製品と同じモデル・同じ runtime）。
 - サーバ起動（製品と同じ設定、ポートだけ 8090）:
 
 ```
-C:/AIagent/llama-server.exe -m C:/models/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf --host 127.0.0.1 --port 8090 -c 8192 -np 1 --jinja --reasoning off --chat-template-kwargs '{"enable_thinking":false}' --fit off -ngl 99
+llama-server -m <models-dir>/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf --host 127.0.0.1 --port 8090 -c 8192 -np 1 --jinja --reasoning off --chat-template-kwargs '{"enable_thinking":false}' --fit off -ngl 99
 ```
 
 - `scripts/` を作業ディレクトリにして実行（`llm.py` が 127.0.0.1:8090 を叩きます）。
@@ -57,5 +57,5 @@ C:/AIagent/llama-server.exe -m C:/models/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf --host
 - E4 は製品ではありません。server の権威判定・private 配送・realtime 進行を通していません。
   人狼に相方を教えている（製品は教えていない）点、1日の発言上限が製品（2回）より多い点も違います。
 - 出力は確率的です。seed を変えれば別の会話になります。
-- E1〜E3 と E5 の T401 版は製品の private ゲームログ（`C:/AIwolf/logs/phase6-private-evidence/game/`）
+- E1〜E3 と E5 の T401 版は製品の private ゲームログ（`<repo-root>/logs/phase6-private-evidence/game/`）
   から抽出した本文を含むため、ここには置いていません。

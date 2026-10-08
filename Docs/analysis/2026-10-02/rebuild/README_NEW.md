@@ -64,7 +64,7 @@ python -m pytest
 AIでゲームを回すには、ローカルの llama-server（OpenAI互換API）が必要です。
 
 ```bash
-C:/AIagent/llama-server.exe -m C:/models/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf --host 127.0.0.1 --port 8090 -c 8192 -np 1 --jinja --reasoning off -ngl 99
+llama-server -m <models-dir>/Qwen3.5-9/Qwen3.5-9B-Q4_K_M.gguf --host 127.0.0.1 --port 8090 -c 8192 -np 1 --jinja --reasoning off -ngl 99
 ```
 
 ```bash

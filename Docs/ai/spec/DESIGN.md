@@ -131,7 +131,7 @@ LLMクライアントは必ず未選択を出すため、宣言は必須とす�
 標準 content は参照実装に合わせ、**`random` を宣言するのは襲撃能力だけ**とする。
 占い・護衛・霊能は `skip`。参照実装が未選択時に強制選択するのは襲撃のみで、
 占いを自動化すると、沈黙しただけで妖狐を呪殺する事故が起きる
-（`spec/JUDGMENT_REFERENCE.md` §3）。
+（`spec/JUDGMENT_REFERENCE.md` §5「夜の行動」）。
 
 `selector` / `restrictions[].type` / `effects[]` は、いずれも content の registry
 （`selectors.yaml` / `restriction_types.yaml` / `effects.yaml`）に登録された

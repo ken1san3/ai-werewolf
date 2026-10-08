@@ -1,8 +1,8 @@
 <!--
 Codex（実行役）への最初のプロンプト（T0: 巻き戻し）。
-使い方: Codex で C:\AIwolf を開き、下の「---- ここから ----」より下をそのまま貼り付ける。
+使い方: Codex で <repo-root> を開き、下の「---- ここから ----」より下をそのまま貼り付ける。
 Claude（監督役）経由で渡す場合も同じ本文を使う。
-入力資料の保存場所: C:\AIwolf\logs\rebuild_materials_2026-10-02\（Gitの対象外。ブランチを切り替えても消えない）
+入力資料の保存場所: <repo-root>\logs\rebuild_materials_2026-10-02\（Gitの対象外。ブランチを切り替えても消えない）
 -->
 
 ---- ここから ----
@@ -13,7 +13,7 @@ Claude（監督役）経由で渡す場合も同じ本文を使う。
 </role>
 
 <override>
-C:\AIwolf にある既存の AGENTS.md は、廃止する旧運用ルール（6役割、Design Gate、独立レビューの連鎖、
+<repo-root> にある既存の AGENTS.md は、廃止する旧運用ルール（6役割、Design Gate、独立レビューの連鎖、
 task packet、ai_status.py の実行など）です。このタスクでは旧 AGENTS.md と Docs/ai 配下の運用文書には従わず、
 このプロンプトの指示に従ってください。新しい AGENTS.md は、このタスクの中で作ります。
 </override>
@@ -25,9 +25,9 @@ task packet、ai_status.py の実行など）です。このタスクでは旧 A
 新しい AGENTS.md・README.md・ROADMAP.md・WORKLOG.md を置き、残したテストがすべて通ることを確かめて、
 commit と push までを行う。
 
-作業場所: C:\AIwolf（現在 experiment/speech-act-kind-first-20260919 をチェックアウト中。未追跡ファイルが多数ある）
+作業場所: <repo-root>（現在 experiment/speech-act-kind-first-20260919 をチェックアウト中。未追跡ファイルが多数ある）
 
-入力資料（読み取りのみ。編集・削除・移動しない）: C:\AIwolf\logs\rebuild_materials_2026-10-02\
+入力資料（読み取りのみ。編集・削除・移動しない）: <repo-root>\logs\rebuild_materials_2026-10-02\
 - rebuild\rebuild_manifest_main_5a5635f.tsv … 全ファイルの扱い（列: path / disposition / lines / reason。disposition は KEEP / EDIT / DELETE）
 - rebuild\REBUILD_MANIFEST.md … 人が読む版
 - rebuild\AGENTS_NEW.md、rebuild\README_NEW.md、rebuild\ROADMAP_NEW.md … 新しい文書の原稿
@@ -45,8 +45,8 @@ commit と push までを行う。
 <steps>
 1. 事前確認（読み取りのみ。ここでは何も変更しない）
    - 上の入力資料がすべて読めること（TSV は 1,468 行＋見出し1行）。
-   - `git -C C:\AIwolf status --porcelain=v1` に、追跡ファイルの変更（"??" 以外の行）が無いこと。
-   - `git -C C:\AIwolf remote get-url origin` が https://github.com/ken1san3/AIwolf.git であること。
+   - `git -C <repo-root> status --porcelain=v1` に、追跡ファイルの変更（"??" 以外の行）が無いこと。
+   - `git -C <repo-root> remote get-url origin` が https://github.com/ken1san3/AIwolf.git であること。
    - 次のブランチ先頭が一致すること:
      main = 5a5635ff52d5f38cfcb08f80ddce69d18a290259
      experiment/speech-act-kind-first-20260919 = ee80895063c98f4e689133fb7fe5ef6ed675f5ed
@@ -108,7 +108,7 @@ commit と push までを行う。
 <action_safety>
 - このタスクの範囲外の変更をしない。リファクタリング、整形、ついでの修正をしない。
 - 未追跡ファイル（logs/、.pytest-*、.review-*、.tmp/、.claude/ など）を削除・移動・上書きしない。入力資料フォルダも読むだけにする。
-- 他のworktree（C:\AIwolf\.claude\worktrees\*、C:\AIwolf\logs\t448-quality-cycles\ci-capture-worktree）と既存ブランチに触らない。
+- 他のworktree（<repo-root>\.claude\worktrees\*、<repo-root>\logs\t448-quality-cycles\ci-capture-worktree）と既存ブランチに触らない。
 - `git reset --hard`、`git clean`、rebase、force push、タグやブランチの削除、main への push・merge をしない。
 - LLMサーバの起動、ゲームの実行、GitHub Actions、pip install は行わない。
 - 手順の途中で想定と違う状態になったら、その時点で止まり、何をして何をしていないかを報告する。自分で回避策を作らない。

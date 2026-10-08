@@ -7,7 +7,7 @@
 
 | # | 事実 | 根拠 |
 |---|---|---|
-| 1 | 実ゲームは 9/17 の T404 が最後。以後 10/2 まで0回 | `C:\AIwolf\logs` のゲームディレクトリ、CURRENT_STATE の hold |
+| 1 | 実ゲームは 9/17 の T404 が最後。以後 10/2 まで0回 | `<repo-root>\logs` のゲームディレクトリ、CURRENT_STATE の hold |
 | 2 | 9/18 以降、モデルに渡る製品プロンプト経路の変更は0。experimentブランチの102コミット・+11.7万行は、合成テスト、評価データの来歴・保全、v2基盤、文書 | `git log` / `git diff --stat` |
 | 3 | 10/2 朝の約4時間の自律運転は LLM呼び出し0回で、保存済み評価データの保全（custody）証明ツールを作っていた | `Docs/ai/handoffs/PHASE6_AUTONOMOUS_20261002.md`（experiment） |
 | 4 | 「Phase 5 完了」の9人ゲームは、全発話が「I am the madman.」など5種類だけ。人狼も「I am the werewolf.」 | `logs/phase5-real/.../ai.jsonl` 全件 |

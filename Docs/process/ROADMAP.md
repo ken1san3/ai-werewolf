@@ -12,12 +12,12 @@
 1. LLMサーバを、別の PowerShell ウィンドウで起動して置いておく。
 
    ```
-   C:\AIagent\llama-server.exe -m C:\models\Qwen3.5-9\Qwen3.5-9B-Q4_K_M.gguf --host 127.0.0.1 --port 8090 -c 8192 -np 1 --jinja --reasoning off -ngl 99
+   llama-server -m <models-dir>\Qwen3.5-9\Qwen3.5-9B-Q4_K_M.gguf --host 127.0.0.1 --port 8090 -c 8192 -np 1 --jinja --reasoning off -ngl 99
    ```
 
 2. Codex に「実行して」→ 報告を読む →（必要なら）「レビューして」→「レビュー内容を基に修正して」→ 次の「実行して」。
    サーバ・プロトコルを変えた項目と★チェックポイントの前は、レビューを新しいスレッドで頼むと、実装の思い込みを持ち込まずに済む。
-3. ★の項目が終わったら、Codex に「チェックポイント準備」→ 出力を、`C:\AIwolf` で新しく開いた Claude に貼って「チェックポイント確認 CP1」。
+3. ★の項目が終わったら、Codex に「チェックポイント準備」→ 出力を、`<repo-root>` で新しく開いた Claude に貼って「チェックポイント確認 CP1」。
 4. ★チェックポイントごとに、書き起こしを1つ読む（`games/` の `transcript.md`）。
 5. どの★チェックポイントでも、Phase 6 の完了条件をすでに満たしていれば、残りの項目を飛ばして S2-6 の判定へ進む（ユーザーが決める）。
 
