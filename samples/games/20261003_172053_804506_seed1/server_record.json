@@ -1,0 +1,1306 @@
+{
+ "rows": [
+  {
+   "t": 0.0,
+   "kind": "GAME_CREATED",
+   "payload": {
+    "day": 0,
+    "phase": "setup",
+    "players": [
+     {
+      "player_id": "player-0"
+     },
+     {
+      "player_id": "player-1"
+     },
+     {
+      "player_id": "player-2"
+     },
+     {
+      "player_id": "player-3"
+     },
+     {
+      "player_id": "player-4"
+     },
+     {
+      "player_id": "player-5"
+     },
+     {
+      "player_id": "player-6"
+     },
+     {
+      "player_id": "player-7"
+     },
+     {
+      "player_id": "player-8"
+     }
+    ]
+   }
+  },
+  {
+   "t": 0.43,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 0,
+    "phase": "night0"
+   }
+  },
+  {
+   "t": 59.64,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 74.63,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 87.69,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "まだ動きがないので、誰が人狼か不安です。player-1 さんは何か見解はありますか?"
+   }
+  },
+  {
+   "t": 88.8,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "私は占い師です。初夜に player-2 を占って人狼ではないと判明しました。この情報から人狼を特定し、村の勝利に貢献したいです。"
+   }
+  },
+  {
+   "t": 94.09,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さんの占い結果は初夜に私が得た情報とは異なるようです。その根拠は何でしょうか?"
+   }
+  },
+  {
+   "t": 97.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 さん、初夜の結果は信頼できますか?その根拠を聞きたいです。player-8 さんにも何か見解はありますか?"
+   }
+  },
+  {
+   "t": 100.69,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0 さん、初夜に占ったのは player-2 さんで人狼ではないと言われましたが、その根拠や確信はどこから得たのでしょうか?"
+   }
+  },
+  {
+   "t": 103.79,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0 さん、占い師ですか?その占った player-2 さんは今、なぜ首を突っ込んでいるのでしょうか?"
+   }
+  },
+  {
+   "t": 105.17,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能者ですが初夜は結果ありません。player-0 さんの占いは初夜情報と矛盾する気がしますが、私はまだ確認できていません。player-0 さん、player-2 さんは誰を占ったのですか?"
+   }
+  },
+  {
+   "t": 107.76,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0 さん、player-2 さんの反応は不自然ですが、私としては player-4 さんが人狼候補に見えます。player-4 さんは player-0 さんの占いを疑っていますが、その根拠は何でしょうか?"
+   }
+  },
+  {
+   "t": 110.25,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "私、市民です。player-0 さんの占った player-2 さんは、なぜ即座に反論しているのでしょうか?"
+   }
+  },
+  {
+   "t": 123.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "私、player-2 さん、初夜にサーバーから「人狼ではない」という結果をただちに得ています。根拠はサーバーの判定であり、狂人の可能性は残りますが、人狼は確定ではないと報告します。"
+   }
+  },
+  {
+   "t": 126.88,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さんの結果は初夜で得られた事実ですが、霊能者 player-6 さんがまだ確認できていない現状では、その占った根拠の信頼性を疑うべきだと考えます。"
+   }
+  },
+  {
+   "t": 128.14,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4 さん、player-0 さんの占いを疑う根拠を教えてください?"
+   }
+  },
+  {
+   "t": 135.0,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-2 さんの即座な反論は不自然に思えますね。player-0 さんが真か?player-3 さん、player-2 さんの態度についてどう思いますか?"
+   }
+  },
+  {
+   "t": 142.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4 さん、素の根拠を示さずただ疑うのは危険です。player-2 さんの態度こそ見極めが必要だと考えます。"
+   }
+  },
+  {
+   "t": 143.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0 さんの初夜判定は正しいでしょうが、player-2 さんが即座に反論するのは不自然です。player-4 さんが人狼なら、なぜ player-0 さんの根拠を求めているのでしょうか?"
+   }
+  },
+  {
+   "t": 145.16,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0 さん、占った対象は player-2 さんでしたが、なぜ player-2 さんは直後に反論する態度だったのでしょう?"
+   }
+  },
+  {
+   "t": 151.86,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0 さんの根拠は初夜の結果ですが、player-2 さんの反応が不自然すぎます。player-4 さんはなぜ player-0 さんを強く疑うのでしょうか?"
+   }
+  },
+  {
+   "t": 153.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-4 さん、player-2 さんの反応に囚われすぎず、player-0 さんの根拠を確認する方が先じゃないでしょうか?"
+   }
+  },
+  {
+   "t": 155.33,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2 さんが即座に反論したのは不自然ですが、霊能者の player-6 さんの確認を待つ必要があります。player-4 さん、なぜ player-2 さんを疑うのでしょうか?"
+   }
+  },
+  {
+   "t": 159.21,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-4 さんの疑念は理解できますが、player-0 さんの初夜判定は信頼できる事実です。player-6 さんの霊能確認待ちですので、player-7 さん、次は誰を占いますか?"
+   }
+  },
+  {
+   "t": 160.87,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4 さん、根拠なしで player-2 さんを疑うのは危険です。player-0 さんの初夜判定は正しいはずです。player-4 さん、真意を教えてください?"
+   }
+  },
+  {
+   "t": 168.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-3 さん、player-2 さんの不自然さは player-0 さんの疑いにも通ずるかもしれませんね。player-7 さん、player-2 さんへの次は誰を占う予定ですか?"
+   }
+  },
+  {
+   "t": 176.81,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-4 さん、根拠なしの疑いは村に危険です。player-8 さん、player-4 さんの真意を教えてください?"
+   }
+  },
+  {
+   "t": 180.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは不自然です。player-0 さんの初夜結果は真実ですが、player-4 さんの態度こそ見極めが必要ではないでしょうか?"
+   }
+  },
+  {
+   "t": 182.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能者 CO です。初夜結果はまだありませんが、私こそ霊能者です。player-2 さん、なぜ player-0 さんの占いを急いで否定したのですか?"
+   }
+  },
+  {
+   "t": 186.52,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-6 さん、霊能確認の状況は?player-4 さんの根拠なしの疑いは危険なので、その理由を教えてください。"
+   }
+  },
+  {
+   "t": 188.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さん、霊能者の player-6 さんの確認待ちですね。player-3 さん、私への疑念は player-4 さんの根拠から来ているようですが、真意が気になります。"
+   }
+  },
+  {
+   "t": 190.09,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-4 さん、player-2 さんの反応を巡って混乱していますが、player-6 さん霊能者の初夜判定はどうなりましたか?"
+   }
+  },
+  {
+   "t": 194.14,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-4 さん、player-2 さんの不自然さへの疑念は確かにありますが、根拠を添えた上で player-0 さんの占いをどう評価されていますか?"
+   }
+  },
+  {
+   "t": 195.72,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4 さん、真意を教えてください。player-7 さん、次は player-0 さんを占うべきではないでしょうか?"
+   }
+  },
+  {
+   "t": 209.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 さん、初夜判定が未出で霊能待ちなら急ぐ必要はないはずです。player-6 さんの霊能結果待ちで、player-2 さんへの次は誰を占うのですか?"
+   }
+  },
+  {
+   "t": 213.62,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "まだ初夜判定は出ず、霊能結果は持っておりません。player-4 さん、根拠なしで player-2 さんを疑うのは、私を含め村にとって危険なので真意を聞かせてください?"
+   }
+  },
+  {
+   "t": 215.4,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険ですね。player-6 さんの霊能結果待ちですが、私は player-7 さんを占うべきではないでしょうか?"
+   }
+  },
+  {
+   "t": 219.63,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-4 さん、根拠を示さず player-2 さんを狙うのは危険です。私、player-2 さんは人狼ではない結果が出ています。player-4 さんはなぜ player-2 さんへの攻撃を急ぐのでしょうか?"
+   }
+  },
+  {
+   "t": 221.35,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-4 さん、根拠を示さずに player-2 さんを狙うのは危険です。私を占うのは player-5 さんへの対策かもしれませんが、なぜ私なのか理由を教えてください?"
+   }
+  },
+  {
+   "t": 223.24,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さん、初夜結果が白なら占い師は未確定です。player-4 さんへの根拠は何か?\nplayer-6 さん、霊能結果はいつ出ますか?"
+   }
+  },
+  {
+   "t": 226.71,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6 さん、霊能結果はまだ出ませんか?player-0 さんの占った player-2 さんの反応が気になります。"
+   }
+  },
+  {
+   "t": 232.6,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 さん、player-2 さんへの判定結果は本当に白ですか?霊能者の player-6 さんの初夜結果が気になりますね。"
+   }
+  },
+  {
+   "t": 236.31,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4 さん、根拠なく player-2 さんを攻撃するのは危険です。真意を教えてください。"
+   }
+  },
+  {
+   "t": 240.78,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 さん、根拠を聞かれても初夜は未確定なら占う順番が優先されるだけですが、player-6 さんの霊能結果次第で動きが変わりますね。player-3 さん、霊能者の初夜判定待ちなら、私への急激な疑念は時期尚早ではないでしょうか?"
+   }
+  },
+  {
+   "t": 242.51,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能者です。まだ初夜判定は出ず、今は結果待ちです。player-4 さん、根拠を添えて player-2 さんへの真意を聞かせてください?"
+   }
+  },
+  {
+   "t": 244.16,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4 さん、根拠なしでの攻撃は危険ですが、真意が不明な player-7 さんへの占いは有効でしょうか?"
+   }
+  },
+  {
+   "t": 247.6,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-4 さん、根拠を提示せずに player-2 さんを攻撃するのは危険です。player-6 さんの霊能結果待ちですが、私への真意は何ですか?"
+   }
+  },
+  {
+   "t": 251.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6 さん、霊能結果待ちですが player-4 さんの真意が気になります。根拠のない player-2 さんへの攻撃は村にとって危険ではありませんか?"
+   }
+  },
+  {
+   "t": 252.88,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-6 さん、霊能結果が白なら私への真意は何でしょうか?"
+   }
+  },
+  {
+   "t": 254.65,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 314.62,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 1,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 1,
+     "player-1": 0,
+     "player-2": 0,
+     "player-3": 0,
+     "player-4": 8,
+     "player-5": 0,
+     "player-6": 0,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-4",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 314.62,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 314.62,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 1,
+    "player_id": "player-4",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 314.69,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 374.62,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 389.63,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 399.3,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0 さん、初夜判定は信頼できますか?player-6 さん、霊能 CO はありましたか?"
+   }
+  },
+  {
+   "t": 405.26,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "狂人対策のため player-2 さんは即座に安全ですが、霊能者の player-6 さんの確認が急務です。私、占い師 CO します。"
+   }
+  },
+  {
+   "t": 410.56,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0 さんの占い結果が気になるので、player-6 さんに霊能結果を教えてください。player-2 さんの反応も確認したいですが、まずは霊能者の動きが気になります。"
+   }
+  },
+  {
+   "t": 415.24,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さんの占いは信用します。player-8 さん、player-6 さんの霊能結果を教えて。player-1 さん、次は player-5 さん占いますか?"
+   }
+  },
+  {
+   "t": 416.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能者 CO です。初夜に player-4 さんは人狼でした。player-8 さん、私の動きは怪しいですか?"
+   }
+  },
+  {
+   "t": 419.48,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8 さん、霊能の結果は player-4 さんで確定ですね。player-2 さん、次は私への占いをお願いします。?"
+   }
+  },
+  {
+   "t": 421.36,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-6 さん、霊能者としての動きは村に安心感を与えました。次は player-5 さんへの占いの有無を確認したいですが、player-0 さんの占う先もまだ不明です。player-5 さん、何か動きはありますか?"
+   }
+  },
+  {
+   "t": 424.49,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 さんの占いは player-2 さんですが、霊能者が player-4 さんを外している点で不安です。私、市民として player-6 さんの動きを確認したいです?"
+   }
+  },
+  {
+   "t": 437.46,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0 さん、占う先が player-2 さんなら霊能者の player-6 さんが外した点で不安ですが、player-2 さんは安全でしょうか?"
+   }
+  },
+  {
+   "t": 444.12,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-6 さん、霊能結果は player-4 人狼との一致で信頼できます。次は player-5 さん占いますか?"
+   }
+  },
+  {
+   "t": 451.13,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-6 さん、霊能結果をまだ聞いていないので不安です。私への占い結果を player-0 さんから教えていただけますか?"
+   }
+  },
+  {
+   "t": 453.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "霊能者、player-4 以外が外れそうなら player-2 さんへの占いは疑わしいです。player-0 さんが player-2 さんを占って安全と判断した根拠と、霊能者の視点がズレていないか確認させてください?"
+   }
+  },
+  {
+   "t": 460.35,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能結果は player-4 人狼確定です。player-2 さんへの占い結果は分かりませんが、player-0 さんの判断を信じて投票します。player-5 さん、占いますか?"
+   }
+  },
+  {
+   "t": 462.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0 さん、player-2 さんへの占いは村に安心感を与えましたが、霊能が player-4 さんを外した点で不安です。player-0 さんの判断根拠を教えてください?"
+   }
+  },
+  {
+   "t": 471.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0 さんの占う先が player-2 さんなら、霊能が外した点で安心は薄いです。player-0 さん、player-2 さんへの占いの根拠は?"
+   }
+  },
+  {
+   "t": 472.97,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0 さん、player-2 さんへの占いは霊能結果と一致する根拠はありますか?"
+   }
+  },
+  {
+   "t": 477.32,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 さん、霊能結果が一致したから player-2 さんは安全ですか?私が player-6 さんを改めて確認したいです?"
+   }
+  },
+  {
+   "t": 479.27,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-5 さん、次はあなたへの占いです。player-2 さんへの結果は「人狼ではない」です。霊能者の player-6 さんとも一致しており信頼できます。"
+   }
+  },
+  {
+   "t": 481.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さん、霊能結果との整合性で占い白なら良いですが、player-6 さんへの確認はありますか?player-7 さん、霊能視点で player-5 さんは外れますか?"
+   }
+  },
+  {
+   "t": 488.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0 さん、霊能と占いの一致は心強いです。次は player-6 さんへの占いが急務ですが、player-7 さん、霊能視点で player-6 さんは外れますか?"
+   }
+  },
+  {
+   "t": 500.33,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "霊能が外した以上、占いの一致は不十分です。player-0 さんは player-2 さんに投票した根拠を語らず、その行動が不安です。player-0 さん、player-2 さんへの投票理由を具体的に教えてください?"
+   }
+  },
+  {
+   "t": 504.55,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0 さん、霊能との一致は強いですね。次は player-1 さんへの占いで、霊能視点で外れるか確認したいです?"
+   }
+  },
+  {
+   "t": 508.93,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-5 さん、次は player-1 さんへの占いですが、霊能者 player-6 さん視点で player-1 さんは外れるでしょうか?"
+   }
+  },
+  {
+   "t": 510.56,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-5 さん、霊能視点で外れる根拠を教えてください。"
+   }
+  },
+  {
+   "t": 517.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 さん、霊能者が外した以上、占い結果は信頼できません。player-6 さん、霊能視点で player-0 さんは外れますか?"
+   }
+  },
+  {
+   "t": 519.47,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 さんの根拠は霊能視点ですが、霊能が外した以上不安です。player-6 さん、player-1 さんへの占いは外れますか?"
+   }
+  },
+  {
+   "t": 526.21,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能は player-4 人狼確定です。player-0 さんの占う先が player-2 なら一致しますが、player-1 への占いは霊能視点で外れる根拠はございませんか?"
+   }
+  },
+  {
+   "t": 530.97,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "霊能者視点で player-6 さんが外れる根拠を教えていただけますか?占い師 player-0 さんの根拠が霊能と一致する以上、player-6 さんの動きも確認が必要ですが、まずは player-7 さんへの占いが急務ですので、霊能視点で player-7 さんは外れますか?"
+   }
+  },
+  {
+   "t": 532.66,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0 さん、player-2 さんに占う根拠は霊能視点からの確認ですか?"
+   }
+  },
+  {
+   "t": 537.21,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "霊能外しで占い信頼度低く、player-0 さんの根拠不明点が残ります。player-1 さん、霊能視点で player-0 さんは外れますか?"
+   }
+  },
+  {
+   "t": 541.78,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "霊能外しで不安ですが、player-1 さんの占いは霊能視点で外れる根拠ありますか?"
+   }
+  },
+  {
+   "t": 554.82,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-1 さんへの占いが急務ですが、霊能視点で外れる根拠が player-6 さんから出ているので、 player-0 さんは player-1 さんを占うべきでしょうか?"
+   }
+  },
+  {
+   "t": 560.92,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能結果は player-4 人狼確定のみです。player-1 さんへの占う根拠は私にはございません。"
+   }
+  },
+  {
+   "t": 565.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "霊能外しで不安ですが、占い師が player-7 さんを占う根拠は何か?私、player-7 さんへの投票は霊能視点での確認を優先します。"
+   }
+  },
+  {
+   "t": 567.4,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "霊能外しは事実です。player-0 さん、player-1 への占いで霊能視点で外れる根拠はありますか?"
+   }
+  },
+  {
+   "t": 569.63,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 629.64,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 2,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 0,
+     "player-1": 6,
+     "player-2": 0,
+     "player-3": 0,
+     "player-5": 0,
+     "player-6": 1,
+     "player-7": 1,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-1",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 629.64,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 629.64,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-1",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 629.74,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 689.66,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-0",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 689.66,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 704.67,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 712.26,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-3 さん、市民 CO の具体的な根拠はありますか?"
+   }
+  },
+  {
+   "t": 713.18,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-3 さん、昨夜 player-0 が死亡した根拠を教えてください。霊能視点か確認したいです?"
+   }
+  },
+  {
+   "t": 725.92,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-3 さんの根拠と player-8 さんの質問に答えますが、私はいまだ役職を公称していません。player-6 さんに霊能結果について確認してみましょうか?"
+   }
+  },
+  {
+   "t": 727.25,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-8 さん、昨夜の player-0 死亡は人狼の襲撃で、霊能が外したとしか言いようがないです。\nplayer-6 さん、霊能視点で確認できますか?私、投票先が気になるので。"
+   }
+  },
+  {
+   "t": 731.07,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能視点で player-1 は人狼ではないことを確認しました。player-8 さん、その根拠を添えて答えます。"
+   }
+  },
+  {
+   "t": 732.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-3 さん、player-0 死亡の根拠が霊能外しだとするなら、私への占いは外れる可能性が高いです。player-7 さん、player-3 への根拠は?"
+   }
+  },
+  {
+   "t": 739.16,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-3 さん、根拠未提示のまま CO 続けるなら、私は人狼の騙りと見なします。player-8 さんへの霊能確認は不要です。"
+   }
+  },
+  {
+   "t": 743.92,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-3 さんが根拠を示さず霊能外しを主張するなら、私も人狼の疑似霊能 CO と見なします。player-5 さん、player-3 への投票は私ですか?"
+   }
+  },
+  {
+   "t": 750.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-5 さん、私も player-8 さんへの占い結果は出ませんでした。player-7 さんへの投票は player-8 さんですか?"
+   }
+  },
+  {
+   "t": 754.82,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-3 さん、根拠なしの霊能外し主張は怪しいので処刑提案します。私への占いで外れた可能性が高い player-7 さんを次に見てほしいですか?"
+   }
+  },
+  {
+   "t": 764.05,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-3 さんの根拠なし CO と player-8 さんの霊能外し主張は不自然ですが、これに飛びつくと票が割れそうです。player-5 さん、player-7 さんへの占い結果は出ましたか?"
+   }
+  },
+  {
+   "t": 768.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-8 さん、昨夜は player-0 さんへの確認結果が未受信です。 player-3 さんへの根拠は、player-4 さんが処刑で人狼確定したため、人狼は player-1 さん以外に一人残っているからです。"
+   }
+  },
+  {
+   "t": 770.69,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-5 さん、処刑提案理由は根拠不足だと判断しました。私の投票先は player-3 です。"
+   }
+  },
+  {
+   "t": 772.42,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-5 さんへの投票先を伺いますが、player-3 さんの根拠なし主張には不自然さを感じます。"
+   }
+  },
+  {
+   "t": 777.15,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-5 さん、投票先は player-8 さんです。霊能外しなら次は player-7 さんを優先すべきでしょう。player-2 さん、確認しますか?"
+   }
+  },
+  {
+   "t": 781.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-3 さんへの投票は確定ですが、私への投票先は player-2 さんです。player-7 さんは player-3 への根拠がないことを指摘しているので、次は player-7 さんを見ても良いですか?"
+   }
+  },
+  {
+   "t": 792.0,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "私、まだ役職未明ですが player-3 さんの根拠不足は危惧します。player-5 さん、player-7 さんへの占いは出ましたか?\n?"
+   }
+  },
+  {
+   "t": 796.82,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-5 さん、player-7 さんへの霊能結果は未受信です。player-2 さん、player-7 さんの投票先を確認して霊能判定をお願いできますか?"
+   }
+  },
+  {
+   "t": 798.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-5 さんへの投票先を伺いますが、player-3 さんの根拠不足が気になります。"
+   }
+  },
+  {
+   "t": 800.65,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-2 さん、占い結果は出ませんでした。私への根拠が player-3 へのものなら、player-3 さんが人狼の可能性が高いですね?"
+   }
+  },
+  {
+   "t": 804.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-5 さん、player-7 さんの投票先も確認したいです。player-2 さん、次は player-6 さんを見ますか?"
+   }
+  },
+  {
+   "t": 812.06,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-2 さん、投票先は player-3 です。player-3 さんが根拠なしで霊能外し主張しているため、人狼である可能性が高いからです。"
+   }
+  },
+  {
+   "t": 816.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-6 さん、player-7 さんへの結果はまだ未受信ですね。私が player-3 さんに確認すれば、票は player-5 さんに行きそうです。"
+   }
+  },
+  {
+   "t": 818.6,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-2 さん、player-7 さんの投票先が確認できれば霊能判定できますが、まだ結果は来ていません。投票先を教えていただけますか?"
+   }
+  },
+  {
+   "t": 825.47,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-2 さん、投票先は player-6 さんです。player-3 さんが根拠なしで霊能外しを主張しているので、彼を優先して確認しますか?"
+   }
+  },
+  {
+   "t": 832.61,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-3 さん、根拠なく霊能外しを主張するなら人狼疑いです。私への投票先は player-7 さんです。"
+   }
+  },
+  {
+   "t": 834.61,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-5 さん、player-2 さんの投票先も確認したいです。player-6 さんの霊能結果待ちですが、次は player-8 さんを占えますか?"
+   }
+  },
+  {
+   "t": 839.18,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-7 さんへの投票先は player-6 です。霊能結果待ちですが、player-3 さんの根拠不足が気になりますね。"
+   }
+  },
+  {
+   "t": 841.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-7 さん、霊能外し根拠不足なら人狼疑いです。次は player-5 さんの投票先を確認して霊能判定しましょうか?"
+   }
+  },
+  {
+   "t": 846.82,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-7 さんの投票先で霊能結果が来ない場合、player-3 さんが人狼である可能性が高いですね。"
+   }
+  },
+  {
+   "t": 884.61,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 944.69,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 3,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-2": 0,
+     "player-3": 4,
+     "player-5": 1,
+     "player-6": 0,
+     "player-7": 1,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-3",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 944.69,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 944.69,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-3",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 944.69,
+   "kind": "GAME_ENDED",
+   "payload": {
+    "outcome": "team_victory",
+    "winner_team": "village",
+    "player_results": {
+     "player-0": "won",
+     "player-1": "won",
+     "player-2": "lost",
+     "player-3": "lost",
+     "player-4": "lost",
+     "player-5": "won",
+     "player-6": "won",
+     "player-7": "won",
+     "player-8": "won"
+    },
+    "roles": {
+     "player-0": {
+      "role": "占い師",
+      "result": "won"
+     },
+     "player-1": {
+      "role": "狩人",
+      "result": "won"
+     },
+     "player-2": {
+      "role": "狂人",
+      "result": "lost"
+     },
+     "player-3": {
+      "role": "人狼",
+      "result": "lost"
+     },
+     "player-4": {
+      "role": "人狼",
+      "result": "lost"
+     },
+     "player-5": {
+      "role": "市民",
+      "result": "won"
+     },
+     "player-6": {
+      "role": "霊能者",
+      "result": "won"
+     },
+     "player-7": {
+      "role": "市民",
+      "result": "won"
+     },
+     "player-8": {
+      "role": "市民",
+      "result": "won"
+     }
+    }
+   }
+  }
+ ]
+}

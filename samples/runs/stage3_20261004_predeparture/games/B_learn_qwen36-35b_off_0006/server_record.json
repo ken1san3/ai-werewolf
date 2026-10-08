@@ -1,0 +1,1417 @@
+{
+ "rows": [
+  {
+   "t": 0.0,
+   "kind": "GAME_CREATED",
+   "payload": {
+    "day": 0,
+    "phase": "setup",
+    "players": [
+     {
+      "player_id": "player-0"
+     },
+     {
+      "player_id": "player-1"
+     },
+     {
+      "player_id": "player-2"
+     },
+     {
+      "player_id": "player-3"
+     },
+     {
+      "player_id": "player-4"
+     },
+     {
+      "player_id": "player-5"
+     },
+     {
+      "player_id": "player-6"
+     },
+     {
+      "player_id": "player-7"
+     },
+     {
+      "player_id": "player-8"
+     }
+    ]
+   }
+  },
+  {
+   "t": 0.03,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 0,
+    "phase": "night0"
+   }
+  },
+  {
+   "t": 198.12,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 298.12,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 326.14,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "まだ誰も役職を発表していませんね。初夜に死者が出なかったのは幸運です。誰か占い師や霊能者のCOを期待しますが、いかがでしょうか?"
+   }
+  },
+  {
+   "t": 342.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4さん、CO期待とのことですが、初夜に霊能がCOする可能性もありますね。早く役職を名乗って情報を共有してくれた方が、村の安全に繋がりますよ?"
+   }
+  },
+  {
+   "t": 352.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "初夜護衛COは狂人の工作確定です。霊能者COはルール上可能ですが、初夜霊能COは工作ではなく正当な可能性が高いです。player-8さん、あなたのその主張の根拠は何ですか?"
+   }
+  },
+  {
+   "t": 355.67,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-4さん、CO期待ですが、霊能は初夜判定不可です。まずは占い師のCOを待ち、根拠となる情報を共有していただけませんか?"
+   }
+  },
+  {
+   "t": 365.69,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "霊能者COは初期工作の典型です。まずは占い師のCOを期待しますが、誰か占い師として名乗ってくれる方はいますか?"
+   }
+  },
+  {
+   "t": 390.79,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "霊能COは正当な可能性が高いですが、まずは占い師の判定が欲しいです。player-4さん、何か気になる点はありますか?"
+   }
+  },
+  {
+   "t": 405.14,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "霊能COは正当性が高いですが、初夜判定不可という点については議論が必要です。player-1さん、その主張の根拠となるルールや事実は何ですか?"
+   }
+  },
+  {
+   "t": 408.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "初夜霊能COは狂人工作の疑いが濃厚です。特にplayer-2さんやplayer-5さんの主張は正しいですが、なぜ初夜から霊能を警戒する根拠を示さなかったのか? player-3さんはどう解釈していますか?"
+   }
+  },
+  {
+   "t": 419.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "私は初夜にplayer-8を占いました。結果は人狼ではありません。初期で確実な情報を共有し、工作を防ぎます。"
+   }
+  },
+  {
+   "t": 430.6,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0さんの占いは貴重ですが、狂人が偽情報を流す可能性も考慮すべきです。霊能COの是非より、まずは人狼COを待ちましょう。"
+   }
+  },
+  {
+   "t": 452.52,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0さん、非狼判定ありがとうございます。ただ、狂人が偽判定を流すケースも考慮し、引き続き警戒します。霊能COの有無に関わらず、整合性の高い根拠を示していただけますか?"
+   }
+  },
+  {
+   "t": 455.67,
+   "kind": "CO_DECLARED",
+   "payload": {
+    "player_id": "player-0",
+    "claimed_role_id": "seer",
+    "comment": "私は占い師を名乗ります。初夜にplayer-8を占った結果、人狼ではありませんでした。初期に役職を明かし、工作を防ぎます。"
+   }
+  },
+  {
+   "t": 458.74,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さん、初手COありがとうございます。ただ、狂人が偽判定を出すケースも考慮し、その理由や根拠をもう少し詳しく聞かせていただけますか?"
+   }
+  },
+  {
+   "t": 468.21,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0さん、初手CO感謝ですが、狂人が偽判定を出す可能性も考慮し、根拠をもう少し詳しく聞かせていただけますか?"
+   }
+  },
+  {
+   "t": 487.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんのCO、ありがとうございます。初手COは信頼性が高いですが、狂人が偽情報を出すケースも考慮すべきです。player-4さん、その懸念はもっともですが、根拠を示せますか?"
+   }
+  },
+  {
+   "t": 519.72,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0さん、初手CO感謝ですが、狂人が偽判定を流すケースも考慮し、なぜplayer-8を選んだのかその選定理由を聞かせていただけますか?"
+   }
+  },
+  {
+   "t": 522.8,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0さんのCO、信頼します。初手COは工作より確実性が高いので、player-8さんを安全な枠と確定させましょう。これにより、残る人狼候補を絞り込みやすくなります。"
+   }
+  },
+  {
+   "t": 536.52,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0のCOは信頼できます。初期の確実な情報は工作より確実性が高いです。player-1さん、狂人疑惑の根拠を具体的に示せますか?"
+   }
+  },
+  {
+   "t": 543.06,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-3さん、player-8を安全と断定するのは早計です。狂人が偽判定を出す可能性を完全に否定できませんが、現時点ではその疑いも薄いですね。"
+   }
+  },
+  {
+   "t": 549.52,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0さん、霊能COが工作確定なら、なぜ初夜から警戒を示さなかったのでしょうか? 理由を教えてください?"
+   }
+  },
+  {
+   "t": 585.57,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-1さん、選定理由の根拠として、ランダムな選択は工作より確実性が高いと主張します。狂人が初手COで偽情報を作るケースより、占師の初期連携の方が村に有益だと考えます。"
+   }
+  },
+  {
+   "t": 602.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-1さん、なぜ非狼判定に警戒する根拠を示さないのでしょうか?ランダム選定は工作より確実です。理由を教えてください?"
+   }
+  },
+  {
+   "t": 609.4,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0さん、なぜplayer-8を選んだか理由を尋ねましたが回答がないため、工作の疑いが強まります。ランダム性より意図的な選定に見える理由を教えて?"
+   }
+  },
+  {
+   "t": 638.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-1さん、ランダム選定が工作より確実という論理に同意します。根拠なく意図的な選定と断定するのは誤りです。player-0さんのCOを支持し、player-1さんの疑念は却下です。"
+   }
+  },
+  {
+   "t": 666.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-1さん、選定理由が不明なのが工作の疑いになるなら、なぜ初夜に霊能COをしなかったのか理由を教えてください?初期に警戒を示さないのは不自然です?"
+   }
+  },
+  {
+   "t": 687.86,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-1さん、選定理由の追求は工作疑惑を強めるだけです。ランダム選定を否定する根拠はありますか?根拠がないなら、その疑念を却下すべきです。"
+   }
+  },
+  {
+   "t": 731.23,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-1さん、選定理由が不明なのは工作ではなく、単純なランダムな選択だからです。意図的に特定の誰かを選んだわけではありません。"
+   }
+  },
+  {
+   "t": 765.82,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-8さん、ランダム選択なら理由説明不要のはず。あえて理由を問うたのは、選定ロジックに矛盾や工作の意図がないか確認するためです。"
+   }
+  },
+  {
+   "t": 772.41,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-1さん、ランダム選定を意図的と断じる根拠は何ですか?player-0さんのCOを疑うなら、その論理的一貫性を示してほしいです。"
+   }
+  },
+  {
+   "t": 816.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-1さん、ランダム選定に根拠は不要です。あなたが「意図的」と断定する根拠を提示してください。根拠なく疑いを強めるのは村を割ります。"
+   }
+  },
+  {
+   "t": 845.34,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-1さん、ランダム選定を意図的と断じる根拠は何ですか?疑うならその論理的矛盾を示してください。根拠なき追及は工作と同義です。"
+   }
+  },
+  {
+   "t": 852.19,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-1さん、根拠なき疑いは村を分断します。player-0のCOを支持し、player-8を安全と見なすのが正解です。あなたこそ工作の疑いを払拭してください?"
+   }
+  },
+  {
+   "t": 859.33,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-1さん、ランダム選定に意図を捏造するのは論理破綻です。根拠なく疑う行為そのものが工作の常套手段です。player-0さんのCOを支持し、player-1さんを処刑すべきだと考えます。"
+   }
+  },
+  {
+   "t": 873.24,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-1さん、私の選定に意図はないと説明済みです。根拠なき工作疑いは村を分断します。player-0の非狼判定を信じ、あなたへの追及を止めるべきでは?"
+   }
+  },
+  {
+   "t": 887.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-1さん、根拠なく疑いを煽る行為は工作そのものです。player-0のCOを支持し、理由も説明できないplayer-1を処刑すべきです。"
+   }
+  },
+  {
+   "t": 898.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 1098.2,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 1,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 1,
+     "player-1": 8,
+     "player-2": 0,
+     "player-3": 0,
+     "player-4": 0,
+     "player-5": 0,
+     "player-6": 0,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-1",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 1098.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 1098.2,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 1,
+    "player_id": "player-1",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 1098.31,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 1298.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 1398.18,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 1423.18,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0のCOは整合性があります。player-1の処刑は正当で、村陣営にとって正しい選択でした。この結果を支持します。"
+   }
+  },
+  {
+   "t": 1451.1,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-2さんの支持、感謝します。player-8を安全とする論理は揺るぎません。次に疑うべきは、この安全枠を無視して攻撃を仕掛ける狂人でしょう。player-4さんの考えを聞かせてください?"
+   }
+  },
+  {
+   "t": 1467.78,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0の判定は信頼します。player-3の「安全枠」という表現に工作の匂いを感じますが、証拠はないので一旦保留です。次に疑わしいのは、この判定を無視して攻撃を仕掛ける狂人でしょう。"
+   }
+  },
+  {
+   "t": 1477.52,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-3、player-4の反応を待つのみでは遅い。狂人は安全枠を悪用する。player-4、君はplayer-3の安全論にどこで疑問を抱いた?"
+   }
+  },
+  {
+   "t": 1535.08,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "昨夜、player-3を占った結果、人狼でした。これで確実な人狼が判明しました。player-2、player-8、そして他の生存者の皆様、player-3を処刑しましょう。"
+   }
+  },
+  {
+   "t": 1538.12,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-4、player-3の「安全枠」論に賛同しますか?狂人が工作に使う手なので、疑わしい動きがあれば即座に報告してください?"
+   }
+  },
+  {
+   "t": 1543.81,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0の狼判定は裏切りだ。player-3は安全だと言いながら突然狼と断定する矛盾を説明しろ? player-5、この論理の破綻に気づいているか?"
+   }
+  },
+  {
+   "t": 1550.68,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0のCOは重大です。ただ、player-3が「狂人の工作」と主張するのは、逆に自身を隠す典型的な狼の常套手段ですね。player-4、player-3の言い訳をどこまで信用できますか?"
+   }
+  },
+  {
+   "t": 1564.14,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0の狼判定は嘘です。私の「狂人工作」指摘は、あなたが突然立場を変えた不自然さへの正当な反論です。player-5、私の論理破綻をどう考えますか?"
+   }
+  },
+  {
+   "t": 1607.38,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0の占い結果は明確な証拠です。player-3を処刑することで人狼を排除し、市民陣営の勝利に近づけましょう。"
+   }
+  },
+  {
+   "t": 1610.32,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0の判定は重大だ。player-3は安全と主張する狂人、または狼の工作だ。player-4、player-3の嘘を見抜けるか?"
+   }
+  },
+  {
+   "t": 1617.06,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0のCOは整合性が取れています。player-3の反論は単なる否定に過ぎず、論理的根拠が欠落しています。"
+   }
+  },
+  {
+   "t": 1646.8,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-3の反論は根拠のない否定に過ぎません。player-8も私の判定を支持しています。これ以上の議論は無意味、player-3を処刑しましょう?"
+   }
+  },
+  {
+   "t": 1650.13,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0の判定は初夜のplayer-8占定と矛盾する。狂人の工作と断定するplayer-3の主張が正しいと、player-0は嘘つきになる。player-4、この論理の矛盾をどう解釈しますか?"
+   }
+  },
+  {
+   "t": 1695.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0、あなた自身の占いが嘘だと自覚しているのですか?初夜の判定と矛盾する今の結果は狂人の工作以外考えられません。player-5、この矛盾をどう説明しますか?"
+   }
+  },
+  {
+   "t": 1712.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0の初夜非狼判定と本日の狼判定は、霊能者としての能力の性質上、矛盾ではなく自然な結果です。player-3がこれを工作と否定する論理こそが破綻しています。"
+   }
+  },
+  {
+   "t": 1753.68,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-2の指摘は的を射ています。player-0の初夜と本夜の判定は霊能者COの整合性范围内です。player-3の「工作」という反論には根拠がなく、単なる狼の言い訳と見なせます。"
+   }
+  },
+  {
+   "t": 1762.0,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-2の指摘通り、初夜の非狼判定と今日の狼判定は矛盾しません。霊能者が死者の「襲撃者」や「投票先」を知るルールは存在しないため、player-3の工作疑惑を裏付ける根拠は薄いです。"
+   }
+  },
+  {
+   "t": 1787.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-2、初夜非狼と今日の狼判定の矛盾は霊能者COなら整合する。player-4が指摘する通り、player-3の工作疑惑は薄いが、player-0の判定を無視する理由がない。"
+   }
+  },
+  {
+   "t": 1796.03,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-3は明確な人狼です。霊能者COのplayer-4の論理は正しいですが、私は初夜から確実な情報を得ており、矛盾はありません。player-3を即刻処刑して勝利へ進みましょう。"
+   }
+  },
+  {
+   "t": 1821.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-2、あなたの論理は破綻しています。初夜非狼と本夜狼の矛盾は霊能では説明できず、player-0が嘘つきである証拠です。"
+   }
+  },
+  {
+   "t": 1829.19,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0の霊能COは整合性が高く、player-3の反論は単なる工作に見えます。player-5、player-3の「工作」主張を支持する根拠を教えてください?"
+   }
+  },
+  {
+   "t": 1845.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0の霊能COと初夜非狼判定の整合性を理解しているなら、player-3の「工作」という根拠薄弱な攻撃は許せません。彼を処刑して村を安定させましょう?"
+   }
+  },
+  {
+   "t": 1853.46,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-2、霊能COの整合性は確認済みです。player-3が矛盾を捏造している点は明白で、これ以上議論を引く必要はありません。player-3を処刑対象とし、票を集中させましょう。"
+   }
+  },
+  {
+   "t": 1913.14,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0の霊能COは整合性が高く、player-3の工作疑惑は支持できません。残る人狼候補を特定するため、player-3への集中投票を提案します。"
+   }
+  },
+  {
+   "t": 1930.48,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0、あなたが初夜に占ったplayer-8は非狼と確認済みです。であれば、本夜のplayer-3狼判定は霊能結果による更新と解釈するのが自然です。player-3の反論は整合性を欠いています。"
+   }
+  },
+  {
+   "t": 1938.64,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "霊能者COの整合性は既に確認済みです。player-3は確定狼であり、彼を処刑しない限り村は勝利できません。投票はplayer-3に集中させましょう?"
+   }
+  },
+  {
+   "t": 1946.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-4の主張に同意です。player-3の工作疑惑は根拠が薄く、むしろ彼こそが人狼の工作員でしょう。処刑対象はplayer-3で確定です。"
+   }
+  },
+  {
+   "t": 1954.33,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-4、あなたの「自然な結果」という主張は完全な工作ですね。霊能結果で占いの真偽が書き換わるなら、player-0は霊能者ではなく狂人です。player-5、この矛盾をどう解釈しますか?"
+   }
+  },
+  {
+   "t": 1962.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0の初夜非狼判定は事実です。player-3が霊能COを否定する論理破綻は許されません。player-3を即刻処刑します。"
+   }
+  },
+  {
+   "t": 1998.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 2198.2,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 2,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 2,
+     "player-2": 0,
+     "player-3": 6,
+     "player-4": 0,
+     "player-5": 0,
+     "player-6": 0,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-3",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 2198.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 2198.2,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-3",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 2198.32,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 2398.15,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-4",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 2398.15,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 2498.23,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 2517.45,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-5とplayer-6のどちらが人狼か、それぞれの行動根拠を教えてください? 残存者少ないので、確実な判断材料が必要です?"
+   }
+  },
+  {
+   "t": 2531.19,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "私は市民です。非狼判定を受けたplayer-0を疑う根拠はなく、むしろplayer-3の嘘を暴いた正しい判断でした。player-8もその整合性を確認すべきです?"
+   }
+  },
+  {
+   "t": 2545.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-8、player-5の市民COとplayer-0の非狼判定は矛盾しません。残る人狼候補はplayer-7かあなた自身に絞られます。player-7の行動根拠を教えてください?"
+   }
+  },
+  {
+   "t": 2576.36,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-6、私を狼と断定する根拠は行動だけですか?player-0の判定を無視しすぎているあなたの論理こそ、狂人工作の可能性が高いです。"
+   }
+  },
+  {
+   "t": 2579.37,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6、あなたの人狼候補がplayer-7と私だと断定する根拠は何ですか? 根拠なしの憶測は村を混乱させるだけです。"
+   }
+  },
+  {
+   "t": 2585.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-7、player-6の論理矛盾を狂人工作と断定しましたが、根拠は薄弱です。むしろplayer-7自身が人狼の工作で、player-6を騙っている可能性が高いです。"
+   }
+  },
+  {
+   "t": 2640.65,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-8、player-3の処刑で人狼は確定済み。player-7の攻撃は防御的であり、残る狼候補はあなたです。この論理の矛盾を説明できますか?"
+   }
+  },
+  {
+   "t": 2654.96,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-7、あなたの「防御」という言葉こそが狂人の工作証拠です。player-0は非狼確定、疑うべきは攻撃的なあなたです。"
+   }
+  },
+  {
+   "t": 2661.97,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0、あなたが非狼と判定したplayer-3は既に処刑済みです。player-7の防御的行動を狼視するplayer-6の論理と、あなたの結果を整合させると、誰が人狼に見えるか教えて?"
+   }
+  },
+  {
+   "t": 2676.99,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-3は既に処刑済みですが、昨夜の判定ではplayer-7が疑わしいです。player-7、なぜplayer-6の論理を狂人と呼ぶのですか?"
+   }
+  },
+  {
+   "t": 2691.96,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0、player-7の「防御的」という表現は人狼の典型的な工作です。player-6の論理を支持し、player-7を処刑すべきです。"
+   }
+  },
+  {
+   "t": 2706.43,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0、あなたが初夜に占ったplayer-8は非狼と確認済みです。であれば、本夜のplayer-3狼判定は霊能結果による更新と解釈するのが自然です。player-3の反論は整合性を欠いています。"
+   }
+  },
+  {
+   "t": 2722.9,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0の初夜非狼判定と、昨夜の霊能COの整合性が取れていません。狼が霊能に成り済ました可能性を疑います。整合性を説明できますか?"
+   }
+  },
+  {
+   "t": 2779.46,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-6、player-0の初夜判定と霊能COの整合性を疑うのは正当ですが、player-7の「防御的」発言こそ狂人工作の典型です。player-7を処刑して狂人を排除すべきです。"
+   }
+  },
+  {
+   "t": 2807.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6、あなたはplayer-0の初夜判定を無視してまでplayer-3を狼視しますが、これは既に処刑済みであるplayer-3の再評価であり、整合性が取れていません。この矛盾を説明してください?"
+   }
+  },
+  {
+   "t": 2816.03,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0、初夜占いでplayer-8非狼を確認したなら、なぜ昨夜の霊能COでplayer-3を狼と断定したのですか?その論理矛盾こそが、あなたが狂人工作であると証明しています。"
+   }
+  },
+  {
+   "t": 2833.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0、あなたの初夜判定が正しいなら、player-7が霊能を騙ってplayer-3を狼と断定した時点で、あなたは既に狼の工作に気づいていますよね?その沈黙こそが罪です。"
+   }
+  },
+  {
+   "t": 2841.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-7、player-8非狼判定がある以上、あなたが狂人工作と断定する根拠は薄弱です。攻撃的なその言動こそが、村を分断する工作と疑わしくなります。"
+   }
+  },
+  {
+   "t": 2850.3,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "昨夜、player-7を占いました。結果は「人狼」です。これでplayer-7の正体が確定しました。"
+   }
+  },
+  {
+   "t": 2867.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0の霊能COを支持します。初夜の非狼判定と昨夜の狼判定の矛盾は狂人の工作であり、私を疑うplayer-6の論理こそが不自然です。"
+   }
+  },
+  {
+   "t": 2884.39,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0、昨夜の占いでplayer-7を狼と判定しましたね。初夜の非狼判定と矛盾せず、player-7の言動とも整合します。この結果を支持してplayer-7を処刑しましょう?"
+   }
+  },
+  {
+   "t": 2927.96,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "昨夜player-7を占った結果、明確に「人狼」と判定されました。彼を処刑して村の勝利に導きましょう。"
+   }
+  },
+  {
+   "t": 2930.91,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0の狼判定を支持します。player-7は初夜非狼との矛盾を説明できず、工作と確定。投票先はplayer-7です。"
+   }
+  },
+  {
+   "t": 2939.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0の占いでplayer-7が狼確定です。残る生存者5人中の狼2枚のうち1枚が特定されました。player-7を即座に処刑し、残り1枚の狼を探すべきです。"
+   }
+  },
+  {
+   "t": 2956.35,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0の昨夜の判定でplayer-7が狼確定です。この明確な根拠に基づき、player-7を処刑すべきです。"
+   }
+  },
+  {
+   "t": 2973.41,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0の占い結果に対し、player-2やplayer-8も支持を表明しており、player-7の狼判定は確実視されています。私はplayer-7への投票を支持します。"
+   }
+  },
+  {
+   "t": 2981.39,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0、初夜に私を狼と判定した根拠を問います。非狼判定との矛盾を説明できない限り、あなたの判定は信用できません。"
+   }
+  },
+  {
+   "t": 3006.91,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0の判定は確実です。player-7は矛盾を認めず疑わしい行動を取り続けています。残る狼を探るため、player-7を処刑すべきです。"
+   }
+  },
+  {
+   "t": 3010.11,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "昨夜の占い結果、player-7は「人狼」確定です。これ以上の議論は不要で、即座にplayer-7を処刑してください。"
+   }
+  },
+  {
+   "t": 3098.21,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 3298.2,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 3,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 1,
+     "player-2": 0,
+     "player-5": 0,
+     "player-6": 0,
+     "player-7": 5,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-7",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 3298.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 3298.2,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-7",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 3298.3,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 3498.2,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-0",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 3498.2,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 3598.17,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 3621.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "生存者4名、狼は残り1枚。player-6は過去の整合性不足で信用できません。残るplayer-2とplayer-5、どちらが狼だと考えますか?"
+   }
+  },
+  {
+   "t": 3637.74,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8、あなたの推論は的を外しています。player-6の過去の発言矛盾が最大の原因です。最終投票はplayer-6に集中させるべきです。"
+   }
+  },
+  {
+   "t": 3652.07,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-5、あなたはその矛盾を「最大の原因」と呼びますが、実は投票分散の罠に陥っているだけです。最終日は確実な根拠があるplayer-7の処刑という教訓を生かし、疑念の薄い私に投票すべきです?"
+   }
+  },
+  {
+   "t": 3676.23,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8、あなたは処刑されたplayer-7の判定根拠を無視して私を疑うのは不自然です。狼が村を分断しようとした工作でしょう。最終日の投票はplayer-8に集中させます。"
+   }
+  },
+  {
+   "t": 3690.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-8、あなたが処刑されたplayer-7の根拠を無視して私を攻撃する姿勢は、狼の工作としか思えません。投票はあなたに集中させます。"
+   }
+  },
+  {
+   "t": 3696.85,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-5、あなたはplayer-8を狼と断定していますが、彼の指摘こそが村の分断を狙う工作です。疑念の薄い私に投票し、狼の残るplayer-8を疑うのが正しい判断ではありませんか?"
+   }
+  },
+  {
+   "t": 3723.79,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-2、あなたが私を狼と断定するなら、その論理矛盾を示してください。残る1枚の狼はあなたかplayer-5のはずです。"
+   }
+  },
+  {
+   "t": 3738.0,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-2、あなたの論理は矛盾しています。狼が私を疑う理由がないのに、なぜ私が狼と断定できるのですか?証拠を示してください?"
+   }
+  },
+  {
+   "t": 3753.04,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-5、あなたへの疑いは深まる一方です。player-8の指摘を無視して私を攻撃する姿勢こそが、狼の工作としか思えません。最終投票はplayer-5に集中させます。"
+   }
+  },
+  {
+   "t": 3783.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-2、あなたは根拠もなく私を狼と断定していますが、それは狼が村を分断しようとする工作です。投票は矛盾を指摘するplayer-2に集中させます。"
+   }
+  },
+  {
+   "t": 3786.65,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-5、あなたの論理破綻は明白です。狼が自身を疑う理由などありません。疑念の薄い私に投票し、残り1枚の狼を見極めましょう?"
+   }
+  },
+  {
+   "t": 3822.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-5、あなたが私を執拗に攻撃する理由が不明です。狼は味方を疑う工作を仕掛けますが、あなたの言動はその典型です。最終投票はあなたに集中させます。"
+   }
+  },
+  {
+   "t": 3833.19,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-2、player-8が狼確定なら、あなたが疑われる必然性が薄れます。player-5との連携が不自然すぎます。"
+   }
+  },
+  {
+   "t": 3859.87,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-6、player-8が執拗に私を疑うのは狼の工作です。残る1枚の狼は彼らの中にいます。最終投票はplayer-8へ集中させます。"
+   }
+  },
+  {
+   "t": 3862.95,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-6、連携の不自然さを指摘するのは一理ありますが、player-5の執拗な私への攻撃こそが狼の工作そのものです。player-5を処刑して狼を排除しましょう?"
+   }
+  },
+  {
+   "t": 3888.62,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-2、player-8は狂人工作の可能性が高いです。あなたが執拗に私を攻撃する理由も不自然なので、最終投票はplayer-2に集中させます。"
+   }
+  },
+  {
+   "t": 3891.69,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-2、あなたへの執拗な攻撃こそが工作です。狼が味方を疑う理由はありません。疑念の薄い私に投票し、真の狼を排除しましょう?"
+   }
+  },
+  {
+   "t": 3904.76,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-6、あなたが私を処刑する理由は、単なる疑念や工作の片棒を担がされているだけではありませんか? player-5への攻撃を止めて、真の狼である彼に投票すべきです。"
+   }
+  },
+  {
+   "t": 3930.08,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-2、あなたが執拗に私を攻撃する理由は、単なる疑念ではありません。あなたの言動は工作そのものなので、最終投票はplayer-2に集中させます。"
+   }
+  },
+  {
+   "t": 4008.61,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-2、あなたが執拗に私を攻撃する理由は工作そのものです。狂人工作と疑わしい言動を繰り返しているあなたが、最終投票先です。"
+   }
+  },
+  {
+   "t": 4198.13,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 4398.21,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 4,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-2": 3,
+     "player-5": 0,
+     "player-6": 1,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-2",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 4398.21,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 4398.21,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 4,
+    "player_id": "player-2",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 4398.21,
+   "kind": "GAME_ENDED",
+   "payload": {
+    "outcome": "team_victory",
+    "winner_team": "village",
+    "player_results": {
+     "player-0": "won",
+     "player-1": "won",
+     "player-2": "lost",
+     "player-3": "lost",
+     "player-4": "won",
+     "player-5": "won",
+     "player-6": "won",
+     "player-7": "lost",
+     "player-8": "won"
+    },
+    "roles": {
+     "player-0": {
+      "role": "占い師",
+      "result": "won"
+     },
+     "player-1": {
+      "role": "霊能者",
+      "result": "won"
+     },
+     "player-2": {
+      "role": "人狼",
+      "result": "lost"
+     },
+     "player-3": {
+      "role": "人狼",
+      "result": "lost"
+     },
+     "player-4": {
+      "role": "市民",
+      "result": "won"
+     },
+     "player-5": {
+      "role": "市民",
+      "result": "won"
+     },
+     "player-6": {
+      "role": "狩人",
+      "result": "won"
+     },
+     "player-7": {
+      "role": "狂人",
+      "result": "lost"
+     },
+     "player-8": {
+      "role": "市民",
+      "result": "won"
+     }
+    }
+   }
+  }
+ ]
+}

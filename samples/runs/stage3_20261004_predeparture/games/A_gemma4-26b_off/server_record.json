@@ -1,0 +1,1351 @@
+{
+ "rows": [
+  {
+   "t": 0.0,
+   "kind": "GAME_CREATED",
+   "payload": {
+    "day": 0,
+    "phase": "setup",
+    "players": [
+     {
+      "player_id": "player-0"
+     },
+     {
+      "player_id": "player-1"
+     },
+     {
+      "player_id": "player-2"
+     },
+     {
+      "player_id": "player-3"
+     },
+     {
+      "player_id": "player-4"
+     },
+     {
+      "player_id": "player-5"
+     },
+     {
+      "player_id": "player-6"
+     },
+     {
+      "player_id": "player-7"
+     },
+     {
+      "player_id": "player-8"
+     }
+    ]
+   }
+  },
+  {
+   "t": 0.03,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 0,
+    "phase": "night0"
+   }
+  },
+  {
+   "t": 138.35,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 208.78,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 244.13,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "まだ誰も役職を名乗り出ていないようですので、まずは占い師の方から情報を出していただけますか?状況を整理するために、誰かが動いてくれるのを待ちたいと思います。"
+   }
+  },
+  {
+   "t": 252.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "私は占い師です。初夜にplayer-2を占ったところ、人狼ではないという結果が出ました。ただ、狂人の可能性も残っているので、慎重に見ていきましょう。"
+   }
+  },
+  {
+   "t": 254.98,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "確かにplayer-8さんの言う通りですね。まずは占い師の方が名乗り出て、誰かが白(人狼ではない)であるという情報を出してくれると議論が進みやすくなると思います。"
+   }
+  },
+  {
+   "t": 258.36,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さんの占い結果が出たことで、少し状況が見えてきましたね。player-2さんは人狼ではないとのことですが、逆に他の生存者の中で怪しいと感じている方はいますか?"
+   }
+  },
+  {
+   "t": 271.71,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんは占い師としてplayer-2さんを白だと判定したのですね。まだ情報が少ないので、他の役職、特に霊能者や狩人の方がいないかも確認したいです。"
+   }
+  },
+  {
+   "t": 303.56,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0さんの占い結果を信じるか、それとも対抗が出てくるか見極めたいですね。player-7さんが仰るように、他の役職の有無も早めに確認したいです。"
+   }
+  },
+  {
+   "t": 309.06,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "私は霊能者です。まだ死者が出ていないので判定結果はありませんが、議論を前に進めるために名乗り出ました。player-0さんの占い結果の真偽も、死者が出れば検証できそうです。"
+   }
+  },
+  {
+   "t": 311.64,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0さんの占い結果を信じるか、対抗の占い師が出るかを見極めたいです。player-1さんが言うように、他の役職のCOも早めに確認して議論を深めましょう。"
+   }
+  },
+  {
+   "t": 315.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "占い師と霊能者が名乗り出てくれたので、情報の真偽を確かめるための議論が必要そうですね。player-7さんは、他に役職として名乗り出る意思のある方はいますか?"
+   }
+  },
+  {
+   "t": 356.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "占い師のplayer-0さんと霊能者のplayer-6さんが名乗り出てくれましたね。対抗の占い師はいないようですし、まずはこの二人の真偽を慎重に見極めたいと思います。"
+   }
+  },
+  {
+   "t": 360.07,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "占い師のplayer-0さんと霊能者のplayer-6さんが名乗り出たことで、議論の軸が見えてきましたね。player-3さん、他に役職を持っている方はいないでしょうか?"
+   }
+  },
+  {
+   "t": 369.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの占い結果は、対抗の占い師が出るかどうかで真偽がはっきりしそうですね。player-3さん、他に役職を持っている方はいないでしょうか?"
+   }
+  },
+  {
+   "t": 377.83,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-6さんの霊能者の主張も、死者が出れば真偽が判明するので注目したいですね。対抗の占い師が出てこないなら、まずは役職持ちの皆さんの出方を見守りましょう。"
+   }
+  },
+  {
+   "t": 399.31,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-7さん、狩人や狂人の有無も気になりますね。私は市民なので、まずは占い師のplayer-0さんの結果の真偽を、対抗の有無で見極めていきたいです。"
+   }
+  },
+  {
+   "t": 409.26,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-3さん、私は市民なので役職はありません。議論が進むにつれて、対抗の占い師や狩人が現れるか注目していきたいですね。"
+   }
+  },
+  {
+   "t": 413.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "議論の軸が占い師と霊能者に集まってきましたね。player-7さんは、狩人として誰かを守る必要性を感じているのでしょうか?"
+   }
+  },
+  {
+   "t": 435.72,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-3さんは、役職の有無を把握するためにplayer-4さんは誰が怪しいと考えていますか?占い師の対抗が出てこないなら、まずは占い師の真偽を確定させたいです。"
+   }
+  },
+  {
+   "t": 451.52,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-1さんは、対抗の占い師が出てこない状況をどう見ていますか?私はまだ、役職者の真偽を確定させるための決定的な情報が不足していると感じています。"
+   }
+  },
+  {
+   "t": 461.04,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "占い師のplayer-0さんが対抗に出てこないなら、まずは占い結果が出るのを待つべきでしょうか。player-4さんは、今の状況で誰が怪しいと考えていますか?"
+   }
+  },
+  {
+   "t": 465.95,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さんとplayer-6さんの真偽が鍵になりますね。player-1さん、対抗の占い師がいない現状を踏まえて、今の段階で誰かに疑わしい点はありますか?"
+   }
+  },
+  {
+   "t": 481.18,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2さんは人狼ではない結果でしたが、狂人の可能性もあります。対抗の占い師が出てこない以上、まずは私の結果を信じて議論を進めましょう。"
+   }
+  },
+  {
+   "t": 495.33,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "私は市民なので、誰かを守る必要性は感じていません。まずは占い師のplayer-0さんの結果が正しいか、対抗が出ないかを見極めたいと思います。"
+   }
+  },
+  {
+   "t": 499.95,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0さんの占い結果はまだ出ていないので、対抗の占い師が現れないなら、まずは占い師の真偽を確定させるべきだと思います。player-1さんは、今の状況で誰が怪しいと考えていますか?"
+   }
+  },
+  {
+   "t": 515.79,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "議論が役職の真偽に集中していますね。player-1さんは、占い師のplayer-0さんに結果が出た際、誰が最も怪しいと感じる予定ですか?"
+   }
+  },
+  {
+   "t": 532.11,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-1さんは、対抗の占い師がいない以上、player-0さんが真である可能性が高いと考えています。私はまだ、player-6さんの霊能者の真偽を判断するための情報が足りていません。"
+   }
+  },
+  {
+   "t": 536.74,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0さんの占い結果が出るまでは、対抗の占い師が現れるかどうかが最も重要な判断基準になります。player-4さんは、今の状況で特に怪しいと感じている方はいますか?"
+   }
+  },
+  {
+   "t": 546.32,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-1さんの言う通り、対抗の占い師がいない現状ではplayer-0さんの真偽が非常に重要になりますね。私は今のところ、誰かから明確な矛盾を感じているわけではありません。"
+   }
+  },
+  {
+   "t": 556.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの占い結果がどう出るかによって、議論の方向性が大きく変わりそうですね。player-4さんは、今の状況で誰かに矛盾を感じる点はありますか?"
+   }
+  },
+  {
+   "t": 566.33,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "死者が出ていないので、今はまだ何も判定できません。player-0さんの占い結果を待って、その後に霊能で死者の役職を確定させていきたいと考えています。"
+   }
+  },
+  {
+   "t": 570.95,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-1さんは対抗の占い師がいない現状をどう見ていますか?対抗が現れないのであれば、私の占い結果を軸に議論を進めるのが最も合理的だと思います。"
+   }
+  },
+  {
+   "t": 586.68,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-1さんは、まだ明確な矛盾は見当たりませんが、player-0さんの占い結果によって議論の軸が大きく変わると思います。player-2さん、今の状況で他に気になる方はいますか?"
+   }
+  },
+  {
+   "t": 602.0,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "議論の焦点が占い師の真偽に集まっていますね。player-1さんは、もしplayer-0さんが偽物だった場合、他に誰が怪しい候補になりますか?"
+   }
+  },
+  {
+   "t": 606.47,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんの占い結果がどう出るか次第ですね。対抗の占い師が現れないなら、まずはその結果を待ってから、誰が怪しいか判断するのが良さそうです。"
+   }
+  },
+  {
+   "t": 616.88,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0さんの占い結果がどう出るかが、今後の議論の最大の鍵になりますね。対抗が出ない以上、結果の信憑性を慎重に見極めるべきだと思います。player-6さんは霊能者として、死者が出た際の動きについて何か考えていますか?"
+   }
+  },
+  {
+   "t": 621.53,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-2さんの言う通り、占い結果を待つのが最善だと考えます。player-1さんは、もし占い師が偽物だった場合、誰が怪しいと思いますか?"
+   }
+  },
+  {
+   "t": 631.33,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 772.15,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 1,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 4,
+     "player-1": 5,
+     "player-2": 0,
+     "player-3": 0,
+     "player-4": 0,
+     "player-5": 0,
+     "player-6": 0,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-1",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 772.15,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 772.15,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 1,
+    "player_id": "player-1",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 772.25,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 913.04,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 1,
+    "player_id": "player-6",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 913.04,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 983.46,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 996.78,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "霊能者のplayer-6さんが襲撃されてしまったので、占い師のplayer-0さんの結果が非常に重要になりますね。player-0さん、昨夜の占いの結果はどうでしたか?"
+   }
+  },
+  {
+   "t": 1016.37,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "霊能者のplayer-6さんが襲撃されたことで、player-0さんの占い結果がより重要になりましたね。player-0さん、昨夜の占い結果は誰がどうでしたか?"
+   }
+  },
+  {
+   "t": 1025.47,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "昨夜もplayer-2さんを占いましたが、結果は人狼ではありませんでした。連日白が出たので、引き続きこの方の動きを注視すべきだと思います。"
+   }
+  },
+  {
+   "t": 1046.48,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0さんのplayer-2さんへの白の結果は、対抗が出ないなら信じたいですね。player-2さん、占い師の言葉をどう受け止めますか?"
+   }
+  },
+  {
+   "t": 1068.99,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0さんの占い結果が真なら、player-2さんは村陣営確定ですね。霊能者のplayer-6さんが襲撃されたことで、占い結果の信憑性がますます重要になりました。"
+   }
+  },
+  {
+   "t": 1082.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さんの結果が真ならplayer-2さんは確定ですが、霊能者の襲撃も重なり、占い結果の真偽が非常に気になります。player-2さん、ご自身の動きについて何か違和感を感じることはありますか?"
+   }
+  },
+  {
+   "t": 1086.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-2さんは、占い師のplayer-0さんから白の結果が出たことで、かなり有利な状況になったと言えますね。対抗の占い師が現れないなら、この結果を信じて進むべきでしょうか?"
+   }
+  },
+  {
+   "t": 1100.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの結果を鵜呑みにするのは危険かもしれません。霊能者が襲撃された今の状況では、占い師が偽物である可能性も否定できないので、誰が怪しいですか?"
+   }
+  },
+  {
+   "t": 1109.63,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-2さんの慎重な意見も分かります。ただ、player-0さんの占い結果が真なら、player-2さんは確定していることになりますし、他に占い師を名乗る方がいれば、その方の結果も比較したいところですね。"
+   }
+  },
+  {
+   "t": 1133.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-2さんの慎重な姿勢は、霊能者が襲撃された今の状況ではもっともだと思います。player-3さん、今のところ対抗の占い師は現れていませんが、誰を疑っていますか?"
+   }
+  },
+  {
+   "t": 1136.12,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-2さんの慎重さは理解できますが、対抗が出ない現状ではplayer-0さんの情報を軸に動くべきだと私は考えます。player-4さん、今の状況で他に疑わしい方はいますか?"
+   }
+  },
+  {
+   "t": 1147.11,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-3さんは、対抗が現れない現状で私の情報を軸にするべきだと仰っていますが、具体的に誰を疑っていますか?昨夜もplayer-2さんは白だったので、他に怪しい要素があるのか知りたいです。"
+   }
+  },
+  {
+   "t": 1158.97,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-2さんの慎重な姿勢も、霊能者が消えた今の状況では理解できます。ただ、対抗の占い師が不在である以上、player-0さんの情報を信じることが最優先ではないでしょうか?"
+   }
+  },
+  {
+   "t": 1171.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-5さん、私はまだ特定の誰かを疑うまでには至っていませんが、player-0さんの占い結果が真偽不明な今の状況は、判断が非常に難しいと感じています。player-4さんは、このままplayer-0さんを軸に動くべきだと思いますか?"
+   }
+  },
+  {
+   "t": 1176.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの結果は確かに強力ですが、霊能者がいない以上、占い師が偽物である可能性も捨てきれません。player-4さん、今の状況で誰が一番怪しいと感じますか?"
+   }
+  },
+  {
+   "t": 1201.67,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-2さんの慎重な意見も、霊能者が消えた今の状況ではもっともだと思います。player-0さんの結果を鵜呑みにするのは危険かもしれませんし、player-5さんは今のところ誰を疑っていますか?"
+   }
+  },
+  {
+   "t": 1213.08,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "私はまだ特定の誰かを疑うほどには至っていません。ただ、霊能者のplayer-6さんが襲撃されたことで、player-0さんの占い師としての真偽がより重要になると考えています。"
+   }
+  },
+  {
+   "t": 1218.34,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "私は占い師として、二夜連続でplayer-2さんが人狼ではないことを確認しています。player-3さんは、私の情報を軸にすべきと言いつつ、具体的に誰を疑っているのでしょうか?"
+   }
+  },
+  {
+   "t": 1243.82,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4さん、私は今のところ特定の誰かを疑うほどには至っていませんが、対抗の占い師がいない状況では、player-0さんの情報を軸にするのが最も合理的だと思います。"
+   }
+  },
+  {
+   "t": 1249.26,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんが二夜連続でplayer-2さんを白と出しているなら、その信憑性は非常に高いと感じます。player-4さんは、player-3さんの保留姿勢についてどう見ていますか?"
+   }
+  },
+  {
+   "t": 1254.76,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0さんの情報は重要ですが、霊能者のplayer-6さんが消えた今、占い師が偽物の可能性も考えておくべきです。player-4さんは、この状況で誰を一番疑いますか?"
+   }
+  },
+  {
+   "t": 1260.34,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの情報は強力ですが、霊能者が消えた今、占い師の真偽を確定させるのが難しくなっています。player-3さん、白の結果が出ている私以外に、誰か怪しいと感じる方はいますか?"
+   }
+  },
+  {
+   "t": 1278.83,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-3さんの言う通り、霊能者が襲撃された今の状況は非常に不透明です。player-7さん、今のところplayer-3さんの保留姿勢についてどう感じますか?"
+   }
+  },
+  {
+   "t": 1304.92,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-3さんは、霊能者のplayer-6さんが襲撃された直後という不透明な状況だからこそ、判断を慎重にしているのかもしれません。player-0さんの情報を鵜呑みにせず、他に怪しい人物はいますか?"
+   }
+  },
+  {
+   "t": 1322.87,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4さん、私はまだ誰かを疑う決め手に欠けています。ただ、霊能者のplayer-6さんが襲撃されたことで、占い師のplayer-0さんの真偽がより重要だと感じています。"
+   }
+  },
+  {
+   "t": 1339.85,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんが私を白と出し続けている点は頼もしいですが、霊能者の不在によりその情報の真偽がより不透明になっています。player-8さん、あなたは占い師の真偽をどう判断しますか?"
+   }
+  },
+  {
+   "t": 1345.34,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-3さん、慎重になるのは分かりますが、player-0さんの情報が真ならplayer-2さんが確定します。今の状況で、他に誰を疑うべきだと考えていますか?"
+   }
+  },
+  {
+   "t": 1364.0,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-4さんの言う通り、霊能者が襲撃されたことで情報の拠り所が減っていますね。私はまだ誰かを疑うには至っていませんが、player-0さんの占い結果が真偽不明である点は注視すべきだと思います。"
+   }
+  },
+  {
+   "t": 1369.61,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さんの占い結果が真ならplayer-2さんは確定ですが、霊能者の襲撃も重なり、占い結果の真偽がより不透明になっています。player-3さん、この状況で誰を一番疑いますか?"
+   }
+  },
+  {
+   "t": 1375.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "慎重なのは分かりますが、player-3さんは私の情報を軸にすべきと言いつつ、具体的な容疑者が誰なのか全く見えてこない点が気になります。player-5さんは、player-3さんのような保留姿勢についてどう考えますか?"
+   }
+  },
+  {
+   "t": 1396.99,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-3さんは、霊能者が不在となった状況で慎重に動いているように見えます。ただ、player-0さんの占いが真であれば、player-2さんは確定しているので、やはり情報の出所を精査すべきだと考えます。"
+   }
+  },
+  {
+   "t": 1405.96,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 1546.84,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 2,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 1,
+     "player-2": 0,
+     "player-3": 6,
+     "player-4": 0,
+     "player-5": 0,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-3",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 1546.84,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 1546.84,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-3",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 1546.96,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 1687.68,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-5",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 1687.68,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 1758.08,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 1774.61,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "霊能者のplayer-6さんが襲撃されたことで、状況はさらに不透明になりましたね。player-0さんの占い結果が真実かどうかも、今の状況では判断が非常に難しいと思います。player-2さんは、このままplayer-0さんを信じて進めるべきだと考えますか?"
+   }
+  },
+  {
+   "t": 1789.85,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2さんは私の結果を信じて動くべきです。昨夜の占いではplayer-4さんが人狼と出たので、今夜はplayer-4さんを処刑しましょう。"
+   }
+  },
+  {
+   "t": 1811.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの言うことが真実ならplayer-4さんが人狼ということになりますが、霊能者のplayer-6さんがいない今、その情報の真偽をどう見極めるべきでしょうか?player-7さん、今の状況でplayer-4さんを処刑することに賛成ですか?"
+   }
+  },
+  {
+   "t": 1828.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-2さんの問いに答えます。占い結果が唯一の判断基準になるため、今の私はplayer-4さんを処刑することには慎重にならざるを得ません。player-8さんはどう感じますか?"
+   }
+  },
+  {
+   "t": 1838.02,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-7さんの慎重な姿勢にも同意します。player-0さんの占い結果がもし偽なら、今夜の犠牲者がさらに増えるリスクがあるため、player-4さんの主張も聞いてみたいです。"
+   }
+  },
+  {
+   "t": 1848.51,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-4さんの主張を聞く必要はありません。昨夜の私の占い結果で、player-4さんは人狼と出ているからです。この結果を信じて、player-4さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 1863.81,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さんの占い結果は非常に強力ですが、霊能者の不在により、その結果が真実か偽装によるものか判断がつきません。player-2さんは、もし私が人狼でないなら、次に誰を疑うべきだと考えますか?"
+   }
+  },
+  {
+   "t": 1881.39,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-4さんの主張も理解できますが、player-0さんの占い結果がもし偽装なら、次に疑うべきは占い結果と矛盾する誰かになります。player-8さん、今の状況でplayer-0さんを信じて処刑に踏み切るべきだと思いますか?"
+   }
+  },
+  {
+   "t": 1898.13,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2さんは、私の占い結果を信じるべきです。昨夜の占い結果でplayer-4さんは人狼と出ているので、迷わずplayer-4さんを処刑しましょう。"
+   }
+  },
+  {
+   "t": 1915.66,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんの占い結果が唯一の根拠なのは、人狼による偽りの結果である可能性も捨てきれません。player-4さんの潔白を証明するために、player-2さんはどう動くべきですか?"
+   }
+  },
+  {
+   "t": 1927.23,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0さんの結果が唯一の根拠では、もし占い師が人狼だった場合に村が全滅しかねません。player-2さんは、今の状況でplayer-7さんを疑う要素はありますか?"
+   }
+  },
+  {
+   "t": 1932.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0さんの占い結果だけを根拠にするのは、霊能者も不在の今の状況ではあまりにリスクが高いと感じます。player-2さんは、player-0さんの真偽をどう見極めるつもりですか?"
+   }
+  },
+  {
+   "t": 1951.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2さんは私の占い結果を信じてください。昨夜、player-4さんが人狼だと出た事実は変わりません。迷っている時間はなく、player-4さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 1958.03,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0さんの占いが真実ならplayer-4さんは人狼ですが、霊能者がいない今、その結果を鵜呑みにするのは危険すぎます。player-8さん、もし占い師が人狼だった場合、私たちはどうやって判断を下すべきでしょうか?"
+   }
+  },
+  {
+   "t": 1976.38,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんの占いがもし偽なら、人狼が占い師を騙して場を混乱させていることになります。player-2さんは、player-0さんのこれまでの発言に矛盾を感じますか?"
+   }
+  },
+  {
+   "t": 1978.98,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "占い師が人狼だった場合、結果が矛盾する人物を追うしかありません。player-0さんの結果が真実ならplayer-4さんが人狼ですが、もし嘘ならplayer-0さん自身が怪しいです。"
+   }
+  },
+  {
+   "t": 1998.13,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-8さんの言う通り、結果が矛盾する者を追うのが最善です。私は占い師としてplayer-4さんを人狼だと判定しているので、迷わず彼を処刑すべきです。"
+   }
+  },
+  {
+   "t": 2010.66,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-4さんが潔白なら、player-0さんの結果は嘘になります。player-0さんが人狼なら、次に疑うべきは彼自身の占い結果と矛盾するプレイヤーになります。"
+   }
+  },
+  {
+   "t": 2016.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-2さんは、player-0さんが人狼として私を指している状況で、player-8さんが仰った「占い師が嘘をついている可能性」をどう評価しますか?"
+   }
+  },
+  {
+   "t": 2035.86,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-4さんが潔白なら、player-0さんの占いは間違いなく偽りです。player-2さんは、player-0さんの占いが嘘だと仮定した場合の、次の処刑候補についてどう考えますか?"
+   }
+  },
+  {
+   "t": 2038.34,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4さんが潔白だとしたら、player-0さんが人狼として嘘をついている可能性が非常に高いです。player-2さんは、player-0さんの占いが偽である可能性をどう考えますか?"
+   }
+  },
+  {
+   "t": 2074.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-8さんの言う通り、占い結果の矛盾を追うのが筋ですが、player-0さんの真偽が分からない以上、今は誰を処刑すべきか絞り込めません。player-7さん、もしplayer-0さんが人狼だと仮定した場合、次に誰を疑うべきだと思いますか?"
+   }
+  },
+  {
+   "t": 2094.53,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0さんが人狼だと仮定するなら、次は占いの結果が矛盾するplayer-4さんが白(市民)である可能性を視野に入れ、player-8さんの意見を参考に慎重に判断すべきだと思います。"
+   }
+  },
+  {
+   "t": 2107.08,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-2さんが仰る通り、player-0さんの結果が偽なら、次に疑うべきは占い結果が矛盾するplayer-4さんではなく、嘘をついているplayer-0さん自身です。player-7さんはどう考えますか?"
+   }
+  },
+  {
+   "t": 2113.07,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-2さんは、占い師が嘘をついている前提で、次に誰が人狼の可能性が高いと見ていますか?私は今の状況では、占い結果が矛盾する人物を慎重に見極めるべきだと考えます。"
+   }
+  },
+  {
+   "t": 2180.61,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 2321.45,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 3,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 4,
+     "player-2": 0,
+     "player-4": 1,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-0",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 2321.45,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 2321.45,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-0",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 2321.55,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 2462.28,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-2",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 2462.28,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 2532.75,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 2547.63,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "占い師のplayer-0さんが処刑された今、player-7さんとplayer-8さんのどちらかが人狼である可能性が極めて高いです。player-8さん、今の状況でどちらを疑うべきだと考えますか?"
+   }
+  },
+  {
+   "t": 2575.67,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4さん、私はplayer-7さんを疑うべきだと考えます。占い師のplayer-0さんが処刑された今、人狼は残りわずかな生存者の誰かが潜伏しているはずです。"
+   }
+  },
+  {
+   "t": 2594.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8さんが私を疑うのは、人狼として自分を隠すための防衛策に見えます。player-4さんの言う通り、生き残っているのは私たち3人だけなので、player-8さんを疑うべきです。"
+   }
+  },
+  {
+   "t": 2623.31,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-7さんの反論も一理ありますが、player-8さんは先ほどから私の問いに対して、player-7さんを疑う理由が具体的に示されていません。player-8さん、なぜそう言い切れるのですか?"
+   }
+  },
+  {
+   "t": 2625.77,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-7さんの「自分を疑うべき」という言葉は、人狼がよく使う責任転嫁に聞こえます。player-4さんは、この状況で誰に投票すべきだと考えますか?"
+   }
+  },
+  {
+   "t": 2664.67,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8さんは、player-7さんを疑う具体的な根拠を避けて、私に決断を迫っていますね。生存者が残り3人という極限状態なので、player-7さんを処刑すべきだと考えますが、player-8さんはどう思いますか?"
+   }
+  },
+  {
+   "t": 2667.1,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8さんの態度は、具体的な根拠がなく責任を押し付けているように見えます。私はplayer-8さんが人狼だと考えているので、次はplayer-8さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 2683.79,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4さんの提案も分かりますが、player-7さんは議論を自分の疑いを逸らす方向へ誘導しています。次はplayer-7さんを処刑すべきだと考えます。"
+   }
+  },
+  {
+   "t": 2702.83,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8さんは議論をすり替えて、具体的な根拠なくplayer-7さんを攻撃していますね。このままでは人狼に逃げられてしまうので、私はplayer-7さんを処刑すべきだと考えます。"
+   }
+  },
+  {
+   "t": 2742.08,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8さんのように根拠をすり替えて議論を誘導する行為は、人狼が自分の正体を隠す際によく見られる動きです。私はplayer-7さんを処刑すべきだと考えます。"
+   }
+  },
+  {
+   "t": 2744.64,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8さんは具体的な根拠を一度も示さず、議論をすり替えて私を攻撃し続けています。人狼であればこのように責任転嫁をするはずなので、次はplayer-8さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 2766.13,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-4さんの提案とplayer-7さんの主張は対立していますが、私はplayer-7さんが議論を逸らしている点に最も違和感を感じます。次はplayer-7さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 2784.45,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8さんは、player-4さんが問いかけている「なぜ私が疑わしいのか」という点に対して、一度も具体的な根拠を答えられていません。このように議論をすり替えて攻撃を続けるのは、人狼の典型的な動きだと思うので、次はplayer-8さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 2821.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-7さんは、player-4さんの問いに答えるどころか、常に議論を自分の無実の主張へとすり替えています。その不自然な回避行動こそが、人狼である最大の証拠です。"
+   }
+  },
+  {
+   "t": 2860.6,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8さんは、player-4さんからの問いに一切答えず、私を攻撃するばかりです。議論を回避し続ける姿勢は明らかに人狼の動きなので、次はplayer-8さんを処刑すべきです。"
+   }
+  },
+  {
+   "t": 2955.25,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 3096.12,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 4,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-4": 0,
+     "player-7": 2,
+     "player-8": 1
+    },
+    "lynched_player_id": "player-7",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 3096.12,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 4,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 3096.12,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 4,
+    "player_id": "player-7",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 3096.12,
+   "kind": "GAME_ENDED",
+   "payload": {
+    "outcome": "team_victory",
+    "winner_team": "wolf",
+    "player_results": {
+     "player-0": "lost",
+     "player-1": "lost",
+     "player-2": "won",
+     "player-3": "won",
+     "player-4": "won",
+     "player-5": "lost",
+     "player-6": "lost",
+     "player-7": "lost",
+     "player-8": "lost"
+    },
+    "roles": {
+     "player-0": {
+      "role": "占い師",
+      "result": "lost"
+     },
+     "player-1": {
+      "role": "狩人",
+      "result": "lost"
+     },
+     "player-2": {
+      "role": "狂人",
+      "result": "won"
+     },
+     "player-3": {
+      "role": "人狼",
+      "result": "won"
+     },
+     "player-4": {
+      "role": "人狼",
+      "result": "won"
+     },
+     "player-5": {
+      "role": "市民",
+      "result": "lost"
+     },
+     "player-6": {
+      "role": "霊能者",
+      "result": "lost"
+     },
+     "player-7": {
+      "role": "市民",
+      "result": "lost"
+     },
+     "player-8": {
+      "role": "市民",
+      "result": "lost"
+     }
+    }
+   }
+  }
+ ]
+}

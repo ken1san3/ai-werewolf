@@ -8,6 +8,7 @@ import pytest
 
 from ai_agent.replay import build_replays, discover_games, replace_player_ids
 from ai_agent.replay_data import load_replay
+from ai_agent.replay_export import export_public_game
 from ai_agent.replay_ui import render_replay
 
 
@@ -335,3 +336,38 @@ def test_existing_game_renders_html_without_running_model(existing_recorded_game
     assert embedded["events"] == data["events"]
     assert any(event["kind"] == "GAME_ENDED" for event in embedded["events"])
     assert "<html" in html.lower()
+
+
+def test_export_writes_only_what_the_replay_shows(tmp_path):
+    source = _record(tmp_path / "source", secrets=True)
+    destination = tmp_path / "exported" / "games" / "public_copy"
+    export_public_game(source, destination)
+    assert sorted(path.name for path in destination.iterdir()) == ["checks.json", "server_record.json"]
+    exported = "".join(path.read_text(encoding="utf-8") for path in destination.iterdir())
+    assert all(secret not in exported for secret in SECRETS)
+    assert set(json.loads((destination / "server_record.json").read_text(encoding="utf-8"))) == {"rows"}
+    assert load_replay(destination)["events"] == load_replay(source)["events"]
+
+
+def test_export_refuses_a_game_that_has_not_ended(tmp_path):
+    source = _record(tmp_path / "source", completed=False)
+    with pytest.raises(ValueError):
+        export_public_game(source, tmp_path / "exported")
+    assert not (tmp_path / "exported").exists()
+
+
+def test_committed_samples_rebuild_the_committed_replays(tmp_path):
+    samples = Path(__file__).resolve().parents[1] / "samples"
+    summary = build_replays(samples, output=tmp_path / "html")
+    assert summary["total"] == 4
+    assert summary["playable"] == 4
+    assert all(row["status"] == "完走" for row in summary["matches"])
+    for row in summary["matches"]:
+        # Checkouts use LF; Windows writes CRLF when it rebuilds the page.
+        built, committed = ((path / row["html"]).read_bytes().replace(b"\r\n", b"\n")
+                            for path in (tmp_path / "html", samples / "html"))
+        assert built == committed
+    for record in samples.rglob("server_record.json"):
+        data = json.loads(record.read_text(encoding="utf-8"))
+        assert set(data) == {"rows"}
+        assert {row["channel"] for row in data["rows"] if row["kind"] == "chat"} == {"public"}

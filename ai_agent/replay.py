@@ -75,6 +75,16 @@ def _game_date(directory, data):
         except ValueError:
             pass
     files = _source_files(directory)
+    saved = next((path for path in files if path.name == 'checks.json'), None)
+    if saved is not None:
+        # Exported samples carry their start time because a Git checkout
+        # does not keep the original file times.
+        try:
+            started = json.loads(saved.read_text(encoding='utf-8-sig')).get('started_at')
+            if isinstance(started, str):
+                return datetime.fromisoformat(started).timestamp()
+        except (OSError, ValueError, AttributeError):
+            pass
     # Saved files are written after the game. Subtract the recorded duration
     # instead of displaying their save time as the start of the game.
     saved = next((path for path in files if path.name == 'checks.json'), None)
@@ -114,7 +124,11 @@ def build_replays(root=ROOT, output=None, names_path=None):
     root = Path(root).resolve()
     output = Path(output) if output else root / 'runs/replays'
     output.mkdir(parents=True, exist_ok=True)
-    names_path = Path(names_path) if names_path else root / 'content/replay_names.yaml'
+    if names_path is None:
+        names_path = root / 'content/replay_names.yaml'
+        if not names_path.exists():
+            names_path = ROOT / 'content/replay_names.yaml'
+    names_path = Path(names_path)
     names = _read_names(names_path)
     teams = _team_names(root)
     shared = hashlib.sha256()
@@ -176,16 +190,20 @@ def build_replays(root=ROOT, output=None, names_path=None):
 
 def main():
     parser = argparse.ArgumentParser(description='公開情報だけの試合リプレイを作り、ブラウザで一覧を開きます。')
-    parser.parse_args()
+    parser.add_argument('--root', type=Path, default=ROOT,
+                        help='games/ と runs/*/games/ を探すフォルダ（例: samples）')
+    parser.add_argument('--output', type=Path, help='HTMLの出力先（既定: <root>/runs/replays）')
+    parser.add_argument('--no-open', action='store_true', help='ブラウザを開かない')
+    args = parser.parse_args()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
     try:
-        result = build_replays()
+        result = build_replays(args.root, args.output)
     except (OSError, ValueError) as error:
         parser.exit(1, f'リプレイの作成に失敗しました: {error}\n')
     print(f"試合 {result['total']}件 / 再生可能 {result['playable']}件 / 途中 {result['partial']}件 / 再生不可 {result['unavailable']}件")
     print(f"作成 {result['generated']}件 / 更新不要 {result['unchanged']}件\n一覧: {result['index']}")
-    if not webbrowser.open(result['index'].as_uri()):
+    if not args.no_open and not webbrowser.open(result['index'].as_uri()):
         print('ブラウザを自動で開けませんでした。一覧のHTMLを直接開いてください。')
 
 

@@ -1,0 +1,1322 @@
+{
+ "rows": [
+  {
+   "t": 0.0,
+   "kind": "GAME_CREATED",
+   "payload": {
+    "day": 0,
+    "phase": "setup",
+    "players": [
+     {
+      "player_id": "player-0"
+     },
+     {
+      "player_id": "player-1"
+     },
+     {
+      "player_id": "player-2"
+     },
+     {
+      "player_id": "player-3"
+     },
+     {
+      "player_id": "player-4"
+     },
+     {
+      "player_id": "player-5"
+     },
+     {
+      "player_id": "player-6"
+     },
+     {
+      "player_id": "player-7"
+     },
+     {
+      "player_id": "player-8"
+     }
+    ]
+   }
+  },
+  {
+   "t": 0.46,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 0,
+    "phase": "night0"
+   }
+  },
+  {
+   "t": 59.58,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 74.56,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 82.94,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "まだ初夜明けで占い結果も出ていませんね。今日は誰かが占い師を名乗るかもしれませんが、素直な市民として慎重に議論しましょう。"
+   }
+  },
+  {
+   "t": 83.75,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2 は初夜に占って人狼ではないことを確認しました。私は占い師です。今日も夜を越して村側で戦う仲間を求めています。"
+   }
+  },
+  {
+   "t": 84.66,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "占い師が出るか、あるいは霊能者が見てくるか、まずは夜明かりで何か起きなかったかを確認しましょう。"
+   }
+  },
+  {
+   "t": 86.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8、慎重なのは評価しますが、占い師が出たならその結果を先に確認すべきです。player-0、あなたは誰を占いましたか?結果が人狼なら即処刑候補にすべきです。"
+   }
+  },
+  {
+   "t": 92.38,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0、player-2 を占った結果はどうなりましたか?人狼なら即処刑すべきです。player-1 はまだ発言がありませんが、占い結果の確認を優先しましょう。"
+   }
+  },
+  {
+   "t": 96.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0 は player-2 を占ったと主張していますが、霊能者として player-2 の真偽を確認する必要があります。占い師の結果を待たず、まずは霊能の判定を行い、村全体の信頼を築くべきです。"
+   }
+  },
+  {
+   "t": 99.11,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0、占った結果が何だったか明言してください。結果が人狼なら即座に処刑すべきですが、曖昧な態度は怪しいです。霊能者の player-6、まずは player-0 の真偽を確認すべきですが、占い結果を優先しましょう。"
+   }
+  },
+  {
+   "t": 100.98,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0、占った相手を明言して結果を確認してください。曖昧な態度は信頼できません。player-6、霊能者の能力を使って player-0 の真偽をまず確認すべきです。"
+   }
+  },
+  {
+   "t": 103.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0、占った相手を具体的に名前と結果を明言してください。霊能者の player-6 がおっしゃる通り、曖昧な態度は信頼できません。"
+   }
+  },
+  {
+   "t": 105.2,
+   "kind": "CO_DECLARED",
+   "payload": {
+    "player_id": "player-0",
+    "claimed_role_id": "seer",
+    "comment": "player-2 は無実を確認済みです。人狼は player-8、player-7、player-6 のいずれかでしょう。結果を隠すなら偽りです。"
+   }
+  },
+  {
+   "t": 109.15,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0、占った相手と結果を具体的に言え。霊能者の player-6 も player-0 の真偽を確認する必要があるが、まずは明確な事実が欲しい。"
+   }
+  },
+  {
+   "t": 111.97,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0、占った相手と結果を具体的に言え。曖昧な態度は怪しいので、霊能者が確認する前に明確な情報を出すべきだ。"
+   }
+  },
+  {
+   "t": 119.16,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-0 は player-2 を占って無罪確認済み。霊能者 player-6 ならまず player-0 の真偽を占って確認すべきです。結果が人狼なら即座に処刑対象にしましょう。"
+   }
+  },
+  {
+   "t": 120.04,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0、具体的に誰を占い、結果は何だったのか明言してください。霊能者も待たずして、結果に基づき行動しましょう。"
+   }
+  },
+  {
+   "t": 124.2,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0 は player-2 を占って無実と断定しましたが、霊能者の player-6 が player-0 の真偽を確認する前に、占った相手と結果を明言すべきです。曖昧なまま信頼できません。"
+   }
+  },
+  {
+   "t": 125.63,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0 が player-2 を占って人狼ではないと言っていますが、霊能者である player-6 が player-0 の真偽をまず確認すべきです。占い師の真偽が不明なら、その後の結果も信頼できません。"
+   }
+  },
+  {
+   "t": 132.32,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0 は占った相手と結果を明言せず、霊能者 player-6 に真偽確認を依頼していますが、ここから何も出ないなら player-0 自身が疑われます。player-6、まずは player-0 の真偽を確認して結果を提示すべきです。"
+   }
+  },
+  {
+   "t": 133.6,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 が具体的に player-2 を占って無実だと主張しているが、霊能者の player-6 はまず player-0 の真偽を確認すべきです。占い師の根拠が曖昧なら、結果も疑わしいからです。"
+   }
+  },
+  {
+   "t": 137.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 が player-2 を占った結果が「人狼」ということなら、player-0 自身は人狼に票を合わせていいですが、無実なら player-6 が霊能者かどうかをまず確認すべきです。"
+   }
+  },
+  {
+   "t": 139.07,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-0、占った相手と結果を具体的に明言するよう求めます。曖昧なままでは信頼できません。霊能者 player-6 こそ、まず player-0 の真偽を確認すべきですが、その前に player-0 から明確な発表を期待します。"
+   }
+  },
+  {
+   "t": 140.63,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 が player-2 を占って無実と言っているが、霊能者である player-6 はまず player-0 の真偽を確認すべきだ。占った相手と結果を具体的に明言するまで、村全体は動けない。"
+   }
+  },
+  {
+   "t": 143.73,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0 は player-2 を占ったと主張していますが、霊能者 player-6 こそ player-0 の真偽を確認すべきです。結果が人狼なら即処刑しましょう。"
+   }
+  },
+  {
+   "t": 154.48,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0 は占った相手と結果を明言しないまま霊能者への確認を求め、この曖昧な態度は怪しい。霊能者の player-6 はまず player-0 の真偽を占って確認すべきだが、その前に player-0 が具体的な情報を発表するまで村全体は動けない。"
+   }
+  },
+  {
+   "t": 159.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0、占った相手と結果を具体的に明言しないと真偽がわからない。霊能者の player-6 が確認する前に、まず明確な情報を提示すべきだ。"
+   }
+  },
+  {
+   "t": 161.15,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0 が player-2 を占った結果を明かさないまま霊能者への確認を押し通すのは不自然だ。霊能者の player-6 は player-0 の真偽を占う前に、まず player-0 から具体的な発表を待たないと動けない。結果を隠すなら偽りでしょう。"
+   }
+  },
+  {
+   "t": 162.91,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0 は player-2 を占ったと主張するが、結果を隠しているのは偽りか真の占い師か判断に困る。霊能者の player-6 が player-0 の真偽を確認すべきだが、まず player-0 から具体的な発表を求めたい。"
+   }
+  },
+  {
+   "t": 164.42,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0、占った相手と結果を明言するまで村は動けない。霊能者 player-6 は player-0 の真偽確認を最優先すべきだが、まずは結果提示を強く求める。"
+   }
+  },
+  {
+   "t": 166.27,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 は player-2 を占った結果を隠しているが、真なら霊能者の player-6 が player-0 の真偽をまず占って確認すべきだ。結果を提示せずに霊能者への確認だけ求めるのは不自然なので、player-6 は player-0 の真偽を優先して占ってほしい。"
+   }
+  },
+  {
+   "t": 169.45,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-0",
+    "message": "player-2 は無実です。霊能者の player-6 にも player-0 の真偽を確認してもらい、結果を共有して狼を特定しましょう。"
+   }
+  },
+  {
+   "t": 171.02,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 は player-2 を占った結果をまだ示していません。霊能者 player-6 が player-0 の真偽を確認する前に、まず具体的な占った相手と結果を明言すべきです。"
+   }
+  },
+  {
+   "t": 178.09,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0 は結果を隠し通していますが、霊能者としての player-6 こそがまず player-0 の真偽を判定すべきです。確認結果を共有しない限り、村全体は動けませんが、偽りの CO は即座に処刑対象です。"
+   }
+  },
+  {
+   "t": 182.87,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0、結果提示なしで霊能者確認を要求するのは不自然だ。player-6、まず player-0 の真偽を占って明言してほしい。"
+   }
+  },
+  {
+   "t": 184.49,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0 は player-2 の結果を提示せず霊能者の確認だけを求める不自然な態度です。霊能者の player-6 にまずは player-0 の真偽を占って結果を共有させ、その上で村全体の判断を行うべきでしょう。"
+   }
+  },
+  {
+   "t": 188.3,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-0、player-2 への結果を明言せず霊能者に確認を押し通すのは不自然だ。真なら結果を公開して信用に値するが、隠蔽なら偽りでしょう。霊能者の player-6 はまず player-0 の真偽を占って結果を提示すべきですが、player-0 は結果を共有しない限り村は動けない。player-2 は無実ですが、player-0 が結果を示さない限り信頼できません。player-6、player-0 の真偽確認を最優先でお願いします。"
+   }
+  },
+  {
+   "t": 191.5,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-2",
+    "message": "player-0、占った相手と結果を具体的に明言しないと真偽がわからない。霊能者の player-6 は player-0 の確認を最優先すべきだが、まずは結果提示を強く求める。"
+   }
+  },
+  {
+   "t": 193.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0、結果提示なしの CO は信用できません。player-6 霊能者こそ player-0 の真偽を確認し、結果を明言すべきです。player-2 は無実と主張するが、player-0 から具体的な占った相手と結果をまず聞かねばなりません。"
+   }
+  },
+  {
+   "t": 196.43,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 は占った結果さえ示さず、霊能者 player-6 にだけ負担をかけようとしている。結果を明言しないなら偽装だ。player-6 はまず player-0 の真偽を確認すべきだが、今すぐ player-0 を投票対象にするべきだ。"
+   }
+  },
+  {
+   "t": 199.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 は結果を出さず霊能者への確認だけを求める不自然さだ。player-6 が player-0 の真偽を急いで確認して明言すべきだが、まず player-0 から具体的な占った相手と結果を提示させるべき。"
+   }
+  },
+  {
+   "t": 202.75,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-0 こそが結果を隠して不自然な CO をしている。霊能者の player-6 は player-0 の真偽確認を最優先でお願いします。"
+   }
+  },
+  {
+   "t": 205.73,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-0、結果提示なしで霊能者頼みするのは典型的な狼の手口だ。player-6、まずは player-0 の真偽占って結果明言して村を救ってほしい。"
+   }
+  },
+  {
+   "t": 209.17,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-0 は結果を隠して霊能者頼みにしている不自然さだ。player-6 なら player-0 の真偽を即座に占って結果を明言すべきだが、まずは player-0 の真偽確認を最優先でお願いします。"
+   }
+  },
+  {
+   "t": 210.72,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-0 は結果を隠し通しており、狼の典型です。霊能者の player-6 が player-0 の真偽を最優先で確認し、結果を明言して狼を特定すべきです。"
+   }
+  },
+  {
+   "t": 213.95,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6 霊能者、player-0 の真偽を最優先で占って結果を明言するべきです。結果がでるまで村は動きません。"
+   }
+  },
+  {
+   "t": 217.03,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-0 は結果を隠しているが、player-6 がまず player-0 の真偽を確認すべきだ。結果を明言しない限り、player-0 の主張は信用できない。"
+   }
+  },
+  {
+   "t": 218.71,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 は結果を隠して霊能者に確認を押し通しており、典型的な狼の動きです。player-6 こそ player-0 の真偽を即座に占って結果を明言すべきですが、player-0 は投票対象です。"
+   }
+  },
+  {
+   "t": 254.56,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 314.59,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 1,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-0": 8,
+     "player-1": 0,
+     "player-2": 0,
+     "player-3": 1,
+     "player-4": 0,
+     "player-5": 0,
+     "player-6": 0,
+     "player-7": 0,
+     "player-8": 0
+    },
+    "lynched_player_id": "player-0",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 314.59,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 314.59,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 1,
+    "player_id": "player-0",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 314.67,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 1,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 374.59,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 1,
+    "player_id": "player-2",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 374.59,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 389.59,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 394.29,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-0 が占い師 CO したが死亡。player-2 も夜中に死亡。人狼が player-0 を狙い、その後 player-2 を殺したと推測。player-8 や player-7 は人狼候補だが、player-6 の動きが気になります。"
+   }
+  },
+  {
+   "t": 399.76,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6、初夜に何してたの?player-0 狙われた後、player-2 が殺されたけど、それと関係あるのか?"
+   }
+  },
+  {
+   "t": 402.31,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-1 さん、初夜に player-6 さんは何してたんですか?player-0 さん狙われた後、player-2 さんが夜中に殺されたのは偶然でしょうか?player-8 や player-7 も人狼候補ですが、player-6 さんの動向を特に気になっています。"
+   }
+  },
+  {
+   "t": 404.34,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6 さん、初夜に player-0 狙われ、その夜 player-2 が夜死してますが、その動きは偶然でしょうか?人狼側としてどう見えましたか?"
+   }
+  },
+  {
+   "t": 407.47,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-8 さん、初夜に player-2 を狙ったなら player-6 は狼ですが、player-2 は無実でした。私は霊能者で player-0 は市民、player-6 は人狼ではないと確信しています。"
+   }
+  },
+  {
+   "t": 409.16,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-6 さん、霊能者 CO なのに player-0 の市民確認だけですか?人狼が player-2 を夜殺したなら、 player-0 狙いなら player-6 も狼ではないでしょうね。"
+   }
+  },
+  {
+   "t": 411.03,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-6 さんが霊能者 CO なら、なぜ player-0 の確認だけですか?player-2 が夜死している事実を無視して、人狼の動きを読みきれているのか気になります。"
+   }
+  },
+  {
+   "t": 415.35,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-6 さんの「player-2 は無実」という根拠が気になります。霊能者は夜に誰かを確認できるはずですが、player-2 が狼ならその場面の確認がなぜなかったのか説明が必要です。"
+   }
+  },
+  {
+   "t": 418.21,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-6 さん、霊能者 CO は評価しますが、player-2 の夜死を無視した理由が気になります。player-2 が狼なら確認すべきでしたね。player-2 の夜死を確認していないなら、霊能者ではない可能性があります。"
+   }
+  },
+  {
+   "t": 420.71,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6 さん、霊能者なら player-2 の夜死を確認すべきだったはずですが、なぜ無視したんですか?player-6 は本当に村側でしょうか。"
+   }
+  },
+  {
+   "t": 424.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-6 さんが player-2 の夜死を確認しなかったのは、霊能者なら当然確認すべき行為です。その欠落は演技に見えます。player-6 は人狼ではないか?"
+   }
+  },
+  {
+   "t": 427.44,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-6 さんの霊能 CO は非常に不自然です。初夜に player-0 を確認できたなら、夜に player-2 が死亡したことは当然確認すべきでした。この欠落は演技に見え、player-6 は人狼である可能性が高いです。"
+   }
+  },
+  {
+   "t": 431.21,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6 さん、霊能者なら player-2 の夜死を確認すべきでした。その欠落は演技に見えます。真の霊能者なら player-0 だけでなく、死亡した player-2 も確認したはずです。"
+   }
+  },
+  {
+   "t": 432.3,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-6 さんが player-2 の夜死を確認せず、霊能者 CO しているのは不自然に見えます。player-6 は村側なのか、それとも人狼の偽装なのか、慎重に判断したいです。"
+   }
+  },
+  {
+   "t": 436.19,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-6 さんが player-2 死亡を確認していないのは、霊能者なら当然取る行動です。その欠落は演技に見え、player-6 は人狼である可能性が高いです。"
+   }
+  },
+  {
+   "t": 439.93,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-6 の霊能 CO は、死亡した player-2 の確認を欠落させています。これは真の霊能者の行動ではなく、人狼による欺きだと確信しています。"
+   }
+  },
+  {
+   "t": 441.1,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6 が player-2 の夜死を確認できていないのは致命的な矛盾です。霊能者なら当然確認すべき行動なのに無視しているのは、演技に見えます。player-6 は人狼ではないでしょうか?"
+   }
+  },
+  {
+   "t": 442.19,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-6 さんは player-2 の夜死を確認していません。霊能者なら当然確認すべき行為の欠落は演技に見え、player-6 は人狼ではないか。慎重に判断したいです。"
+   }
+  },
+  {
+   "t": 443.28,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "player-6 さん、霊能者なら夜に player-2 の確認は必須です。なぜ欠落させたのでしょうか?これは演技に見え、player-6 は人狼ではないでしょうか?"
+   }
+  },
+  {
+   "t": 450.35,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6 さんは player-2 さんの夜死を確認できていませんね。これは真の霊能者の行動ではなく、人狼による欺きだと確信しています。player-6 さんも人狼ではないでしょうか?"
+   }
+  },
+  {
+   "t": 452.26,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-6 さんは霊能者の CO は否定できず、player-2 さんの夜死を確認しなかったのは、霊能者の能力行動ではないためです。player-6 は市民として、真の霊能者を救うため、player-6 の誤解を解くべきです。"
+   }
+  },
+  {
+   "t": 455.86,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-6 は霊能者なら player-2 の夜死を確認するはずです。その欠落は演技に見え、player-6 は人狼ではないでしょうか?慎重に判断します。"
+   }
+  },
+  {
+   "t": 463.09,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-6 さんは確かに player-2 の夜死確認を欠落させていますが、霊能者 CO を否定する前に他の生存者の真意も確認しましょう。急がず、慎重に player-6 の真偽を判断したいです。"
+   }
+  },
+  {
+   "t": 464.99,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-6",
+    "message": "霊能者は死者確認必須ですが、player-6 は初夜 player-0 だけ調べたのでしょう。player-2 の夜死が人狼工作なら確認せず、村側なら確認するはず。この矛盾は player-6 が偽りの霊能者だと疑います。慎重に判断したいです。"
+   }
+  },
+  {
+   "t": 468.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-6 さん、霊能者なら死者確認は義務ですが、player-0 の初夜確認優先なら player-2 の確認は翌朝に委ねられます。その判断こそが真の霊能者の行動であり、player-6 を狼だと疑うのは早計です。"
+   }
+  },
+  {
+   "t": 472.74,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6、初夜 player-0 確認なら、なぜ死者 player-2 の確認を完全無視したのか。霊能者なら当然取る行動なのに、その欠落は演技に見えます。真の霊能者は村側を救うため、夜間の死者状況は必ず把握すべきです。"
+   }
+  },
+  {
+   "t": 474.43,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-3 さんの言う通り、初夜確認優先なら player-2 の確認は翌朝まで待てますね。霊能者の判断ミスではなく、合理的な行動だと思います。player-6 は真の村側だと信じています。"
+   }
+  },
+  {
+   "t": 478.15,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6 さんは player-2 の確認を欠落させていますが、それは霊能者としての合理的な判断かもしれません。しかし player-0 は霊能 CO 自体が偽りと見えます。真の霊能者がいないなら、player-6 を村側として信用せず、慎重に他の生存者を調べ上げるべきです。"
+   }
+  },
+  {
+   "t": 480.02,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-3 さんの発言に同意。初夜優先なら翌朝確認も可能。ただ、player-6 は player-2 の夜死を完全に無視しており、その矛盾が気になります。player-6、なぜ player-2 の死亡を確認しなかったのか、説明が必要かと。"
+   }
+  },
+  {
+   "t": 488.92,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-6 さんの霊能 CO について、初夜確認優先なら player-2 の確認は翌朝で良いと理解できます。player-1、player-8 さん、player-6 さんの行動を狼として疑うのは早計に思えます。投票は player-8 さんでお願いします。"
+   }
+  },
+  {
+   "t": 489.94,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-6 さん、player-2 さんの夜死確認を省略したのは初夜だけだったためでしょうか。霊能者ならなぜ確認しなかったのか、根拠を説明してください。"
+   }
+  },
+  {
+   "t": 492.04,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-3 さん、初夜 player-0 確認優先なら player-2 は翌朝でも良いが、player-6 は「player-0 だけ調べた」と主張している。霊能者は初夜に狼を確認し、残りの死者は朝にわかるから。player-6 は狼にしか見えない。player-6 は真の霊能者でしょうか。"
+   }
+  },
+  {
+   "t": 493.81,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-6 さんの「翌朝確認」の説明は理屈として成立しますが、霊能者なら初夜に即座に死者を確認するのが普通です。その不自然な省略が演技に見え、player-6 を人狼として投票します。"
+   }
+  },
+  {
+   "t": 499.22,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-6 さん、初夜に確認できたのは player-0 だけとのことですが、なぜ player-2 の死因を朝まで放置されたのか。霊能者なら優先順位に理由が必要かと。"
+   }
+  },
+  {
+   "t": 500.68,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4 さん、初夜確認優先なら翌朝確認も可能ですが、player-6 さんの「player-0 だけ調べた」という主張は霊能者には不自然です。霊能者は夜中の死者状況は朝にわかるため、夜中だけで特定できません。player-6 は真の霊能者でしょうか?"
+   }
+  },
+  {
+   "t": 569.6,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 629.62,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 2,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-1": 0,
+     "player-3": 0,
+     "player-4": 0,
+     "player-5": 0,
+     "player-6": 5,
+     "player-7": 0,
+     "player-8": 2
+    },
+    "lynched_player_id": "player-6",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 629.62,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 629.62,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 2,
+    "player_id": "player-6",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 629.7,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 2,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 689.55,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "dawn"
+   }
+  },
+  {
+   "t": 704.56,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "day"
+   }
+  },
+  {
+   "t": 712.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-6 の処刑に投票した player-8 ですが、player-2 と player-8 は夜に死亡したため護衛だったと推測されます。 player-8 は護衛でしょうか?"
+   }
+  },
+  {
+   "t": 713.72,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8 さん、2 日目は player-6 を投票しましたが、なぜその判断だったのか教えてください。player-8 さんも人狼だと疑われますが、その理由を聞きたいと思います。"
+   }
+  },
+  {
+   "t": 715.07,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-1、player-8 の護衛説は有力だが、player-4 も護衛候補だな。互いに護衛なら狼が抜けるはず。player-4 はどう判断してる?"
+   }
+  },
+  {
+   "t": 722.59,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "護衛が二人居るなら狼は一人。player-4 も護衛なら矛盾するから、どちらかが人狼か、あるいは護衛が一人だけ。player-8 さん、昨日の理由を詳しく聞きたいです。"
+   }
+  },
+  {
+   "t": 723.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-4 さんは player-8 と同じく護衛を CO しようとしてるの?もし互いに護衛なら狼は消えるはずだから、その動きが気になります。"
+   }
+  },
+  {
+   "t": 725.01,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8 の護衛説は有力だが、player-4 も同様なら矛盾する。player-4 は昨日 player-6 をなぜ救えなかったのか、あるいは護衛ではない理由を聞きたい。"
+   }
+  },
+  {
+   "t": 730.24,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-4、昨日 player-6 が人狼なら護衛は player-8 だけのはず。player-4 も護衛を CO するなら、なぜ player-8 との矛盾を解決しないのか。"
+   }
+  },
+  {
+   "t": 731.35,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8 と player-4 の互恵護衛説は崩壊しましたが、player-8 の行動理由が未だ不明です。player-8 さん、昨日 player-6 を投票させた正当な根拠を語ってください。"
+   }
+  },
+  {
+   "t": 736.25,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-8 さん、なぜ昨日 player-6 を投票したのか、正直な理由を聞きたいです。護衛ではないなら人狼だと疑われますね。"
+   }
+  },
+  {
+   "t": 737.36,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8 さん、昨日 player-6 が人狼なら投票は必然でしょう。しかし、player-2 との死別が護衛行為と完全に一致する根拠が欲しいです。"
+   }
+  },
+  {
+   "t": 740.09,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "護衛なら player-2 も護衛対象だ。player-8 はその理由を言えずに player-6 だけ狙った。昨日の夜 player-2 が死んだなら護衛ミスか、あるいは player-8 が人狼で player-6 を殺した疑いが強い。player-8 さんは人狼ではないですか?"
+   }
+  },
+  {
+   "t": 742.58,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8 は player-2 の護衛ミスか人狼か、理由が全く説明できない。護衛なら player-6 を狙うはずだ。player-4 は護衛を主張するが、player-8 と矛盾する。player-4 も疑われる。"
+   }
+  },
+  {
+   "t": 743.72,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "護衛なら player-2 も守るべきだったはず。player-8 は player-6 だけ狙って player-2 を見逃した。この判断の正当性を問う必要があります。"
+   }
+  },
+  {
+   "t": 750.36,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8 さんは player-6 狙いだけなら護衛として不自然すぎます。player-2 と player-4 も護衛候補ですが、互いに矛盾してます。player-4 さん、player-8 さん、誰が護衛で誰が人狼か明確な根拠を出してください。"
+   }
+  },
+  {
+   "t": 751.38,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8 さん、護衛なら player-2 も守るべきだった。なぜ player-6 だけ狙ったのか、その根拠を教えてください。"
+   }
+  },
+  {
+   "t": 752.98,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-8 は player-2 を見落とし player-6 だけ狙った。護衛なら優先順位不明だが、夜に player-2 が死んだのは護衛ミス。player-8 は人狼の可能性が高い。player-4 も護衛を CO したが player-8 と矛盾する。player-4 が player-8 を庇うなら狼である確率高い。"
+   }
+  },
+  {
+   "t": 754.31,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-8 さんは護衛ミスなら仕方ないですが、狼が player-2 を狙うなら player-6 は狙わないはずです。昨日 player-2 を守りきれず player-6 を狙ったなら、どちらかが人狼でしょう。"
+   }
+  },
+  {
+   "t": 759.54,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-8 は護衛行動の根拠を示せず、player-2 と player-6 の両方を守れなかった。この不自然な動きは人狼の仕業に見え、優先すべきは player-8 の処刑です。"
+   }
+  },
+  {
+   "t": 762.7,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8 さん、護衛なら player-2 も守るべき。その理由が立たないなら、player-8 が人狼ではないか。player-4 も護衛主張で矛盾しているが、player-8 の行動がまずい。"
+   }
+  },
+  {
+   "t": 766.76,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-8 は player-2 を見逃した点が不自然ですが、狼なら player-2 を優先的に狙うはず。護衛なら player-2 が死なないはずなので、player-8 は狼ではないと信じます。player-4 も護衛主張が矛盾していますが、まずは player-8 の行動理由を聞きましょう。"
+   }
+  },
+  {
+   "t": 768.91,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8 さんが player-2 を見落として player-6 だけ狙ったのは、護衛として極めて不自然な行動です。護衛が一人なら player-4 も守るべきで、互恵護衛なら player-2 を守るはずです。矛盾を突くなら player-8 こそ人狼の疑い濃厚です。"
+   }
+  },
+  {
+   "t": 770.43,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8 は護衛ミスで狼の疑いが濃厚です。player-4 も矛盾していますが、まずは player-8 を処刑しましょう。"
+   }
+  },
+  {
+   "t": 780.11,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-4",
+    "message": "player-8 さんは護衛なら player-2 を守るべきでした。その説明がないなら、player-8 は人狼です。player-4 さんも護衛 CO で矛盾して疑われますが、まずは player-8 を処刑すべきです。"
+   }
+  },
+  {
+   "t": 781.89,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-8 さん、護衛なら player-2 も守るべきです。player-2 を見逃して player-6 だけ狙ったのは狼の仕業に見えます。player-8 を処刑すべきです。"
+   }
+  },
+  {
+   "t": 783.85,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-8",
+    "message": "player-8 さんが player-2 を見落とし player-6 だけ狙ったのは護衛として極端に不自然です。護衛なら優先順位が不明でも player-2 を守るべき。この矛盾は player-8 が人狼である証明だと信じています。"
+   }
+  },
+  {
+   "t": 787.47,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-1",
+    "message": "player-8 は護衛なら player-2 も守るべきだった。見逃して player-6 だけ狙ったのは狼の仕業。player-8 さんは人狼である疑いが濃厚です。"
+   }
+  },
+  {
+   "t": 791.3,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8 の護衛行動が極めて不自然で、狼の仕業に見えます。player-4 も矛盾していますが、まずは player-8 の行動理由を明確にすべきです。説明が立たなければ処刑を支持します。"
+   }
+  },
+  {
+   "t": 792.97,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-7",
+    "message": "player-8 の護衛行動は明らかに不自然で、狼である疑いが濃厚です。player-4 も矛盾していますが、まずは player-8 を優先的に処刑すべきでしょう。"
+   }
+  },
+  {
+   "t": 796.84,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-3",
+    "message": "player-8 さんは護衛の優先順位が全く理解できておらず、player-2 を放置して player-6 だけを救おうとしたのは典型の狼行動です。player-4 さんも護衛 CO で混乱していますが、まずは player-8 の明確な根拠を聞かず処刑すべきです。"
+   }
+  },
+  {
+   "t": 805.11,
+   "kind": "chat",
+   "channel": "public",
+   "message": {
+    "player_id": "player-5",
+    "message": "player-8 の護衛ミスは狼の仕業に見えますが、player-4 も矛盾しています。両者とも護衛を CO しているので、どちらか片方が狼の可能性大。まずは player-8 を処刑すべきです。"
+   }
+  },
+  {
+   "t": 884.55,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "vote"
+   }
+  },
+  {
+   "t": 944.59,
+   "kind": "VOTE_RESOLVED",
+   "payload": {
+    "day": 3,
+    "phase": "vote",
+    "result": "lynch",
+    "tallies": {
+     "player-1": 0,
+     "player-3": 0,
+     "player-4": 1,
+     "player-5": 0,
+     "player-7": 0,
+     "player-8": 5
+    },
+    "lynched_player_id": "player-8",
+    "runoff_candidate_player_ids": []
+   }
+  },
+  {
+   "t": 944.59,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "execution"
+   }
+  },
+  {
+   "t": 944.59,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-8",
+    "public_cause": "lynched"
+   }
+  },
+  {
+   "t": 944.67,
+   "kind": "PHASE_STARTED",
+   "payload": {
+    "day": 3,
+    "phase": "night"
+   }
+  },
+  {
+   "t": 1004.59,
+   "kind": "PLAYER_DIED",
+   "payload": {
+    "day": 3,
+    "player_id": "player-1",
+    "public_cause": "died_in_night"
+   }
+  },
+  {
+   "t": 1004.59,
+   "kind": "GAME_ENDED",
+   "payload": {
+    "outcome": "team_victory",
+    "winner_team": "wolf",
+    "player_results": {
+     "player-0": "lost",
+     "player-1": "lost",
+     "player-2": "won",
+     "player-3": "won",
+     "player-4": "won",
+     "player-5": "lost",
+     "player-6": "lost",
+     "player-7": "lost",
+     "player-8": "lost"
+    },
+    "roles": {
+     "player-0": {
+      "role": "占い師",
+      "result": "lost"
+     },
+     "player-1": {
+      "role": "狩人",
+      "result": "lost"
+     },
+     "player-2": {
+      "role": "狂人",
+      "result": "won"
+     },
+     "player-3": {
+      "role": "人狼",
+      "result": "won"
+     },
+     "player-4": {
+      "role": "人狼",
+      "result": "won"
+     },
+     "player-5": {
+      "role": "市民",
+      "result": "lost"
+     },
+     "player-6": {
+      "role": "霊能者",
+      "result": "lost"
+     },
+     "player-7": {
+      "role": "市民",
+      "result": "lost"
+     },
+     "player-8": {
+      "role": "市民",
+      "result": "lost"
+     }
+    }
+   }
+  }
+ ]
+}

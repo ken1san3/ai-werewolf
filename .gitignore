@@ -35,3 +35,10 @@ _to_delete/
 
 # test leftovers (R-20260830-01 の暫定保険)
 tmp*/
+
+# 公開サンプルのリプレイ生成キャッシュ（ローカルの絶対パスを含む）
+samples/html/.manifest.json
+# 公開情報だけを書き出した代表試合（ai_agent.replay_export）は追跡する
+!samples/games/
+!samples/runs/
+!samples/runs/*/games/

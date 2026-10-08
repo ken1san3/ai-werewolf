@@ -1,0 +1,13 @@
+{
+ "settings": {
+  "seed": 1,
+  "day_seconds": 180,
+  "vote_seconds": 60,
+  "night_seconds": 60,
+  "silence_after_dawn_seconds": 15
+ },
+ "completed": true,
+ "crashes": 0,
+ "wall_sec": 1004.76,
+ "started_at": "2026-10-03T03:30:24+09:00"
+}

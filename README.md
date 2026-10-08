@@ -81,6 +81,7 @@ AIが間違えてもゲームのルールは壊れず、AIに渡る情報もネ�
   直前文の再使用・同一文3回以上・不適切な自己開示・死者への呼びかけ・生成時間を、ゲームごとに `checks.json` に出力。
 - **反復検査と比較実験**: 改善案は最大3案を同じseedで比較し、基準を下回った案は通常のrevertで戻す運用（Git履歴に残っています）。
 - **リプレイ**: 公開イベントだけから自己完結HTMLを生成し、試合一覧・検索・1〜50倍速再生（`ai_agent/replay.py`）。
+  実際のAI対戦4試合を収録しており、LLMなしで再生できます（`samples/`）。
 - **長時間評価基盤**: 複数のローカルモデルを実ゲーム由来の12場面と実ゲームで比較し、
   9体の「感想戦」から教訓を作ってルール事実と照合する実験ランナー（中断・再開・締切管理付き）。
 
@@ -96,29 +97,42 @@ AIが間違えてもゲームのルールは壊れず、AIに渡る情報もネ�
 
 ## 7. テスト状況
 
-pytestが収集するテストは **385件（809 subtests）** です。LLMは使いません（AIエージェントのテストは偽のLLMを使います）。
+pytestが収集するテストは **388件（809 subtests）** です。LLMは使いません（AIエージェントのテストは偽のLLMを使います）。
 
 | 内訳 | 内容 |
 |---|---|
-| 単体・結合テスト | ゲームコア、プロトコル、セッション、配送、AIエージェント、品質チェック、実験ランナー、リプレイ。9体が実サーバに接続して1ゲームを完走するテストを含む |
+| 単体・結合テスト | ゲームコア、プロトコル、セッション、配送、AIエージェント、品質チェック、実験ランナー、リプレイ。9体が実サーバに接続して1ゲームを完走するテストと、収録した4試合のリプレイを作り直して収録済みHTMLと一致することの確認を含む |
 | 別プロセス完走テスト（`-m completion`、1件） | サーバとクライアントを別プロセスで起動し、プロトコルの行動とtickだけで完走 |
 | 条件付きでskipされるテスト（1件） | 手元に長時間実験の記録（Gitに含まれない `runs/`）がある場合だけ、そのリプレイ生成を確かめる |
 
-最終の実測結果（2026-10-07〜08、公開準備の時点）:
+最終の実測結果（2026-10-08、公開準備の時点）:
 
 | 環境 | 結果 |
 |---|---|
 | GitHub Actions（Ubuntu: Python 3.10〜3.13、Windows: Python 3.13） | 全ジョブ成功 |
-| Linux（WSL Ubuntu、Python 3.14、ローカル） | 384 passed / 1 skipped / 809 subtests passed |
-| Windows 11（Python 3.13、ローカル） | 384 passed / 1 skipped / 809 subtests passed（PCの負荷が低いとき。下の注意を参照） |
+| Linux（WSL Ubuntu、Python 3.14、ローカル） | 387 passed / 1 skipped / 809 subtests passed |
 
-収集385件 = passed 384件 + skipped 1件です。
+収集388件 = passed 387件 + skipped 1件です。
+ローカルのWindowsでは、実時間で進む完走テストが負荷によって失敗することがあります（「既知の課題」を参照）。
 
 実モデルを使うゲーム評価（`python -m ai_agent.play`、書き起こしと `checks.json` を出力）はローカルLLMが必要なため、CIでは実行しません。
 
 GitHub ActionsではLLMを使わないテストだけを実行します（`.github/workflows/ci.yml`、Ubuntu: Python 3.10〜3.13、Windows: 3.13）。
 
 ## 8. 実行方法
+
+### リプレイを見る（LLM不要）
+
+実際に9体のAIが対戦した代表4試合（CP1・CP3の判定ゲーム、Stage 3のモデル比較・学習系列）を `samples/` に収録しています。
+`samples/html/index.html` をブラウザで開くと試合一覧から再生できます。収録データからHTMLを作り直すこともできます。
+
+```bash
+python -m ai_agent.replay --root samples --output samples/html
+```
+
+収録データは、リプレイ画面と同じ許可リストで公開情報だけを書き出したものです（秘密チャット・非公開の結果・AIの判断記録は含みません）。詳細は [`samples/README.md`](samples/README.md)。
+
+### テストとゲームの実行
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -140,7 +154,7 @@ python -m ai_agent.play --seed 1
 ```
 
 `games/<日時>_seed<N>/` に書き起こし（`transcript.md`）と機械チェック（`checks.json`）が出力されます。
-記録済みのゲームは `python -m ai_agent.replay` でHTMLのリプレイにできます。
+記録済みのゲームは `python -m ai_agent.replay` でHTMLのリプレイにでき、`python -m ai_agent.replay_export <記録> <書き出し先>` で公開情報だけを書き出せます。
 
 長時間のモデル比較（`python -m ai_agent.marathon`）はWindows上の実験用ランナーで、
 `AIWOLF_LLAMA_SERVER` と `AIWOLF_MODELS_DIR` でLLMサーバとモデルの場所を指定します。
@@ -220,6 +234,7 @@ Docs/ai/decisions/    設計判断の記録（D001〜D050）
 Docs/analysis/        2026-10の停滞の原因分析と再現用スクリプト
 Docs/process/         AI向け作業ルール・ロードマップ・作業記録
 Docs/development-history.md  開発の経緯
+samples/              代表4試合の公開リプレイデータと生成済みHTML
 ```
 
 ## ライセンス
